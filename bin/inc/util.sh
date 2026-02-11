@@ -1,0 +1,188 @@
+#!/usr/bin/env zsh
+
+EchoStep() {
+  echo "==> $*"
+}
+
+PrepareInstallLogDir() {
+  if [[ -z "$MKEXP2_INSTALL_LOG_DIR" ]]; then
+    MKEXP2_INSTALL_LOG_DIR="$PWD/logs/install/local/$MKEXP2_RUN_ID/commands"
+  fi
+  mkdir -p "$MKEXP2_INSTALL_LOG_DIR"
+}
+
+_NextInstallLogFile() {
+  MKEXP2_INSTALL_COUNTER=$((MKEXP2_INSTALL_COUNTER + 1))
+  printf '%s/%04d.log' "$MKEXP2_INSTALL_LOG_DIR" "$MKEXP2_INSTALL_COUNTER"
+}
+
+_RunWithSpinner() {
+  local label="$1"
+  local log_file="$2"
+  shift 2
+
+  local exit_code=0
+  local -a spinner=('|' '/' '-' '\\')
+  local idx=1
+
+  if [[ -t 1 ]]; then
+    set +e
+    "$@" >"$log_file" 2>&1 &
+    local pid=$!
+    while kill -0 "$pid" 2>/dev/null; do
+      printf "\r  [%s] %s" "${spinner[$idx]}" "$label"
+      idx=$((idx + 1))
+      if (( idx > ${#spinner[@]} )); then
+        idx=1
+      fi
+      sleep 0.1
+    done
+    wait "$pid"
+    exit_code=$?
+    set -e
+    printf "\r\033[K"
+  else
+    set +e
+    "$@" >"$log_file" 2>&1
+    exit_code=$?
+    set -e
+  fi
+
+  if (( exit_code == 0 )); then
+    echo "  [ok] $label"
+    return 0
+  fi
+
+  echo "  [fail] $label"
+  echo "    log: $log_file"
+  sed 's/^/    | /' "$log_file"
+  return "$exit_code"
+}
+
+Run() {
+  local -a cmd=("$@")
+  local label="${cmd[1]:-command}"
+  if (( ${#cmd[@]} > 1 )); then
+    label="$label ${cmd[2]}"
+  fi
+  local cmd_display="${(j: :)cmd}"
+
+  if (( MKEXP2_RUN_VERBOSE )); then
+    echo "  $ $cmd_display"
+    "$@"
+    return
+  fi
+
+  PrepareInstallLogDir
+  local log_file
+  log_file=$(_NextInstallLogFile)
+  _RunWithSpinner "$label" "$log_file" "$@"
+}
+
+FunctionExists() {
+  typeset -f "$1" >/dev/null 2>&1
+}
+
+DiscoverExperimentFunctions() {
+  local experiment_file="$1"
+  awk '
+    /^Experiment[[:alnum:]_]*[[:space:]]*\(\)[[:space:]]*\{/ {
+      fn = $1
+      sub(/\(.*/, "", fn)
+      print fn
+    }
+  ' "$experiment_file"
+}
+
+HashString() {
+  local input="$1"
+  if command -v sha1sum >/dev/null 2>&1; then
+    printf '%s' "$input" | sha1sum | awk '{print $1}'
+  else
+    printf '%s' "$input" | shasum | awk '{print $1}'
+  fi
+}
+
+ParseNodes() {
+  if [[ "$1" == *x*x* ]]; then
+    echo "${1%%x*}"
+  else
+    echo "1"
+  fi
+}
+
+ParseMpis() {
+  if [[ "$1" == *x*x* ]]; then
+    local without_threads="${1%x*}"
+    echo "${without_threads#*x}"
+  else
+    echo "1"
+  fi
+}
+
+ParseThreads() {
+  if [[ "$1" == *x*x* ]]; then
+    echo "${1##*x}"
+  else
+    echo "$1"
+  fi
+}
+
+ParseTimelimitToSeconds() {
+  local time="$1"
+  local seconds="${time##*:}"
+  local minutes=0
+  local hours=0
+  local days=0
+
+  if [[ "$time" == *:* ]]; then
+    time="${time%:*}"
+    minutes="${time##*:}"
+  fi
+  if [[ "$time" == *:* ]]; then
+    time="${time%:*}"
+    hours="${time##*:}"
+  fi
+  if [[ "$time" == *:* ]]; then
+    time="${time%:*}"
+    days="$time"
+  fi
+
+  echo $((seconds + 60 * minutes + 3600 * hours + 86400 * days))
+}
+
+SafeName() {
+  local s="$1"
+  s="${s// /_}"
+  s="${s//\//_}"
+  s="${s//:/_}"
+  echo "$s"
+}
+
+GenericGitFetch() {
+  local repo_url="$1"
+  local repo_ref="$2"
+  local src_dir="$3"
+
+  mkdir -p "$(dirname "$src_dir")"
+  if [[ ! -d "$src_dir/.git" ]]; then
+    EchoStep "Cloning $repo_url"
+    Run git clone "$repo_url" "$src_dir"
+  fi
+
+  EchoStep "Updating $src_dir"
+  Run git -C "$src_dir" fetch --all --tags
+
+  if [[ -n "$repo_ref" && "$repo_ref" != "latest" ]]; then
+    Run git -C "$src_dir" checkout "$repo_ref"
+  else
+    Run git -C "$src_dir" checkout main
+    Run git -C "$src_dir" pull --ff-only origin main
+  fi
+
+  Run git -C "$src_dir" submodule update --init --recursive
+}
+
+ShellQuote() {
+  printf '%q' "$1"
+}

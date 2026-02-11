@@ -1,0 +1,82 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+source_path="$0"
+while [[ -L "$source_path" ]]; do
+  script_dir=$(cd -P "$(dirname "$source_path")" >/dev/null 2>&1 && pwd)
+  source_path=$(readlink "$source_path")
+  [[ $source_path != /* ]] && source_path="$script_dir/$source_path"
+done
+script_dir=$(cd -P "$(dirname "$source_path")" >/dev/null 2>&1 && pwd)
+MKEXP2_HOME=$(cd "$script_dir/.." && pwd)
+
+. "$MKEXP2_HOME/bin/inc/state.sh"
+. "$MKEXP2_HOME/bin/inc/util.sh"
+. "$MKEXP2_HOME/bin/inc/dsl.sh"
+. "$MKEXP2_HOME/bin/inc/props.sh"
+. "$MKEXP2_HOME/bin/inc/plugins.sh"
+. "$MKEXP2_HOME/bin/inc/install.sh"
+. "$MKEXP2_HOME/bin/inc/generate.sh"
+. "$MKEXP2_HOME/bin/inc/cli.sh"
+
+ParseCli "$@"
+
+if [[ "$MKEXP2_MODE" == "help" ]]; then
+  PrintHelp
+  exit 0
+fi
+
+if [[ "$MKEXP2_MODE" == "init" ]]; then
+  InitExperiment
+  exit 0
+fi
+
+if [[ ! -f "$PWD/Experiment" ]]; then
+  echo "fatal: no Experiment file in current directory"
+  exit 1
+fi
+
+if (( MKEXP2_DO_GENERATE )); then
+  PrepareGenerateOutputs
+fi
+
+typeset -a experiment_functions
+experiment_functions=($(DiscoverExperimentFunctions "$PWD/Experiment"))
+if [[ ${#experiment_functions[@]} -eq 0 ]]; then
+  echo "fatal: no Experiment*() functions found in Experiment"
+  exit 1
+fi
+
+local_fn=""
+for local_fn in "${experiment_functions[@]}"; do
+  EchoStep "Processing $local_fn"
+
+  ResetExperiment
+  # Re-source for each experiment function to restore global declarations.
+  . "$PWD/Experiment"
+  "$local_fn"
+
+  EnsureExperimentDefaults
+  FlattenAlgorithmHierarchy
+  LoadLauncherPlugin "$_system"
+
+  install_mode=""
+  install_mode=$(ResolveRunProperty "install" "slurm.install.mode" "local")
+
+  if (( MKEXP2_DO_INSTALL )); then
+    if [[ "$_system" == "slurm" && "$install_mode" == "job" && "$MKEXP2_MODE" == "all" ]]; then
+      EchoStep "Deferring install to Slurm install job for $local_fn"
+      MKEXP2_SLURM_INSTALL_JOB_REQUIRED=1
+    else
+      InstallCurrentExperiment "$local_fn"
+    fi
+  fi
+
+  if (( MKEXP2_DO_GENERATE )); then
+    GenerateCurrentExperiment "$local_fn"
+  fi
+done
+
+if (( MKEXP2_DO_GENERATE )); then
+  FinalizeGenerateOutputs
+fi
