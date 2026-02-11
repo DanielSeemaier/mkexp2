@@ -32,7 +32,7 @@ PartitionerBuild_KaMinPar() {
   fi
 
   Run cmake -S "$CTX_source_dir" -B "$CTX_source_dir/build" "${cmake_args[@]}"
-  Run cmake --build "$CTX_source_dir/build" --target KaMinPar "${build_parallel_args[@]}"
+  Run cmake --build "$CTX_source_dir/build" --target KaMinParApp "${build_parallel_args[@]}"
   Run cp "$CTX_source_dir/build/apps/KaMinPar" "$CTX_binary_path"
 }
 
