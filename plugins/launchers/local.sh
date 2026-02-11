@@ -35,8 +35,7 @@ LauncherWriteJob_local() {
   local _mpis="$5"
   local _threads="$6"
   local _timelimit="$7"
-  local _subexp="$8"
-  local _cmd_count="$9"
+  local _cmd_count="$8"
 
   cat > "$job_script" <<SCRIPT
 #!/usr/bin/env zsh

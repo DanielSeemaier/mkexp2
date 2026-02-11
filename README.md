@@ -14,13 +14,12 @@ Requirements:
   - experiment global (`Property`)
   - system-level (`SystemProperty`)
   - algorithm-level (`AlgorithmProperty`)
-  - sub-experiment-level (`SubExperimentProperty`)
 - Plugin APIs for:
   - partitioners (`plugins/partitioners/*.sh`)
   - launchers (`plugins/launchers/*.sh`)
 - Working launchers:
   - `local` (single machine, shared-memory)
-  - `slurm` (supports arrays and sub-experiment dependencies)
+  - `slurm` (supports arrays and dependencies between `Experiment*` functions)
 - Working partitioner plugins:
   - `Mock` (local smoke tests)
   - `KaMinPar`
@@ -55,8 +54,6 @@ System local
 Property slurm.partition cpuonly
 SystemProperty slurm.qos normal
 AlgorithmProperty KaMinPar repo_url https://github.com/KaHIP/KaMinPar.git
-SubExperiments baseline stress
-SubExperimentProperty stress slurm.dependency afterok:baseline
 Property slurm.install.mode job
 Property slurm.install.timelimit 02:00:00
 
@@ -64,12 +61,23 @@ DefineAlgorithmVersion KaMinPar-Dev KaMinPar origin/my/branch
 DefineAlgorithmBuild KaMinPar-Dbg KaMinPar -DCMAKE_BUILD_TYPE=Debug
 DefineAlgorithm KaMinPar-FM KaMinPar -P fm
 
-ExperimentMyRun() {
+ExperimentBaseline() {
   Algorithms KaMinPar-Dev dKaMinPar
   Graphs /path/to/graphs metis
   Ks 2 4 8
   Seeds 1 2 3
   Threads 1x1x16 2x2x16
+  Property timelimit 00:30:00
+}
+
+ExperimentStress() {
+  Property slurm.dependency afterok:ExperimentBaseline
+  Algorithms KaMinPar-FM
+  Graphs /path/to/graphs metis
+  Ks 2 4 8
+  Seeds 1 2 3
+  Threads 1x1x16 2x2x16
+  Property timelimit 02:00:00
 }
 ```
 

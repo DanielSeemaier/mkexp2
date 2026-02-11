@@ -80,11 +80,11 @@ EnsureSlurmInstallJob() {
   local install_job_name=""
   local install_cmd=""
 
-  partition=$(ResolveRunProperty "install" "slurm.partition" "default")
-  qos=$(ResolveRunProperty "install" "slurm.qos" "")
-  account=$(ResolveRunProperty "install" "slurm.account" "")
-  constraint=$(ResolveRunProperty "install" "slurm.constraint" "")
-  timelimit=$(ResolveRunProperty "install" "slurm.install.timelimit" "02:00:00")
+  partition=$(ResolveRunProperty "slurm.partition" "default")
+  qos=$(ResolveRunProperty "slurm.qos" "")
+  account=$(ResolveRunProperty "slurm.account" "")
+  constraint=$(ResolveRunProperty "slurm.constraint" "")
+  timelimit=$(ResolveRunProperty "slurm.install.timelimit" "02:00:00")
 
   install_job_name="mkexp2-install-$(SafeName "$(basename "$PWD")")"
   MKEXP2_SLURM_INSTALL_JOB_SCRIPT="$PWD/jobs/install__${MKEXP2_RUN_ID}.sh"
@@ -141,12 +141,10 @@ SCRIPT
 }
 
 ResolveDependencyKey() {
-  local experiment="$1"
-  local subexp="$2"
-  local topology="$3"
+  local topology="$1"
 
   local dep=""
-  dep=$(ResolveRunProperty "$subexp" "slurm.dependency" "")
+  dep=$(ResolveRunProperty "slurm.dependency" "")
   if [[ -z "$dep" ]]; then
     echo ""
     return
@@ -154,7 +152,7 @@ ResolveDependencyKey() {
 
   if [[ "$dep" == afterok:* ]]; then
     local dep_name="${dep#afterok:}"
-    echo "${experiment}:${dep_name}:${topology}"
+    echo "${dep_name}:${topology}"
   else
     echo "$dep"
   fi
@@ -179,7 +177,7 @@ GenerateCurrentExperiment() {
 
   if [[ "$_system" == "slurm" ]]; then
     local install_mode=""
-    install_mode=$(ResolveRunProperty "install" "slurm.install.mode" "local")
+    install_mode=$(ResolveRunProperty "slurm.install.mode" "local")
     if [[ "$install_mode" == "job" ]]; then
       MKEXP2_SLURM_INSTALL_JOB_REQUIRED=1
       EnsureSlurmInstallJob
@@ -193,105 +191,100 @@ GenerateCurrentExperiment() {
     mpis=$(ParseMpis "$topology")
     threads=$(ParseThreads "$topology")
 
-    local subexp=""
-    for subexp in "${_subexperiments[@]}"; do
-      local subexp_label=""
-      subexp_label=$(SafeName "$subexp")
-      local job_name="${experiment_label}__${subexp_label}__${topology}"
-      local job_key="${experiment_name}:${subexp}:${topology}"
+    local job_name="${experiment_label}__${topology}"
+    local job_key="${experiment_name}:${topology}"
 
-      local cmd_file="$PWD/jobs/${job_name}.cmds"
-      local job_script="$PWD/jobs/${job_name}.sh"
-      : > "$cmd_file"
+    local cmd_file="$PWD/jobs/${job_name}.cmds"
+    local job_script="$PWD/jobs/${job_name}.sh"
+    : > "$cmd_file"
 
-      local per_instance_limit=""
-      per_instance_limit=$(ResolveRunProperty "$subexp" "timelimit.per_instance" "$_timelimit_per_instance")
+    local per_instance_limit=""
+    per_instance_limit=$(ResolveRunProperty "timelimit.per_instance" "$_timelimit_per_instance")
 
-      local algorithm=""
-      for algorithm in "${_algorithms[@]}"; do
-        PopulateBuildContext "$algorithm" "$subexp"
-        LoadPartitionerPlugin "$CTX_base"
+    local algorithm=""
+    for algorithm in "${_algorithms[@]}"; do
+      PopulateBuildContext "$algorithm"
+      LoadPartitionerPlugin "$CTX_base"
 
-        local distributed="false"
-        if (( nodes > 1 || mpis > 1 )); then
-          distributed="true"
-        fi
-        if [[ "$distributed" == "true" && "$CTX_supports_distributed" != "true" ]]; then
-          echo "fatal: $algorithm does not support distributed mode ($topology)"
-          exit 1
-        fi
+      local distributed="false"
+      if (( nodes > 1 || mpis > 1 )); then
+        distributed="true"
+      fi
+      if [[ "$distributed" == "true" && "$CTX_supports_distributed" != "true" ]]; then
+        echo "fatal: $algorithm does not support distributed mode ($topology)"
+        exit 1
+      fi
 
-        mkdir -p "$PWD/logs/$algorithm/$subexp_label"
+      mkdir -p "$PWD/logs/$algorithm/$experiment_label"
 
-        local seed=""
-        for seed in "${_seeds[@]}"; do
-          local epsilon=""
-          for epsilon in "${_epsilons[@]}"; do
-            local k=""
-            for k in "${_ks[@]}"; do
-              local graph=""
-              for graph in "${_graphs[@]}"; do
-                RUN_algorithm="$algorithm"
-                RUN_base="$CTX_base"
-                RUN_binary_path="$CTX_binary_path"
-                RUN_args="$CTX_args"
-                RUN_graph="$graph"
-                RUN_k="$k"
-                RUN_epsilon="$epsilon"
-                RUN_seed="$seed"
-                RUN_nodes="$nodes"
-                RUN_mpis="$mpis"
-                RUN_threads="$threads"
+      local seed=""
+      for seed in "${_seeds[@]}"; do
+        local epsilon=""
+        for epsilon in "${_epsilons[@]}"; do
+          local k=""
+          for k in "${_ks[@]}"; do
+            local graph=""
+            for graph in "${_graphs[@]}"; do
+              RUN_algorithm="$algorithm"
+              RUN_base="$CTX_base"
+              RUN_binary_path="$CTX_binary_path"
+              RUN_args="$CTX_args"
+              RUN_graph="$graph"
+              RUN_k="$k"
+              RUN_epsilon="$epsilon"
+              RUN_seed="$seed"
+              RUN_nodes="$nodes"
+              RUN_mpis="$mpis"
+              RUN_threads="$threads"
 
-                local invoke_fn="PartitionerInvoke_${CTX_base}"
-                if ! FunctionExists "$invoke_fn"; then
-                  echo "fatal: plugin ${CTX_base} is missing $invoke_fn"
-                  exit 1
-                fi
+              local invoke_fn="PartitionerInvoke_${CTX_base}"
+              if ! FunctionExists "$invoke_fn"; then
+                echo "fatal: plugin ${CTX_base} is missing $invoke_fn"
+                exit 1
+              fi
 
-                local raw_cmd=""
-                raw_cmd=$("$invoke_fn")
+              local raw_cmd=""
+              raw_cmd=$("$invoke_fn")
 
-                local wrap_fn="LauncherWrapCommand_${_system}"
-                local wrapped_cmd=""
-                wrapped_cmd=$("$wrap_fn" "$raw_cmd" "$nodes" "$mpis" "$threads" "$distributed")
+              local wrap_fn="LauncherWrapCommand_${_system}"
+              local wrapped_cmd=""
+              wrapped_cmd=$("$wrap_fn" "$raw_cmd" "$nodes" "$mpis" "$threads" "$distributed")
 
-                if [[ -n "$per_instance_limit" ]]; then
-                  local timeout_seconds=""
-                  timeout_seconds=$(ParseTimelimitToSeconds "$per_instance_limit")
-                  wrapped_cmd="timeout -v ${timeout_seconds}s $wrapped_cmd"
-                fi
+              if [[ -n "$per_instance_limit" ]]; then
+                local timeout_seconds=""
+                timeout_seconds=$(ParseTimelimitToSeconds "$per_instance_limit")
+                wrapped_cmd="timeout -v ${timeout_seconds}s $wrapped_cmd"
+              fi
 
-                local id=""
-                id=$(BuildInstanceId "$graph" "$k" "$seed" "$epsilon" "$topology")
-                local log_file="$PWD/logs/$algorithm/$subexp_label/${id}.log"
-                printf '%s\n' "$wrapped_cmd >> \"$log_file\" 2>&1" >> "$cmd_file"
-              done
+              local id=""
+              id=$(BuildInstanceId "$graph" "$k" "$seed" "$epsilon" "$topology")
+              local log_file="$PWD/logs/$algorithm/$experiment_label/${id}.log"
+              printf '%s\n' "$wrapped_cmd >> \"$log_file\" 2>&1" >> "$cmd_file"
             done
           done
         done
       done
-
-      local cmd_count=""
-      cmd_count=$(wc -l < "$cmd_file" | tr -d ' ')
-      if [[ "$cmd_count" == "0" ]]; then
-        rm -f "$cmd_file"
-        continue
-      fi
-
-      local timelimit=""
-      timelimit=$(ResolveRunProperty "$subexp" "timelimit" "$_timelimit")
-
-      local write_fn="LauncherWriteJob_${_system}"
-      "$write_fn" "$job_script" "$cmd_file" "$job_name" "$nodes" "$mpis" "$threads" "$timelimit" "$subexp" "$cmd_count"
-      chmod +x "$job_script"
-
-      local dependency_key=""
-      dependency_key=$(ResolveDependencyKey "$experiment_name" "$subexp" "$topology")
-
-      GENERATED_JOB_META["$job_key"]="${_system}|$job_script|$dependency_key"
-      GENERATED_JOB_KEYS+=("$job_key")
     done
+
+    local cmd_count=""
+    cmd_count=$(wc -l < "$cmd_file" | tr -d ' ')
+    if [[ "$cmd_count" == "0" ]]; then
+      rm -f "$cmd_file"
+      continue
+    fi
+
+    local timelimit=""
+    timelimit=$(ResolveRunProperty "timelimit" "$_timelimit")
+
+    local write_fn="LauncherWriteJob_${_system}"
+    "$write_fn" "$job_script" "$cmd_file" "$job_name" "$nodes" "$mpis" "$threads" "$timelimit" "$cmd_count"
+    chmod +x "$job_script"
+
+    local dependency_key=""
+    dependency_key=$(ResolveDependencyKey "$topology")
+
+    GENERATED_JOB_META["$job_key"]="${_system}|$job_script|$dependency_key"
+    GENERATED_JOB_KEYS+=("$job_key")
   done
 }
 

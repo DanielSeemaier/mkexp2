@@ -28,8 +28,7 @@ LauncherWriteJob_slurm() {
   local mpis="$5"
   local threads="$6"
   local timelimit="$7"
-  local subexp="$8"
-  local cmd_count="$9"
+  local cmd_count="$8"
 
   local total_tasks=$((nodes * mpis))
   local partition=""
@@ -39,12 +38,12 @@ LauncherWriteJob_slurm() {
   local use_array=""
   local max_parallel=""
 
-  partition=$(ResolveRunProperty "$subexp" "slurm.partition" "default")
-  qos=$(ResolveRunProperty "$subexp" "slurm.qos" "")
-  account=$(ResolveRunProperty "$subexp" "slurm.account" "")
-  constraint=$(ResolveRunProperty "$subexp" "slurm.constraint" "")
-  use_array=$(ResolveRunProperty "$subexp" "slurm.use_array" "false")
-  max_parallel=$(ResolveRunProperty "$subexp" "slurm.array.max_parallel" "32")
+  partition=$(ResolveRunProperty "slurm.partition" "default")
+  qos=$(ResolveRunProperty "slurm.qos" "")
+  account=$(ResolveRunProperty "slurm.account" "")
+  constraint=$(ResolveRunProperty "slurm.constraint" "")
+  use_array=$(ResolveRunProperty "slurm.use_array" "false")
+  max_parallel=$(ResolveRunProperty "slurm.array.max_parallel" "32")
 
   cat > "$job_script" <<SCRIPT
 #!/usr/bin/env zsh

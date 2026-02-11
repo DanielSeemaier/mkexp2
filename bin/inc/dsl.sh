@@ -23,17 +23,6 @@ AlgorithmProperty() {
   PROP_ALGORITHM["$algorithm::$key"]="$*"
 }
 
-SubExperiments() {
-  _subexperiments=("$@")
-}
-
-SubExperimentProperty() {
-  local subexp="$1"
-  local key="$2"
-  shift 2
-  PROP_SUBEXPERIMENT["$subexp::$key"]="$*"
-}
-
 DefineAlgorithm() {
   local name="$1"
   local base="$2"

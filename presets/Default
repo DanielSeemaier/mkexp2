@@ -5,7 +5,7 @@
 System local
 
 # These are global properties. Any of these can be overridden per algorithm
-# or per sub-experiment.
+# or per Experiment* function.
 Property timelimit 01:00:00
 Property slurm.partition cpuonly
 Property slurm.use_array true
@@ -21,7 +21,7 @@ Property slurm.array.max_parallel 64
 # AlgorithmProperty KaMinPar-Dev repo_ref origin/feature/my-branch
 # AlgorithmProperty KaMinPar-Dev cmake_flags -DKAMINPAR_64BIT_IDS=On
 
-ExperimentDemo() {
+ExperimentBaseline() {
   Algorithms Mock
 
   Ks 2 4
@@ -32,11 +32,20 @@ ExperimentDemo() {
   # Paths are without extension, same as mkexp v1 style.
   Graph /tmp/demo_graph
 
-  SubExperiments baseline stress
+  Property timelimit 00:30:00
+}
 
-  # For slurm launcher, this means: submit stress after baseline finished OK
-  # (for the same experiment + topology).
-  SubExperimentProperty stress slurm.dependency afterok:baseline
-  SubExperimentProperty baseline timelimit 00:30:00
-  SubExperimentProperty stress timelimit 02:00:00
+ExperimentStress() {
+  Algorithms Mock
+
+  Ks 2 4
+  Seeds 1 2
+  Epsilons 0.03
+  Threads 1x1x4
+  Graph /tmp/demo_graph
+
+  # For slurm launcher, this means: submit ExperimentStress after
+  # ExperimentBaseline finished OK (for the same topology).
+  Property slurm.dependency afterok:ExperimentBaseline
+  Property timelimit 02:00:00
 }

@@ -2,7 +2,6 @@
 
 PopulateBuildContext() {
   local algorithm="$1"
-  local subexp="$2"
 
   local base=""
   base="${FLAT_ALGO_BASE["$algorithm"]:-}"
@@ -36,13 +35,12 @@ PopulateBuildContext() {
 
   CTX_algorithm="$algorithm"
   CTX_base="$base"
-  CTX_subexp="$subexp"
   CTX_args="$inherited_args"
   CTX_build_opts="$inherited_build"
-  CTX_repo_url="$(ResolveAlgorithmProperty "$algorithm" "$subexp" repo_url "")"
-  CTX_repo_ref="$(ResolveAlgorithmProperty "$algorithm" "$subexp" repo_ref "$default_ref")"
-  CTX_cmake_flags="$(ResolveAlgorithmProperty "$algorithm" "$subexp" cmake_flags "")"
-  CTX_supports_distributed="$(ResolveAlgorithmProperty "$algorithm" "$subexp" supports_distributed "false")"
+  CTX_repo_url="$(ResolveAlgorithmProperty "$algorithm" repo_url "")"
+  CTX_repo_ref="$(ResolveAlgorithmProperty "$algorithm" repo_ref "$default_ref")"
+  CTX_cmake_flags="$(ResolveAlgorithmProperty "$algorithm" cmake_flags "")"
+  CTX_supports_distributed="$(ResolveAlgorithmProperty "$algorithm" supports_distributed "false")"
   CTX_build_max_cores="$MKEXP2_BUILD_MAX_CORES"
   if [[ -n "$CTX_build_max_cores" ]]; then
     if [[ "$CTX_build_max_cores" != <-> ]] || (( CTX_build_max_cores <= 0 )); then
@@ -66,38 +64,35 @@ InstallCurrentExperiment() {
   EchoStep "Installing dependencies for $experiment_name"
   echo "  logs: $MKEXP2_INSTALL_LOG_DIR"
 
-  local subexp=""
-  for subexp in "${_subexperiments[@]}"; do
-    local algorithm=""
-    for algorithm in "${_algorithms[@]}"; do
-      PopulateBuildContext "$algorithm" "$subexp"
+  local algorithm=""
+  for algorithm in "${_algorithms[@]}"; do
+    PopulateBuildContext "$algorithm"
 
-      if [[ -n "${INSTALLED_BUILDS["$CTX_build_key"]:-}" ]]; then
-        echo "  [skip] $algorithm (already built in this run)"
-        continue
-      fi
+    if [[ -n "${INSTALLED_BUILDS["$CTX_build_key"]:-}" ]]; then
+      echo "  [skip] $algorithm (already built in this run)"
+      continue
+    fi
 
-      echo "  [run] $algorithm (sub-experiment: $subexp)"
-      if [[ -n "$CTX_build_max_cores" ]]; then
-        echo "    build cores: $CTX_build_max_cores"
-      else
-        echo "    build cores: all available"
-      fi
+    echo "  [run] $algorithm"
+    if [[ -n "$CTX_build_max_cores" ]]; then
+      echo "    build cores: $CTX_build_max_cores"
+    else
+      echo "    build cores: all available"
+    fi
 
-      local fetch_fn="PartitionerFetch_${CTX_base}"
-      local build_fn="PartitionerBuild_${CTX_base}"
+    local fetch_fn="PartitionerFetch_${CTX_base}"
+    local build_fn="PartitionerBuild_${CTX_base}"
 
-      if FunctionExists "$fetch_fn"; then
-        "$fetch_fn"
-      fi
-      if FunctionExists "$build_fn"; then
-        "$build_fn"
-      else
-        echo "fatal: plugin ${CTX_base} is missing $build_fn"
-        exit 1
-      fi
+    if FunctionExists "$fetch_fn"; then
+      "$fetch_fn"
+    fi
+    if FunctionExists "$build_fn"; then
+      "$build_fn"
+    else
+      echo "fatal: plugin ${CTX_base} is missing $build_fn"
+      exit 1
+    fi
 
-      INSTALLED_BUILDS["$CTX_build_key"]="$CTX_binary_path"
-    done
+    INSTALLED_BUILDS["$CTX_build_key"]="$CTX_binary_path"
   done
 }

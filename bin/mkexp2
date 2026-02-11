@@ -61,7 +61,7 @@ for local_fn in "${experiment_functions[@]}"; do
   LoadLauncherPlugin "$_system"
 
   install_mode=""
-  install_mode=$(ResolveRunProperty "install" "slurm.install.mode" "local")
+  install_mode=$(ResolveRunProperty "slurm.install.mode" "local")
 
   if (( MKEXP2_DO_INSTALL )); then
     if [[ "$_system" == "slurm" && "$install_mode" == "job" && "$MKEXP2_MODE" == "all" ]]; then

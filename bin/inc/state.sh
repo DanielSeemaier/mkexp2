@@ -25,12 +25,10 @@ typeset -a _seeds=()
 typeset -a _ks=()
 typeset -a _epsilons=()
 typeset -a _graphs=()
-typeset -a _subexperiments=()
 
 typeset -A PROP_GLOBAL=()
 typeset -A PROP_SYSTEM=()
 typeset -A PROP_ALGORITHM=()
-typeset -A PROP_SUBEXPERIMENT=()
 
 typeset -A PARTITIONER_DEFAULTS=()
 typeset -A SYSTEM_DEFAULTS=()
@@ -56,7 +54,6 @@ MKEXP2_SLURM_INSTALL_JOB_KEY="__install__"
 # Shared build context (avoids shell-specific nameref usage).
 CTX_algorithm=""
 CTX_base=""
-CTX_subexp=""
 CTX_args=""
 CTX_build_opts=""
 CTX_repo_url=""
@@ -99,12 +96,10 @@ ResetExperiment() {
   _ks=()
   _epsilons=()
   _graphs=()
-  _subexperiments=()
 
   PROP_GLOBAL=()
   PROP_SYSTEM=()
   PROP_ALGORITHM=()
-  PROP_SUBEXPERIMENT=()
 
   PARTITIONER_DEFAULTS=()
   SYSTEM_DEFAULTS=()
@@ -130,9 +125,6 @@ EnsureExperimentDefaults() {
   fi
   if [[ ${#_epsilons[@]} -eq 0 ]]; then
     _epsilons=("0.03")
-  fi
-  if [[ ${#_subexperiments[@]} -eq 0 ]]; then
-    _subexperiments=("main")
   fi
   if [[ -z "$_timelimit" ]]; then
     _timelimit="01:00:00"

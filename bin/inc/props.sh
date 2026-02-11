@@ -14,11 +14,9 @@ SetSystemDefault() {
 }
 
 ResolveRunProperty() {
-  local subexp="$1"
-  local key="$2"
-  local fallback="${3:-}"
+  local key="$1"
+  local fallback="${2:-}"
   local value="$fallback"
-  local sub_key="$subexp::$key"
 
   if [[ -n "${SYSTEM_DEFAULTS["$key"]:-}" ]]; then
     value="${SYSTEM_DEFAULTS["$key"]}"
@@ -29,23 +27,18 @@ ResolveRunProperty() {
   if [[ -n "${PROP_SYSTEM["$key"]:-}" ]]; then
     value="${PROP_SYSTEM["$key"]}"
   fi
-  if [[ -n "${PROP_SUBEXPERIMENT["$sub_key"]:-}" ]]; then
-    value="${PROP_SUBEXPERIMENT["$sub_key"]}"
-  fi
 
   echo "$value"
 }
 
 ResolveAlgorithmProperty() {
   local algorithm="$1"
-  local subexp="$2"
-  local key="$3"
-  local fallback="${4:-}"
+  local key="$2"
+  local fallback="${3:-}"
   local value="$fallback"
   local base=""
   local base_key=""
   local algo_key=""
-  local sub_key=""
 
   base="${FLAT_ALGO_BASE["$algorithm"]:-}"
   if [[ -z "$base" ]]; then
@@ -53,7 +46,6 @@ ResolveAlgorithmProperty() {
   fi
   base_key="$base::$key"
   algo_key="$algorithm::$key"
-  sub_key="$subexp::$key"
 
   if [[ -n "${PARTITIONER_DEFAULTS["$base_key"]:-}" ]]; then
     value="${PARTITIONER_DEFAULTS["$base_key"]}"
@@ -72,9 +64,6 @@ ResolveAlgorithmProperty() {
   fi
   if [[ -n "${PROP_ALGORITHM["$algo_key"]:-}" ]]; then
     value="${PROP_ALGORITHM["$algo_key"]}"
-  fi
-  if [[ -n "${PROP_SUBEXPERIMENT["$sub_key"]:-}" ]]; then
-    value="${PROP_SUBEXPERIMENT["$sub_key"]}"
   fi
 
   echo "$value"
