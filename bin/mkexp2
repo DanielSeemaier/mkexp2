@@ -26,6 +26,11 @@ if [[ "$MKEXP2_MODE" == "help" ]]; then
   exit 0
 fi
 
+if [[ "$MKEXP2_MODE" == "list" ]]; then
+  PrintDiscoverabilityLists
+  exit 0
+fi
+
 if [[ "$MKEXP2_MODE" == "init" ]]; then
   InitExperiment
   exit 0

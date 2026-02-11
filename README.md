@@ -47,6 +47,16 @@ Requirements:
 ./submit.sh
 ```
 
+Discover available systems/partitioners/presets from the CLI:
+
+```bash
+mkexp2 --list-all
+# or:
+mkexp2 --list-systems
+mkexp2 --list-partitioners
+mkexp2 --list-presets
+```
+
 ## DSL essentials
 
 ```bash
