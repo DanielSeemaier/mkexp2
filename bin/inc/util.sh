@@ -22,7 +22,7 @@ _RunWithSpinner() {
   shift 2
 
   local exit_code=0
-  local -a spinner=('|' '/' '-' '\\')
+  local -a spinner=('|' '/' '-' "\\")
   local idx=1
 
   if [[ -t 1 ]]; then
