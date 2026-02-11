@@ -15,6 +15,7 @@ LauncherWrapCommand_slurm() {
   local mpis="$3"
   local threads="$4"
   local _distributed="$5"
+  local _use_openmp_env="$6"
 
   local total_tasks=$((nodes * mpis))
   echo "srun --nodes=$nodes --ntasks=$total_tasks --ntasks-per-node=$mpis --cpus-per-task=$threads --cpu-bind=cores $cmd"

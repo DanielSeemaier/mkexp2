@@ -109,6 +109,9 @@ Launcher plugin `Y` should define:
 ## Notes
 
 - This is a scaffold intended to be extended with more partitioners, systems, parsers, and plotting.
+- OpenMP env var prefixing (`OMP_NUM_THREADS`, `OMP_PROC_BIND`, `OMP_PLACES`) is opt-in per algorithm via `use_openmp_env`.
+  - Default is `false` unless a partitioner plugin sets a default.
+  - Override with `AlgorithmProperty <AlgorithmName> use_openmp_env true|false`.
 - `timelimit.per_instance` maps to `timeout` seconds in generated commands.
 - Install command output is concise by default and writes per-command logs to:
   `logs/install/local/<run-id>/commands/`

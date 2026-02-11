@@ -10,9 +10,10 @@ LauncherWrapCommand_local() {
   local mpis="$3"
   local threads="$4"
   local _distributed="$5"
+  local use_openmp_env="$6"
 
   if (( nodes > 1 )); then
-    echo "fatal: launcher 'local' does not support nodes > 1" >&2
+    EchoFatal "launcher 'local' does not support nodes > 1"
     exit 1
   fi
 
@@ -20,7 +21,7 @@ LauncherWrapCommand_local() {
   if (( mpis > 1 )); then
     wrapped="mpirun -n $mpis $wrapped"
   fi
-  if (( threads > 1 )); then
+  if (( threads > 1 )) && [[ "$use_openmp_env" == "true" ]]; then
     wrapped="OMP_NUM_THREADS=$threads OMP_PROC_BIND=spread OMP_PLACES=threads $wrapped"
   fi
 

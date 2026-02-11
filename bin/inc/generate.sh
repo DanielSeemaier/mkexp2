@@ -211,7 +211,7 @@ GenerateCurrentExperiment() {
         distributed="true"
       fi
       if [[ "$distributed" == "true" && "$CTX_supports_distributed" != "true" ]]; then
-        echo "fatal: $algorithm does not support distributed mode ($topology)"
+        EchoFatal "$algorithm does not support distributed mode ($topology)"
         exit 1
       fi
 
@@ -239,7 +239,7 @@ GenerateCurrentExperiment() {
 
               local invoke_fn="PartitionerInvoke_${CTX_base}"
               if ! FunctionExists "$invoke_fn"; then
-                echo "fatal: plugin ${CTX_base} is missing $invoke_fn"
+                EchoFatal "plugin ${CTX_base} is missing $invoke_fn"
                 exit 1
               fi
 
@@ -248,7 +248,7 @@ GenerateCurrentExperiment() {
 
               local wrap_fn="LauncherWrapCommand_${_system}"
               local wrapped_cmd=""
-              wrapped_cmd=$("$wrap_fn" "$raw_cmd" "$nodes" "$mpis" "$threads" "$distributed")
+              wrapped_cmd=$("$wrap_fn" "$raw_cmd" "$nodes" "$mpis" "$threads" "$distributed" "$CTX_use_openmp_env")
 
               if [[ -n "$per_instance_limit" ]]; then
                 local timeout_seconds=""

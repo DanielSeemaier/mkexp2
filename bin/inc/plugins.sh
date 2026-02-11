@@ -8,7 +8,7 @@ LoadPartitionerPlugin() {
 
   local plugin_file="$MKEXP2_HOME/plugins/partitioners/$base.sh"
   if [[ ! -f "$plugin_file" ]]; then
-    echo "fatal: unknown partitioner plugin '$base' ($plugin_file not found)"
+    EchoFatal "unknown partitioner plugin '$base' ($plugin_file not found)"
     exit 1
   fi
 
@@ -29,7 +29,7 @@ LoadLauncherPlugin() {
 
   local plugin_file="$MKEXP2_HOME/plugins/launchers/$launcher.sh"
   if [[ ! -f "$plugin_file" ]]; then
-    echo "fatal: unknown launcher plugin '$launcher' ($plugin_file not found)"
+    EchoFatal "unknown launcher plugin '$launcher' ($plugin_file not found)"
     exit 1
   fi
 

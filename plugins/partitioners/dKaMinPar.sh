@@ -5,6 +5,7 @@ PartitionerDefaults_dKaMinPar() {
   SetPartitionerDefault "dKaMinPar" "repo_ref" "main"
   SetPartitionerDefault "dKaMinPar" "cmake_flags" ""
   SetPartitionerDefault "dKaMinPar" "supports_distributed" "true"
+  SetPartitionerDefault "dKaMinPar" "use_openmp_env" "true"
 }
 
 PartitionerFetch_dKaMinPar() {

@@ -41,10 +41,11 @@ PopulateBuildContext() {
   CTX_repo_ref="$(ResolveAlgorithmProperty "$algorithm" repo_ref "$default_ref")"
   CTX_cmake_flags="$(ResolveAlgorithmProperty "$algorithm" cmake_flags "")"
   CTX_supports_distributed="$(ResolveAlgorithmProperty "$algorithm" supports_distributed "false")"
+  CTX_use_openmp_env="$(ResolveAlgorithmProperty "$algorithm" use_openmp_env "false")"
   CTX_build_max_cores="$MKEXP2_BUILD_MAX_CORES"
   if [[ -n "$CTX_build_max_cores" ]]; then
     if [[ "$CTX_build_max_cores" != <-> ]] || (( CTX_build_max_cores <= 0 )); then
-      echo "fatal: --build-max-cores must be a positive integer, got '$CTX_build_max_cores'"
+      EchoFatal "--build-max-cores must be a positive integer, got '$CTX_build_max_cores'"
       exit 1
     fi
   fi
@@ -62,22 +63,26 @@ InstallCurrentExperiment() {
   PrepareInstallLogDir
 
   EchoStep "Installing dependencies for $experiment_name"
-  echo "  logs: $MKEXP2_INSTALL_LOG_DIR"
+  EchoInfo "logs: $MKEXP2_INSTALL_LOG_DIR"
 
   local algorithm=""
   for algorithm in "${_algorithms[@]}"; do
     PopulateBuildContext "$algorithm"
 
     if [[ -n "${INSTALLED_BUILDS["$CTX_build_key"]:-}" ]]; then
-      echo "  [skip] $algorithm (already built in this run)"
+      local skip_tag
+      skip_tag=$(_UiTag skip)
+      echo "  $skip_tag $algorithm (already built in this run)"
       continue
     fi
 
-    echo "  [run] $algorithm"
+    local run_tag
+    run_tag=$(_UiTag run)
+    echo "  $run_tag $algorithm"
     if [[ -n "$CTX_build_max_cores" ]]; then
-      echo "    build cores: $CTX_build_max_cores"
+      EchoInfo "build cores: $CTX_build_max_cores"
     else
-      echo "    build cores: all available"
+      EchoInfo "build cores: all available"
     fi
 
     local fetch_fn="PartitionerFetch_${CTX_base}"
@@ -89,7 +94,7 @@ InstallCurrentExperiment() {
     if FunctionExists "$build_fn"; then
       "$build_fn"
     else
-      echo "fatal: plugin ${CTX_base} is missing $build_fn"
+      EchoFatal "plugin ${CTX_base} is missing $build_fn"
       exit 1
     fi
 

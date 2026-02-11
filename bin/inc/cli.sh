@@ -102,7 +102,7 @@ ParseCli() {
     case "$1" in
       all)
         if (( command_set )); then
-          echo "fatal: multiple commands provided"
+          EchoFatal "multiple commands provided"
           PrintHelp
           exit 1
         fi
@@ -114,7 +114,7 @@ ParseCli() {
         ;;
       install)
         if (( command_set )); then
-          echo "fatal: multiple commands provided"
+          EchoFatal "multiple commands provided"
           PrintHelp
           exit 1
         fi
@@ -126,7 +126,7 @@ ParseCli() {
         ;;
       generate)
         if (( command_set )); then
-          echo "fatal: multiple commands provided"
+          EchoFatal "multiple commands provided"
           PrintHelp
           exit 1
         fi
@@ -138,7 +138,7 @@ ParseCli() {
         ;;
       init)
         if (( command_set )); then
-          echo "fatal: multiple commands provided"
+          EchoFatal "multiple commands provided"
           PrintHelp
           exit 1
         fi
@@ -155,7 +155,7 @@ ParseCli() {
         ;;
       help)
         if (( command_set )); then
-          echo "fatal: multiple commands provided"
+          EchoFatal "multiple commands provided"
           PrintHelp
           exit 1
         fi
@@ -168,7 +168,7 @@ ParseCli() {
       -j|--build-max-cores)
         shift
         if [[ $# -eq 0 ]]; then
-          echo "fatal: missing value for --build-max-cores"
+          EchoFatal "missing value for --build-max-cores"
           exit 1
         fi
         MKEXP2_BUILD_MAX_CORES="$1"
@@ -207,7 +207,7 @@ ParseCli() {
           shift
           continue
         fi
-        echo "fatal: unknown argument '$1'"
+        EchoFatal "unknown argument '$1'"
         PrintHelp
         exit 1
       ;;
@@ -216,7 +216,7 @@ ParseCli() {
 
   if (( list_flag_set )); then
     if (( command_set )); then
-      echo "fatal: list flags cannot be combined with a command"
+      EchoFatal "list flags cannot be combined with a command"
       PrintHelp
       exit 1
     fi
@@ -227,7 +227,7 @@ ParseCli() {
 
   if [[ -n "$MKEXP2_BUILD_MAX_CORES" ]]; then
     if [[ "$MKEXP2_BUILD_MAX_CORES" != <-> ]] || (( MKEXP2_BUILD_MAX_CORES <= 0 )); then
-      echo "fatal: --build-max-cores must be a positive integer, got '$MKEXP2_BUILD_MAX_CORES'"
+      EchoFatal "--build-max-cores must be a positive integer, got '$MKEXP2_BUILD_MAX_CORES'"
       exit 1
     fi
   fi
@@ -236,11 +236,11 @@ ParseCli() {
 InitExperiment() {
   local preset_file="$MKEXP2_HOME/presets/$MKEXP2_INIT_PRESET"
   if [[ ! -f "$preset_file" ]]; then
-    echo "fatal: preset '$MKEXP2_INIT_PRESET' not found in $MKEXP2_HOME/presets"
+    EchoFatal "preset '$MKEXP2_INIT_PRESET' not found in $MKEXP2_HOME/presets"
     exit 1
   fi
   if [[ -f "$PWD/Experiment" ]]; then
-    echo "fatal: Experiment already exists in $PWD"
+    EchoFatal "Experiment already exists in $PWD"
     exit 1
   fi
 

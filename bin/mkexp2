@@ -37,7 +37,7 @@ if [[ "$MKEXP2_MODE" == "init" ]]; then
 fi
 
 if [[ ! -f "$PWD/Experiment" ]]; then
-  echo "fatal: no Experiment file in current directory"
+  EchoFatal "no Experiment file in current directory"
   exit 1
 fi
 
@@ -48,7 +48,7 @@ fi
 typeset -a experiment_functions
 experiment_functions=($(DiscoverExperimentFunctions "$PWD/Experiment"))
 if [[ ${#experiment_functions[@]} -eq 0 ]]; then
-  echo "fatal: no Experiment*() functions found in Experiment"
+  EchoFatal "no Experiment*() functions found in Experiment"
   exit 1
 fi
 
