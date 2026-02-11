@@ -30,7 +30,17 @@ _RunWithSpinner() {
     "$@" >"$log_file" 2>&1 &
     local pid=$!
     while kill -0 "$pid" 2>/dev/null; do
-      printf "\r  [%s] %s" "${spinner[$idx]}" "$label"
+      local spinner_label="$label"
+      local cols="${COLUMNS:-0}"
+      if [[ "$cols" == <-> ]] && (( cols > 12 )); then
+        # Keep the live spinner status on one terminal line; full command is still
+        # printed after completion in [ok]/[fail] output.
+        local max_label_len=$((cols - 6))
+        if (( ${#spinner_label} > max_label_len )); then
+          spinner_label="${spinner_label[1,$((max_label_len - 3))]}..."
+        fi
+      fi
+      printf "\r\033[K  [%s] %s" "${spinner[$idx]}" "$spinner_label"
       idx=$((idx + 1))
       if (( idx > ${#spinner[@]} )); then
         idx=1
@@ -61,11 +71,8 @@ _RunWithSpinner() {
 
 Run() {
   local -a cmd=("$@")
-  local label="${cmd[1]:-command}"
-  if (( ${#cmd[@]} > 1 )); then
-    label="$label ${cmd[2]}"
-  fi
   local cmd_display="${(j: :)cmd}"
+  local label="${cmd_display:-command}"
 
   if (( MKEXP2_RUN_VERBOSE )); then
     echo "  $ $cmd_display"
