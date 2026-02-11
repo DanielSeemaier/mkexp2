@@ -246,4 +246,30 @@ InitExperiment() {
 
   cp "$preset_file" "$PWD/Experiment"
   EchoStep "Created $PWD/Experiment from preset '$MKEXP2_INIT_PRESET'"
+
+  EnsureExperimentGitignore
+}
+
+EnsureExperimentGitignore() {
+  local gitignore_file="$PWD/.gitignore"
+  local changed=0
+
+  if [[ ! -f "$gitignore_file" ]]; then
+    : > "$gitignore_file"
+  fi
+
+  if ! grep -qxF ".mkexp2/" "$gitignore_file"; then
+    printf '%s\n' ".mkexp2/" >> "$gitignore_file"
+    changed=1
+  fi
+
+  # Experiment run logs can grow very large; keep them out of git by default.
+  if ! grep -qxF "logs/" "$gitignore_file"; then
+    printf '%s\n' "logs/" >> "$gitignore_file"
+    changed=1
+  fi
+
+  if (( changed )); then
+    EchoStep "Updated $gitignore_file with mkexp2 ignores"
+  fi
 }
