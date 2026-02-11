@@ -174,6 +174,14 @@ ParseCli() {
         MKEXP2_BUILD_MAX_CORES="$1"
         shift
         ;;
+      -j*)
+        MKEXP2_BUILD_MAX_CORES="${1#-j}"
+        if [[ -z "$MKEXP2_BUILD_MAX_CORES" ]]; then
+          EchoFatal "missing value for --build-max-cores"
+          exit 1
+        fi
+        shift
+        ;;
       --build-max-cores=*)
         MKEXP2_BUILD_MAX_CORES="${1#*=}"
         shift
