@@ -82,6 +82,11 @@ RUN_nodes=""
 RUN_mpis=""
 RUN_threads=""
 
+# Shared command output buffers to avoid per-instance subshell command substitution
+# in the generate hot path.
+PARTITIONER_INVOKE_CMD=""
+LAUNCHER_WRAPPED_CMD=""
+
 ResetExperiment() {
   _system="local"
 
@@ -112,6 +117,8 @@ ResetExperiment() {
 
   _timelimit=""
   _timelimit_per_instance=""
+  PARTITIONER_INVOKE_CMD=""
+  LAUNCHER_WRAPPED_CMD=""
 
   # Keep logging settings stable across Experiment* blocks inside one run.
   MKEXP2_INSTALL_COUNTER=0

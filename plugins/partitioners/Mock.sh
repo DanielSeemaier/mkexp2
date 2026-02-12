@@ -16,14 +16,14 @@ SCRIPT
 
 PartitionerInvoke_Mock() {
   local cmd=""
-  cmd="$(ShellQuote "$RUN_binary_path")"
-  cmd+=" --graph $(ShellQuote "$RUN_graph")"
-  cmd+=" --k $(ShellQuote "$RUN_k")"
-  cmd+=" --epsilon $(ShellQuote "$RUN_epsilon")"
-  cmd+=" --seed $(ShellQuote "$RUN_seed")"
-  cmd+=" --threads $(ShellQuote "$RUN_threads")"
+  cmd="${(q)RUN_binary_path}"
+  cmd+=" --graph ${(q)RUN_graph}"
+  cmd+=" --k ${(q)RUN_k}"
+  cmd+=" --epsilon ${(q)RUN_epsilon}"
+  cmd+=" --seed ${(q)RUN_seed}"
+  cmd+=" --threads ${(q)RUN_threads}"
   if [[ -n "$RUN_args" ]]; then
     cmd+=" $RUN_args"
   fi
-  echo "$cmd"
+  PARTITIONER_INVOKE_CMD="$cmd"
 }

@@ -25,7 +25,7 @@ LauncherWrapCommand_local() {
     wrapped="OMP_NUM_THREADS=$threads OMP_PROC_BIND=spread OMP_PLACES=threads $wrapped"
   fi
 
-  echo "$wrapped"
+  LAUNCHER_WRAPPED_CMD="$wrapped"
 }
 
 LauncherWriteJob_local() {

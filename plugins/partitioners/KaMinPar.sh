@@ -55,15 +55,15 @@ PartitionerInvoke_KaMinPar() {
   fi
 
   local cmd=""
-  cmd="$(ShellQuote "$RUN_binary_path")"
-  cmd+=" -G $(ShellQuote "$graph")"
-  cmd+=" -k $(ShellQuote "$RUN_k")"
-  cmd+=" -e $(ShellQuote "$RUN_epsilon")"
-  cmd+=" --seed=$(ShellQuote "$RUN_seed")"
-  cmd+=" -t $(ShellQuote "$RUN_threads")"
+  cmd="${(q)RUN_binary_path}"
+  cmd+=" -G ${(q)graph}"
+  cmd+=" -k ${(q)RUN_k}"
+  cmd+=" -e ${(q)RUN_epsilon}"
+  cmd+=" --seed=${(q)RUN_seed}"
+  cmd+=" -t ${(q)RUN_threads}"
   cmd+=" -v -T"
   if [[ -n "$RUN_args" ]]; then
     cmd+=" $RUN_args"
   fi
-  echo "$cmd"
+  PARTITIONER_INVOKE_CMD="$cmd"
 }

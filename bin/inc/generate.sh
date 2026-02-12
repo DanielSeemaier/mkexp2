@@ -190,6 +190,10 @@ GenerateCurrentExperiment() {
     nodes=$(ParseNodes "$topology")
     mpis=$(ParseMpis "$topology")
     threads=$(ParseThreads "$topology")
+    local distributed="false"
+    if (( nodes > 1 || mpis > 1 )); then
+      distributed="true"
+    fi
 
     local job_name="${experiment_label}__${topology}"
     local job_key="${experiment_name}:${topology}"
@@ -200,22 +204,36 @@ GenerateCurrentExperiment() {
 
     local per_instance_limit=""
     per_instance_limit=$(ResolveRunProperty "timelimit.per_instance" "$_timelimit_per_instance")
+    local timeout_prefix=""
+    if [[ -n "$per_instance_limit" ]]; then
+      local timeout_seconds=""
+      timeout_seconds=$(ParseTimelimitToSeconds "$per_instance_limit")
+      timeout_prefix="timeout -v ${timeout_seconds}s "
+    fi
+
+    local wrap_fn="LauncherWrapCommand_${_system}"
+    if ! FunctionExists "$wrap_fn"; then
+      EchoFatal "launcher ${_system} is missing $wrap_fn"
+      exit 1
+    fi
 
     local algorithm=""
     for algorithm in "${_algorithms[@]}"; do
       PopulateBuildContext "$algorithm"
       LoadPartitionerPlugin "$CTX_base"
-
-      local distributed="false"
-      if (( nodes > 1 || mpis > 1 )); then
-        distributed="true"
-      fi
       if [[ "$distributed" == "true" && "$CTX_supports_distributed" != "true" ]]; then
         EchoFatal "$algorithm does not support distributed mode ($topology)"
         exit 1
       fi
 
-      mkdir -p "$PWD/logs/$algorithm/$experiment_label"
+      local invoke_fn="PartitionerInvoke_${CTX_base}"
+      if ! FunctionExists "$invoke_fn"; then
+        EchoFatal "plugin ${CTX_base} is missing $invoke_fn"
+        exit 1
+      fi
+
+      local log_dir="$PWD/logs/$algorithm/$experiment_label"
+      mkdir -p "$log_dir"
 
       local seed=""
       for seed in "${_seeds[@]}"; do
@@ -237,28 +255,39 @@ GenerateCurrentExperiment() {
               RUN_mpis="$mpis"
               RUN_threads="$threads"
 
-              local invoke_fn="PartitionerInvoke_${CTX_base}"
-              if ! FunctionExists "$invoke_fn"; then
-                EchoFatal "plugin ${CTX_base} is missing $invoke_fn"
+              local raw_cmd=""
+              PARTITIONER_INVOKE_CMD=""
+              "$invoke_fn" >/dev/null
+              raw_cmd="$PARTITIONER_INVOKE_CMD"
+              if [[ -z "$raw_cmd" ]]; then
+                # Backward compatibility: older plugins may still print the command.
+                raw_cmd=$("$invoke_fn")
+              fi
+              if [[ -z "$raw_cmd" ]]; then
+                EchoFatal "plugin ${CTX_base} produced an empty invoke command"
                 exit 1
               fi
 
-              local raw_cmd=""
-              raw_cmd=$("$invoke_fn")
-
-              local wrap_fn="LauncherWrapCommand_${_system}"
               local wrapped_cmd=""
-              wrapped_cmd=$("$wrap_fn" "$raw_cmd" "$nodes" "$mpis" "$threads" "$distributed" "$CTX_use_openmp_env")
-
-              if [[ -n "$per_instance_limit" ]]; then
-                local timeout_seconds=""
-                timeout_seconds=$(ParseTimelimitToSeconds "$per_instance_limit")
-                wrapped_cmd="timeout -v ${timeout_seconds}s $wrapped_cmd"
+              LAUNCHER_WRAPPED_CMD=""
+              "$wrap_fn" "$raw_cmd" "$nodes" "$mpis" "$threads" "$distributed" "$CTX_use_openmp_env" >/dev/null
+              wrapped_cmd="$LAUNCHER_WRAPPED_CMD"
+              if [[ -z "$wrapped_cmd" ]]; then
+                # Backward compatibility: older launchers may still print wrapped commands.
+                wrapped_cmd=$("$wrap_fn" "$raw_cmd" "$nodes" "$mpis" "$threads" "$distributed" "$CTX_use_openmp_env")
+              fi
+              if [[ -z "$wrapped_cmd" ]]; then
+                EchoFatal "launcher ${_system} produced an empty wrapped command"
+                exit 1
               fi
 
-              local id=""
-              id=$(BuildInstanceId "$graph" "$k" "$seed" "$epsilon" "$topology")
-              local log_file="$PWD/logs/$algorithm/$experiment_label/${id}.log"
+              if [[ -n "$timeout_prefix" ]]; then
+                wrapped_cmd="${timeout_prefix}${wrapped_cmd}"
+              fi
+
+              local graph_name="${graph:t}"
+              local id="${graph_name}__k${k}__s${seed}__e${epsilon}__${topology}"
+              local log_file="$log_dir/${id}.log"
               printf '%s\n' "$wrapped_cmd >> \"$log_file\" 2>&1" >> "$cmd_file"
             done
           done

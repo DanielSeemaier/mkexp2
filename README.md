@@ -98,12 +98,12 @@ Partitioner plugin `X` should define:
 - `PartitionerDefaults_X` (optional)
 - `PartitionerFetch_X` (optional)
 - `PartitionerBuild_X` (required for install)
-- `PartitionerInvoke_X` (required for generate)
+- `PartitionerInvoke_X` (required for generate; set `PARTITIONER_INVOKE_CMD`)
 
 Launcher plugin `Y` should define:
 
 - `LauncherDefaults_Y` (optional)
-- `LauncherWrapCommand_Y` (required)
+- `LauncherWrapCommand_Y` (required; set `LAUNCHER_WRAPPED_CMD`)
 - `LauncherWriteJob_Y` (required)
 
 Inside `PartitionerFetch_*`, `PartitionerBuild_*`, and `PartitionerInvoke_*`, use:
