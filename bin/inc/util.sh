@@ -33,13 +33,14 @@ _UiTag() {
   local kind="$1"
   InitUi
   case "$kind" in
-    step) printf '%s==>%s' "${MKEXP2_UI_BLUE}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
-    info) printf '%s[info]%s' "${MKEXP2_UI_CYAN}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
-    ok) printf '%s[ok]%s' "${MKEXP2_UI_GREEN}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
+    step) printf '%s==>%s' "${MKEXP2_UI_DIM}" "$MKEXP2_UI_RESET" ;;
+    exp) printf '%s==>%s' "${MKEXP2_UI_DIM}" "$MKEXP2_UI_RESET" ;;
+    info) printf '%s[info]%s' "${MKEXP2_UI_CYAN}" "$MKEXP2_UI_RESET" ;;
+    ok) printf '%s[ok]%s' "${MKEXP2_UI_GREEN}" "$MKEXP2_UI_RESET" ;;
     warn) printf '%s[warn]%s' "${MKEXP2_UI_YELLOW}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
     fail) printf '%s[fail]%s' "${MKEXP2_UI_RED}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
     fatal) printf '%s[fatal]%s' "${MKEXP2_UI_RED}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
-    run) printf '%s[run]%s' "${MKEXP2_UI_CYAN}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
+    run) printf '%s[run]%s' "${MKEXP2_UI_CYAN}" "$MKEXP2_UI_RESET" ;;
     skip) printf '%s[skip]%s' "${MKEXP2_UI_DIM}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
     *) printf '[%s]' "$kind" ;;
   esac
@@ -48,7 +49,7 @@ _UiTag() {
 EchoInfo() {
   local tag
   tag=$(_UiTag info)
-  echo "$tag $*"
+  echo "  $tag $*"
 }
 
 EchoStep() {
@@ -67,6 +68,14 @@ EchoFatal() {
   local tag
   tag=$(_UiTag fatal)
   echo "$tag $*" >&2
+}
+
+EchoExperiment() {
+  local name="$1"
+  InitUi
+  local tag
+  tag=$(_UiTag exp)
+  echo "$tag ${MKEXP2_UI_BOLD}${name}${MKEXP2_UI_RESET}"
 }
 
 PrepareInstallLogDir() {

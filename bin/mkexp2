@@ -54,7 +54,7 @@ fi
 
 local_fn=""
 for local_fn in "${experiment_functions[@]}"; do
-  EchoStep "Processing $local_fn"
+  EchoExperiment "$local_fn"
 
   ResetExperiment
   # Re-source for each experiment function to restore global declarations.
