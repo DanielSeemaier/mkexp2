@@ -4,6 +4,8 @@ PrepareGenerateOutputs() {
   mkdir -p "$PWD/jobs" "$PWD/logs" "$MKEXP2_WORK_DIR/bin" "$MKEXP2_WORK_DIR/src"
   GENERATED_JOB_META=()
   GENERATED_JOB_KEYS=()
+  MKEXP2_SLURM_HAS_RUN_JOBS=0
+  MKEXP2_SLURM_PARSE_JOB_SCRIPT=""
 
   cat > "$PWD/submit.sh" <<'SCRIPT'
 #!/usr/bin/env zsh
@@ -61,6 +63,35 @@ submit_slurm() {
 submit_local() {
   local script="$1"
   zsh "$script"
+}
+
+submit_parse_slurm() {
+  local script="$1"
+  local dep_arg=""
+  local out=""
+  local -a dep_ids=()
+  local id=""
+
+  if [[ -n "$INSTALL_JOB_ID" ]]; then
+    dep_ids+=("$INSTALL_JOB_ID")
+  fi
+
+  for id in "${(@v)JOB_IDS}"; do
+    [[ -n "$id" ]] || continue
+    dep_ids+=("$id")
+  done
+
+  if (( ${#dep_ids[@]} > 0 )); then
+    dep_arg="--dependency=afterok:${(j/:/)dep_ids}"
+  fi
+
+  if [[ -n "$dep_arg" ]]; then
+    out=$(sbatch "$dep_arg" "$script")
+  else
+    out=$(sbatch "$script")
+  fi
+
+  echo "$out"
 }
 SCRIPT
 
@@ -138,6 +169,74 @@ exit \$install_exit_code
 SCRIPT
 
   chmod +x "$MKEXP2_SLURM_INSTALL_JOB_SCRIPT"
+}
+
+EnsureSlurmParseJob() {
+  if [[ -n "$MKEXP2_SLURM_PARSE_JOB_SCRIPT" ]]; then
+    return
+  fi
+
+  local partition=""
+  local qos=""
+  local account=""
+  local constraint=""
+  local timelimit=""
+  local parse_job_name=""
+  local parse_cmd=""
+
+  partition=$(ResolveRunProperty "slurm.partition" "default")
+  qos=$(ResolveRunProperty "slurm.qos" "")
+  account=$(ResolveRunProperty "slurm.account" "")
+  constraint=$(ResolveRunProperty "slurm.constraint" "")
+  timelimit=$(ResolveRunProperty "parse.slurm.timelimit" "00:30:00")
+
+  parse_job_name="mkexp2-parse-$(SafeName "$(basename "$PWD")")"
+  MKEXP2_SLURM_PARSE_JOB_SCRIPT="$PWD/jobs/parse__${MKEXP2_RUN_ID}.sh"
+  parse_cmd="$(ShellQuote "$MKEXP2_HOME/bin/mkexp2") parse"
+
+  local parse_log_dir="$PWD/logs/parse/slurm/$MKEXP2_RUN_ID"
+  local parse_log_file="$parse_log_dir/parse.log"
+
+  cat > "$MKEXP2_SLURM_PARSE_JOB_SCRIPT" <<SCRIPT
+#!/usr/bin/env zsh
+#SBATCH --job-name=${parse_job_name}
+#SBATCH --time=${timelimit}
+#SBATCH --partition=${partition}
+SCRIPT
+
+  if [[ -n "$qos" ]]; then
+    echo "#SBATCH --qos=$qos" >> "$MKEXP2_SLURM_PARSE_JOB_SCRIPT"
+  fi
+  if [[ -n "$account" ]]; then
+    echo "#SBATCH --account=$account" >> "$MKEXP2_SLURM_PARSE_JOB_SCRIPT"
+  fi
+  if [[ -n "$constraint" ]]; then
+    echo "#SBATCH --constraint=$constraint" >> "$MKEXP2_SLURM_PARSE_JOB_SCRIPT"
+  fi
+
+  cat >> "$MKEXP2_SLURM_PARSE_JOB_SCRIPT" <<SCRIPT
+set -euo pipefail
+
+cd "$PWD"
+mkdir -p "$parse_log_dir"
+
+echo "[mkexp2] parse job started"
+echo "[mkexp2] parse log: $parse_log_file"
+
+set +e
+$parse_cmd > "$parse_log_file" 2>&1
+parse_exit_code=\$?
+set -e
+
+if (( parse_exit_code != 0 )); then
+  echo "[mkexp2] parse failed, log: $parse_log_file"
+  tail -n 200 "$parse_log_file"
+fi
+
+exit \$parse_exit_code
+SCRIPT
+
+  chmod +x "$MKEXP2_SLURM_PARSE_JOB_SCRIPT"
 }
 
 ResolveDependencyKey() {
@@ -336,11 +435,28 @@ FinalizeGenerateOutputs() {
 
     IFS='|' read -r launcher job_script dep_key <<< "$entry"
     if [[ "$launcher" == "slurm" ]]; then
+      MKEXP2_SLURM_HAS_RUN_JOBS=1
       printf 'submit_slurm %q %q %q\n' "$key" "$dep_key" "$job_script" >> "$PWD/submit.sh"
     else
       printf 'submit_local %q\n' "$job_script" >> "$PWD/submit.sh"
     fi
   done
+
+  if (( MKEXP2_PARSE_AUTO_REQUIRED )); then
+    if (( MKEXP2_SLURM_HAS_RUN_JOBS )); then
+      EnsureSlurmParseJob
+      printf 'submit_parse_slurm %q\n' "$MKEXP2_SLURM_PARSE_JOB_SCRIPT" >> "$PWD/submit.sh"
+      EchoStep "Generated Slurm parse job: $MKEXP2_SLURM_PARSE_JOB_SCRIPT"
+    else
+      local parse_cmd=""
+      parse_cmd="$(ShellQuote "$MKEXP2_HOME/bin/mkexp2") parse"
+      {
+        echo "echo \"==> Parsing logs into CSV\""
+        echo "$parse_cmd"
+      } >> "$PWD/submit.sh"
+      EchoStep "Enabled auto-parse in submit script"
+    fi
+  fi
 
   EchoStep "Generated submit script: $PWD/submit.sh"
 }

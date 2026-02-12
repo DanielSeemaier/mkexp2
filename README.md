@@ -54,7 +54,14 @@ mkexp2 --list-all
 # or:
 mkexp2 --list-systems
 mkexp2 --list-partitioners
+mkexp2 --list-parsers
 mkexp2 --list-presets
+```
+
+Parse finished logs into CSV:
+
+```bash
+mkexp2 parse
 ```
 
 ## DSL essentials
@@ -66,6 +73,7 @@ SystemProperty slurm.qos normal
 AlgorithmProperty KaMinPar repo_url https://github.com/KaHIP/KaMinPar.git
 Property slurm.install.mode job
 Property slurm.install.timelimit 02:00:00
+Property parse.auto true
 
 DefineAlgorithmVersion KaMinPar-Dev KaMinPar origin/my/branch
 DefineAlgorithmBuild KaMinPar-Dbg KaMinPar -DCMAKE_BUILD_TYPE=Debug
@@ -132,3 +140,16 @@ Example:
   - `Property slurm.install.mode job`
   - optional: `Property slurm.install.timelimit 02:00:00`
   - logs go to: `logs/install/slurm/<run-id>/`
+- Parse support:
+  - `mkexp2 parse` writes CSV files to `results/<algorithm>.csv`
+  - `Property parse.auto true` appends parsing automatically after generated runs complete
+  - parser lookup defaults to algorithm base name (e.g. `KaMinPar`, `dKaMinPar`)
+  - per-algorithm override from `Experiment`:
+    - `AlgorithmProperty <AlgorithmName> parser <name>`
+    - `AlgorithmProperty <AlgorithmName> parser ./parsers/<file>.awk`
+  - parser `<spec>` resolution order:
+    - absolute path
+    - relative path from experiment directory
+    - bundled parser name in `mkexp2/parsers/`
+    - local parser name in `./parsers/` or `./`
+- `mkexp2 init` adds `.mkexp2/` and `logs/` to `.gitignore`; CSV results are intentionally not ignored.

@@ -8,6 +8,7 @@ Commands:
   all       Install + generate (default)
   install   Only fetch/build configured partitioners
   generate  Only generate job files and submit script
+  parse     Parse logs into CSV files under ./results
   init      Create ./Experiment from a preset
   help      Show this help
 
@@ -15,6 +16,7 @@ Options:
   -j, --build-max-cores N    Limit build parallelism to N cores
   --list-systems             List supported values for `System ...`
   --list-partitioners        List available partitioner plugin names
+  --list-parsers             List available parser names
   --list-presets             List installable init presets
   --list-all                 List all of the above
 HELP
@@ -71,6 +73,27 @@ ListPresets() {
   done
 }
 
+ListParsers() {
+  local file=""
+  local -a names=()
+  for file in "$MKEXP2_HOME/parsers/"*.awk(N); do
+    names+=("${file:t:r}")
+  done
+
+  if (( ${#names[@]} == 0 )); then
+    echo "Parsers:"
+    echo "  (none)"
+    return
+  fi
+
+  names=("${(@on)names}")
+  echo "Parsers:"
+  local name=""
+  for name in "${names[@]}"; do
+    echo "  $name"
+  done
+}
+
 PrintDiscoverabilityLists() {
   local printed=0
 
@@ -90,6 +113,13 @@ PrintDiscoverabilityLists() {
       echo ""
     fi
     ListPresets
+    printed=1
+  fi
+  if (( MKEXP2_LIST_PARSERS )); then
+    if (( printed )); then
+      echo ""
+    fi
+    ListParsers
   fi
 }
 
@@ -133,6 +163,19 @@ ParseCli() {
         MKEXP2_MODE="generate"
         MKEXP2_DO_INSTALL=0
         MKEXP2_DO_GENERATE=1
+        command_set=1
+        shift
+        ;;
+      parse)
+        if (( command_set )); then
+          EchoFatal "multiple commands provided"
+          PrintHelp
+          exit 1
+        fi
+        MKEXP2_MODE="parse"
+        MKEXP2_DO_INSTALL=0
+        MKEXP2_DO_GENERATE=0
+        MKEXP2_DO_PARSE=1
         command_set=1
         shift
         ;;
@@ -201,10 +244,16 @@ ParseCli() {
         list_flag_set=1
         shift
         ;;
+      --list-parsers)
+        MKEXP2_LIST_PARSERS=1
+        list_flag_set=1
+        shift
+        ;;
       --list-all)
         MKEXP2_LIST_SYSTEMS=1
         MKEXP2_LIST_PARTITIONERS=1
         MKEXP2_LIST_PRESETS=1
+        MKEXP2_LIST_PARSERS=1
         list_flag_set=1
         shift
         ;;
@@ -231,6 +280,7 @@ ParseCli() {
     MKEXP2_MODE="list"
     MKEXP2_DO_INSTALL=0
     MKEXP2_DO_GENERATE=0
+    MKEXP2_DO_PARSE=0
   fi
 
   if [[ -n "$MKEXP2_BUILD_MAX_CORES" ]]; then
@@ -239,6 +289,7 @@ ParseCli() {
       exit 1
     fi
   fi
+
 }
 
 InitExperiment() {

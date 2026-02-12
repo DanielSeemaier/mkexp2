@@ -14,6 +14,10 @@ Property slurm.array.max_parallel 64
 # mkexp2 install --build-max-cores 16
 # Property slurm.install.mode job
 # Property slurm.install.timelimit 02:00:00
+# Property parse.auto true
+# Property parse.slurm.timelimit 00:30:00
+# AlgorithmProperty KaMinPar parser KaMinPar
+# AlgorithmProperty KaMinPar parser ./parsers/KaMinParCustom.awk
 
 # Example: override an algorithm repository and ref from the Experiment file.
 # DefineAlgorithmVersion KaMinPar-Dev KaMinPar feature/my-branch
