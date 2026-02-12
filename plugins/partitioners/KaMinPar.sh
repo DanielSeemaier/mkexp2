@@ -5,7 +5,7 @@ PartitionerDefaults_KaMinPar() {
   SetPartitionerDefault "KaMinPar" "repo_ref" "main"
   SetPartitionerDefault "KaMinPar" "cmake_flags" ""
   SetPartitionerDefault "KaMinPar" "supports_distributed" "false"
-  SetPartitionerDefault "KaMinPar" "use_openmp_env" "true"
+  SetPartitionerDefault "KaMinPar" "use_openmp_env" "false"
 }
 
 PartitionerFetch_KaMinPar() {
