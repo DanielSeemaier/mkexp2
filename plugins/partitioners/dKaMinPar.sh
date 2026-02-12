@@ -6,6 +6,8 @@ PartitionerDefaults_dKaMinPar() {
   SetPartitionerDefault "dKaMinPar" "cmake_flags" ""
   SetPartitionerDefault "dKaMinPar" "supports_distributed" "true"
   SetPartitionerDefault "dKaMinPar" "use_openmp_env" "false"
+  SetPartitionerDefault "dKaMinPar" "build_target" "dKaMinParApp"
+  SetPartitionerDefault "dKaMinPar" "binary" "dKaMinPar"
 }
 
 PartitionerFetch_dKaMinPar() {
@@ -32,9 +34,14 @@ PartitionerBuild_dKaMinPar() {
     build_parallel_args+=("$CTX_build_max_cores")
   fi
 
+  local build_target=""
+  local binary=""
+  build_target=$(PartitionerProperty "build_target")
+  binary=$(PartitionerProperty "binary")
+
   Run cmake -S "$CTX_source_dir" -B "$CTX_source_dir/build" "${cmake_args[@]}"
-  Run cmake --build "$CTX_source_dir/build" --target dKaMinPar "${build_parallel_args[@]}"
-  Run cp "$CTX_source_dir/build/apps/dKaMinPar" "$CTX_binary_path"
+  Run cmake --build "$CTX_source_dir/build" --target "$build_target" "${build_parallel_args[@]}"
+  Run cp "$CTX_source_dir/build/apps/$binary" "$CTX_binary_path"
 }
 
 PartitionerInvoke_dKaMinPar() {
