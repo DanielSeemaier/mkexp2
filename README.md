@@ -106,6 +106,14 @@ Launcher plugin `Y` should define:
 - `LauncherWrapCommand_Y` (required)
 - `LauncherWriteJob_Y` (required)
 
+Inside `PartitionerFetch_*`, `PartitionerBuild_*`, and `PartitionerInvoke_*`, use:
+- `PartitionerProperty <key> [fallback]`
+
+Example:
+- in plugin defaults: `SetPartitionerDefault "KaMinPar" "build_target" "KaMinParApp"`
+- in Experiment: `AlgorithmProperty KaMinPar build_target KaMinParApp`
+- in plugin build hook: `build_target=$(PartitionerProperty build_target KaMinParApp)`
+
 ## Notes
 
 - This is a scaffold intended to be extended with more partitioners, systems, parsers, and plotting.

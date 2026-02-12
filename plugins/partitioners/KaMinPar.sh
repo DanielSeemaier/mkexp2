@@ -6,6 +6,7 @@ PartitionerDefaults_KaMinPar() {
   SetPartitionerDefault "KaMinPar" "cmake_flags" ""
   SetPartitionerDefault "KaMinPar" "supports_distributed" "false"
   SetPartitionerDefault "KaMinPar" "use_openmp_env" "false"
+  SetPartitionerDefault "KaMinPar" "build_target" "KaMinParApp"
 }
 
 PartitionerFetch_KaMinPar() {
@@ -31,9 +32,11 @@ PartitionerBuild_KaMinPar() {
   if [[ -n "$CTX_build_max_cores" ]]; then
     build_parallel_args+=("$CTX_build_max_cores")
   fi
+  local build_target=""
+  build_target=$(PartitionerProperty "build_target" "KaMinParApp")
 
   Run cmake -S "$CTX_source_dir" -B "$CTX_source_dir/build" "${cmake_args[@]}"
-  Run cmake --build "$CTX_source_dir/build" --target KaMinParApp "${build_parallel_args[@]}"
+  Run cmake --build "$CTX_source_dir/build" --target "$build_target" "${build_parallel_args[@]}"
   Run cp "$CTX_source_dir/build/apps/KaMinPar" "$CTX_binary_path"
 }
 

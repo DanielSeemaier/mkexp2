@@ -265,3 +265,17 @@ GenericGitFetch() {
 ShellQuote() {
   printf '%q' "$1"
 }
+
+# Resolve an algorithm property for the currently active plugin context.
+# Intended for PartitionerFetch_*/PartitionerBuild_*/PartitionerInvoke_* helpers.
+PartitionerProperty() {
+  local key="$1"
+  local fallback="${2:-}"
+
+  if [[ -z "$CTX_algorithm" ]]; then
+    EchoFatal "PartitionerProperty called without an active CTX_algorithm"
+    exit 1
+  fi
+
+  ResolveAlgorithmProperty "$CTX_algorithm" "$key" "$fallback"
+}
