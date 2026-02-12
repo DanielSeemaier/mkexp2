@@ -40,6 +40,7 @@ _UiTag() {
     warn) printf '%s[warn]%s' "${MKEXP2_UI_YELLOW}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
     fail) printf '%s[fail]%s' "${MKEXP2_UI_RED}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
     fatal) printf '%s[fatal]%s' "${MKEXP2_UI_RED}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
+    build) printf '%s[build]%s' "${MKEXP2_UI_CYAN}" "$MKEXP2_UI_RESET" ;;
     run) printf '%s[run]%s' "${MKEXP2_UI_CYAN}" "$MKEXP2_UI_RESET" ;;
     skip) printf '%s[skip]%s' "${MKEXP2_UI_DIM}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
     *) printf '[%s]' "$kind" ;;

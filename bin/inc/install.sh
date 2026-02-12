@@ -76,9 +76,9 @@ InstallCurrentExperiment() {
       continue
     fi
 
-    local run_tag
-    run_tag=$(_UiTag run)
-    echo "  $run_tag $algorithm"
+    local build_tag
+    build_tag=$(_UiTag build)
+    echo "  $build_tag $algorithm"
     if [[ -n "$CTX_build_max_cores" ]]; then
       EchoInfo "build cores: $CTX_build_max_cores"
     else
