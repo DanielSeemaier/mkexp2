@@ -9,6 +9,7 @@ MKEXP2_UI_GREEN=""
 MKEXP2_UI_YELLOW=""
 MKEXP2_UI_RED=""
 MKEXP2_UI_CYAN=""
+MKEXP2_UI_TAG=""
 
 InitUi() {
   if (( MKEXP2_UI_READY )); then
@@ -33,50 +34,55 @@ _UiTag() {
   local kind="$1"
   InitUi
   case "$kind" in
-    step) printf '%s==>%s' "${MKEXP2_UI_DIM}" "$MKEXP2_UI_RESET" ;;
-    exp) printf '%s==>%s' "${MKEXP2_UI_DIM}" "$MKEXP2_UI_RESET" ;;
-    info) printf '%s[info]%s' "${MKEXP2_UI_CYAN}" "$MKEXP2_UI_RESET" ;;
-    ok) printf '%s[ok]%s' "${MKEXP2_UI_GREEN}" "$MKEXP2_UI_RESET" ;;
-    warn) printf '%s[warn]%s' "${MKEXP2_UI_YELLOW}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
-    fail) printf '%s[fail]%s' "${MKEXP2_UI_RED}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
-    fatal) printf '%s[fatal]%s' "${MKEXP2_UI_RED}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
-    build) printf '%s[build]%s' "${MKEXP2_UI_CYAN}" "$MKEXP2_UI_RESET" ;;
-    run) printf '%s[run]%s' "${MKEXP2_UI_CYAN}" "$MKEXP2_UI_RESET" ;;
-    skip) printf '%s[skip]%s' "${MKEXP2_UI_DIM}${MKEXP2_UI_BOLD}" "$MKEXP2_UI_RESET" ;;
-    *) printf '[%s]' "$kind" ;;
+    step) MKEXP2_UI_TAG="${MKEXP2_UI_CYAN}==>${MKEXP2_UI_RESET}" ;;
+    exp) MKEXP2_UI_TAG="${MKEXP2_UI_CYAN}==>${MKEXP2_UI_RESET}" ;;
+    info) MKEXP2_UI_TAG="[info]" ;;
+    ok) MKEXP2_UI_TAG="${MKEXP2_UI_GREEN}[ok]${MKEXP2_UI_RESET}" ;;
+    warn) MKEXP2_UI_TAG="${MKEXP2_UI_YELLOW}${MKEXP2_UI_BOLD}[warn]${MKEXP2_UI_RESET}" ;;
+    fail) MKEXP2_UI_TAG="${MKEXP2_UI_RED}${MKEXP2_UI_BOLD}[fail]${MKEXP2_UI_RESET}" ;;
+    fatal) MKEXP2_UI_TAG="${MKEXP2_UI_RED}${MKEXP2_UI_BOLD}[fatal]${MKEXP2_UI_RESET}" ;;
+    build) MKEXP2_UI_TAG="${MKEXP2_UI_BLUE}${MKEXP2_UI_BOLD}[build]${MKEXP2_UI_RESET}" ;;
+    run) MKEXP2_UI_TAG="${MKEXP2_UI_CYAN}[run]${MKEXP2_UI_RESET}" ;;
+    skip) MKEXP2_UI_TAG="${MKEXP2_UI_DIM}${MKEXP2_UI_BOLD}[skip]${MKEXP2_UI_RESET}" ;;
+    *) MKEXP2_UI_TAG="[${kind}]" ;;
   esac
 }
 
 EchoInfo() {
-  local tag
-  tag=$(_UiTag info)
-  echo "  $tag $*"
+  _UiTag info
+  echo "  $MKEXP2_UI_TAG $*"
 }
 
 EchoStep() {
-  local tag
-  tag=$(_UiTag step)
-  echo "$tag $*"
+  _UiTag step
+  echo "$MKEXP2_UI_TAG $*"
 }
 
 EchoWarn() {
-  local tag
-  tag=$(_UiTag warn)
-  echo "$tag $*" >&2
+  _UiTag warn
+  echo "$MKEXP2_UI_TAG $*" >&2
 }
 
 EchoFatal() {
-  local tag
-  tag=$(_UiTag fatal)
-  echo "$tag $*" >&2
+  _UiTag fatal
+  echo "$MKEXP2_UI_TAG $*" >&2
 }
 
 EchoExperiment() {
   local name="$1"
   InitUi
-  local tag
-  tag=$(_UiTag exp)
-  echo "$tag ${MKEXP2_UI_BOLD}${name}${MKEXP2_UI_RESET}"
+  _UiTag exp
+  echo "$MKEXP2_UI_TAG ${MKEXP2_UI_BOLD}${name}${MKEXP2_UI_RESET}"
+}
+
+DisplayExperimentName() {
+  local fn_name="$1"
+  local display_name="${fn_name#Experiment}"
+  if [[ -z "$display_name" || "$display_name" == "$fn_name" ]]; then
+    display_name="$fn_name"
+  fi
+  display_name="${display_name//_/ }"
+  echo "$display_name"
 }
 
 PrepareInstallLogDir() {
@@ -135,15 +141,13 @@ _RunWithSpinner() {
   fi
 
   if (( exit_code == 0 )); then
-    local ok_tag
-    ok_tag=$(_UiTag ok)
-    echo "  $ok_tag $label"
+    _UiTag ok
+    echo "  $MKEXP2_UI_TAG $label"
     return 0
   fi
 
-  local fail_tag
-  fail_tag=$(_UiTag fail)
-  echo "  $fail_tag $label"
+  _UiTag fail
+  echo "  $MKEXP2_UI_TAG $label"
   EchoWarn "log: $log_file"
   sed 's/^/    | /' "$log_file"
   return "$exit_code"
@@ -155,9 +159,8 @@ Run() {
   local label="${cmd_display:-command}"
 
   if (( MKEXP2_RUN_VERBOSE )); then
-    local run_tag
-    run_tag=$(_UiTag run)
-    echo "  $run_tag $cmd_display"
+    _UiTag run
+    echo "  $MKEXP2_UI_TAG $cmd_display"
     "$@"
     return
   fi

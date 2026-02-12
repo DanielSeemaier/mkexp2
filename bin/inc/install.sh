@@ -70,15 +70,13 @@ InstallCurrentExperiment() {
     PopulateBuildContext "$algorithm"
 
     if [[ -n "${INSTALLED_BUILDS["$CTX_build_key"]:-}" ]]; then
-      local skip_tag
-      skip_tag=$(_UiTag skip)
-      echo "  $skip_tag $algorithm (already built in this run)"
+      _UiTag skip
+      echo "  $MKEXP2_UI_TAG $algorithm (already built in this run)"
       continue
     fi
 
-    local build_tag
-    build_tag=$(_UiTag build)
-    echo "  $build_tag $algorithm"
+    _UiTag build
+    echo "  $MKEXP2_UI_TAG $algorithm"
     if [[ -n "$CTX_build_max_cores" ]]; then
       EchoInfo "build cores: $CTX_build_max_cores"
     else

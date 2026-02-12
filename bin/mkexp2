@@ -54,7 +54,9 @@ fi
 
 local_fn=""
 for local_fn in "${experiment_functions[@]}"; do
-  EchoExperiment "$local_fn"
+  local display_name=""
+  display_name=$(DisplayExperimentName "$local_fn")
+  EchoStep "Processing experiment $display_name"
 
   ResetExperiment
   # Re-source for each experiment function to restore global declarations.
@@ -70,10 +72,10 @@ for local_fn in "${experiment_functions[@]}"; do
 
   if (( MKEXP2_DO_INSTALL )); then
     if [[ "$_system" == "slurm" && "$install_mode" == "job" && "$MKEXP2_MODE" == "all" ]]; then
-      EchoStep "Deferring install to Slurm install job for $local_fn"
+      EchoStep "Deferring install to Slurm install job for $display_name"
       MKEXP2_SLURM_INSTALL_JOB_REQUIRED=1
     else
-      InstallCurrentExperiment "$local_fn"
+      InstallCurrentExperiment "$display_name"
     fi
   fi
 
