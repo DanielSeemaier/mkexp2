@@ -41,7 +41,7 @@ if [[ "$MKEXP2_MODE" == "init" ]]; then
 fi
 
 if [[ "$MKEXP2_MODE" == "describe" ]]; then
-  DescribePartitioner "$MKEXP2_DESCRIBE_PARTITIONER"
+  DescribePlugin "$MKEXP2_DESCRIBE_TARGET" "$MKEXP2_DESCRIBE_KIND"
   exit $?
 fi
 

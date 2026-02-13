@@ -6,12 +6,13 @@ System local
 
 # These are global properties. Any of these can be overridden per algorithm
 # or per Experiment* function.
-Property timelimit 01:00:00
 Property slurm.partition cpuonly
 Property slurm.use_array true
 Property slurm.array.max_parallel 64
 # Build-core limit is a CLI option, e.g.:
 # mkexp2 install --build-max-cores 16
+# Property timelimit 01:00:00
+# Property timelimit.per_instance 00:05:00
 # Property slurm.install.mode job
 # Property slurm.install.timelimit 02:00:00
 # Property parse.auto true
@@ -36,8 +37,6 @@ ExperimentBaseline() {
 
   # Paths are without extension, same as mkexp v1 style.
   Graph /tmp/demo_graph
-
-  Property timelimit 00:30:00
 }
 
 ExperimentStress() {
@@ -52,5 +51,4 @@ ExperimentStress() {
   # For slurm launcher, this means: submit ExperimentStress after
   # ExperimentBaseline finished OK (for the same topology).
   Property slurm.dependency afterok:ExperimentBaseline
-  Property timelimit 02:00:00
 }

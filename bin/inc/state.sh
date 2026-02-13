@@ -10,6 +10,8 @@ MKEXP2_INIT_PRESET="Default"
 MKEXP2_RUN_ID="$(date +%Y%m%d-%H%M%S)"
 MKEXP2_BUILD_MAX_CORES=""
 MKEXP2_DESCRIBE_PARTITIONER=""
+MKEXP2_DESCRIBE_TARGET=""
+MKEXP2_DESCRIBE_KIND=""
 MKEXP2_LIST_SYSTEMS=0
 MKEXP2_LIST_PARTITIONERS=0
 MKEXP2_LIST_PRESETS=0
@@ -140,8 +142,5 @@ EnsureExperimentDefaults() {
   fi
   if [[ ${#_epsilons[@]} -eq 0 ]]; then
     _epsilons=("0.03")
-  fi
-  if [[ -z "$_timelimit" ]]; then
-    _timelimit="01:00:00"
   fi
 }

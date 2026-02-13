@@ -171,3 +171,117 @@ DescribePartitioner() {
     "$describe_fn"
   fi
 }
+
+DescribeSystem() {
+  local launcher="$1"
+  if [[ -z "$launcher" ]]; then
+    EchoFatal "describe requires a system name, e.g. 'mkexp2 describe local --system'"
+    return 1
+  fi
+
+  local plugin_file="$MKEXP2_HOME/plugins/launchers/$launcher.sh"
+  if [[ ! -f "$plugin_file" ]]; then
+    EchoFatal "unknown system '$launcher' ($plugin_file not found)"
+    return 1
+  fi
+
+  ResetExperiment
+  . "$plugin_file"
+
+  local defaults_fn="LauncherDefaults_${launcher}"
+  local wrap_fn="LauncherWrapCommand_${launcher}"
+  local write_fn="LauncherWriteJob_${launcher}"
+  local describe_fn="LauncherDescribe_${launcher}"
+
+  if FunctionExists "$defaults_fn"; then
+    "$defaults_fn"
+  fi
+
+  EchoStep "System: $launcher"
+  EchoInfo "plugin: $plugin_file"
+
+  local -a hooks=()
+  if FunctionExists "$defaults_fn"; then hooks+=("defaults"); fi
+  if FunctionExists "$wrap_fn"; then hooks+=("wrap"); fi
+  if FunctionExists "$write_fn"; then hooks+=("write"); fi
+  if FunctionExists "$describe_fn"; then hooks+=("describe"); fi
+  EchoInfo "hooks: ${(j:, :)hooks}"
+
+  local -a default_lines=()
+  local key=""
+  for key in ${(k)SYSTEM_DEFAULTS}; do
+    key="${key#\"}"
+    key="${key%\"}"
+    default_lines+=("$key=${SYSTEM_DEFAULTS["$key"]}")
+  done
+
+  if (( ${#default_lines[@]} > 0 )); then
+    default_lines=("${(@on)default_lines}")
+    EchoInfo "defaults:"
+    local line=""
+    for line in "${default_lines[@]}"; do
+      echo "    - $line"
+    done
+  else
+    EchoInfo "defaults: (none)"
+  fi
+
+  if FunctionExists "$describe_fn"; then
+    "$describe_fn"
+  fi
+}
+
+DescribePlugin() {
+  local name="$1"
+  local kind="${2:-}"
+
+  local part_file="$MKEXP2_HOME/plugins/partitioners/$name.sh"
+  local sys_file="$MKEXP2_HOME/plugins/launchers/$name.sh"
+  local has_part=0
+  local has_system=0
+
+  [[ -f "$part_file" ]] && has_part=1
+  [[ -f "$sys_file" ]] && has_system=1
+
+  case "$kind" in
+    partitioner)
+      if (( ! has_part )); then
+        EchoFatal "unknown partitioner '$name' ($part_file not found)"
+        return 1
+      fi
+      DescribePartitioner "$name"
+      return $?
+      ;;
+    system)
+      if (( ! has_system )); then
+        EchoFatal "unknown system '$name' ($sys_file not found)"
+        return 1
+      fi
+      DescribeSystem "$name"
+      return $?
+      ;;
+    "")
+      if (( has_part && has_system )); then
+        EchoFatal "'$name' matches both a partitioner and a system plugin"
+        EchoInfo "use one of:"
+        echo "    mkexp2 describe $name --partitioner"
+        echo "    mkexp2 describe $name --system"
+        return 1
+      fi
+      if (( has_part )); then
+        DescribePartitioner "$name"
+        return $?
+      fi
+      if (( has_system )); then
+        DescribeSystem "$name"
+        return $?
+      fi
+      EchoFatal "unknown plugin '$name' (not found in partitioners or launchers)"
+      return 1
+      ;;
+    *)
+      EchoFatal "invalid describe kind '$kind' (expected 'partitioner' or 'system')"
+      return 1
+      ;;
+  esac
+}

@@ -72,12 +72,16 @@ Validate an `Experiment` without generating jobs:
 mkexp2 check
 ```
 
-Inspect a partitioner plugin (defaults, hooks, predefined aliases):
+Inspect a plugin (partitioner or system/launcher):
 
 ```bash
 mkexp2 describe MtKaHIP
 # alias:
 mkexp2 describe-partitioner MtKaHIP
+# system:
+mkexp2 describe slurm --system
+# alias:
+mkexp2 describe-system slurm
 ```
 
 ## DSL essentials
@@ -147,6 +151,9 @@ Example:
 - OpenMP env var prefixing (`OMP_NUM_THREADS`, `OMP_PROC_BIND`, `OMP_PLACES`) is opt-in per algorithm via `use_openmp_env`.
   - Default is `false` unless a partitioner plugin sets a default.
   - Override with `AlgorithmProperty <AlgorithmName> use_openmp_env true|false`.
+- No timelimit is applied by default.
+  - Set `Property timelimit <DD:HH:MM:SS|HH:MM:SS>` to add a Slurm job timelimit.
+  - Set `Property timelimit.per_instance <DD:HH:MM:SS|HH:MM:SS>` to wrap each run with `timeout`.
 - `timelimit.per_instance` maps to `timeout` seconds in generated commands.
 - Install command output is concise by default and writes per-command logs to:
   `logs/install/local/<run-id>/commands/`
@@ -159,11 +166,12 @@ Example:
   - short form: `mkexp2 install -j <N>`
 - Slurm can run install as a dedicated dependency job before compute jobs:
   - `Property slurm.install.mode job`
-  - optional: `Property slurm.install.timelimit 02:00:00`
+  - optional: `Property slurm.install.timelimit 02:00:00` (otherwise no `#SBATCH --time`)
   - logs go to: `logs/install/slurm/<run-id>/`
 - Parse support:
   - `mkexp2 parse` writes CSV files to `results/<algorithm>.csv`
   - `Property parse.auto true` appends parsing automatically after generated runs complete
+  - optional: `Property parse.slurm.timelimit 00:30:00` for auto-parse Slurm jobs
   - parser lookup defaults to algorithm base name (e.g. `KaMinPar`, `dKaMinPar`)
   - per-algorithm override from `Experiment`:
     - `AlgorithmProperty <AlgorithmName> parser <name>`

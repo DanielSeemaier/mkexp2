@@ -53,9 +53,12 @@ LauncherWriteJob_slurm() {
 #SBATCH --ntasks=${total_tasks}
 #SBATCH --ntasks-per-node=${mpis}
 #SBATCH --cpus-per-task=${threads}
-#SBATCH --time=${timelimit}
 #SBATCH --partition=${partition}
 SCRIPT
+
+  if [[ -n "$timelimit" ]]; then
+    echo "#SBATCH --time=$timelimit" >> "$job_script"
+  fi
 
   if [[ -n "$qos" ]]; then
     echo "#SBATCH --qos=$qos" >> "$job_script"

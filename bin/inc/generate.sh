@@ -115,7 +115,7 @@ EnsureSlurmInstallJob() {
   qos=$(ResolveRunProperty "slurm.qos" "")
   account=$(ResolveRunProperty "slurm.account" "")
   constraint=$(ResolveRunProperty "slurm.constraint" "")
-  timelimit=$(ResolveRunProperty "slurm.install.timelimit" "02:00:00")
+  timelimit=$(ResolveRunProperty "slurm.install.timelimit" "")
 
   install_job_name="mkexp2-install-$(SafeName "$(basename "$PWD")")"
   MKEXP2_SLURM_INSTALL_JOB_SCRIPT="$PWD/jobs/install__${MKEXP2_RUN_ID}.sh"
@@ -131,9 +131,12 @@ EnsureSlurmInstallJob() {
   cat > "$MKEXP2_SLURM_INSTALL_JOB_SCRIPT" <<SCRIPT
 #!/usr/bin/env zsh
 #SBATCH --job-name=${install_job_name}
-#SBATCH --time=${timelimit}
 #SBATCH --partition=${partition}
 SCRIPT
+
+  if [[ -n "$timelimit" ]]; then
+    echo "#SBATCH --time=$timelimit" >> "$MKEXP2_SLURM_INSTALL_JOB_SCRIPT"
+  fi
 
   if [[ -n "$qos" ]]; then
     echo "#SBATCH --qos=$qos" >> "$MKEXP2_SLURM_INSTALL_JOB_SCRIPT"
@@ -188,7 +191,7 @@ EnsureSlurmParseJob() {
   qos=$(ResolveRunProperty "slurm.qos" "")
   account=$(ResolveRunProperty "slurm.account" "")
   constraint=$(ResolveRunProperty "slurm.constraint" "")
-  timelimit=$(ResolveRunProperty "parse.slurm.timelimit" "00:30:00")
+  timelimit=$(ResolveRunProperty "parse.slurm.timelimit" "")
 
   parse_job_name="mkexp2-parse-$(SafeName "$(basename "$PWD")")"
   MKEXP2_SLURM_PARSE_JOB_SCRIPT="$PWD/jobs/parse__${MKEXP2_RUN_ID}.sh"
@@ -200,9 +203,12 @@ EnsureSlurmParseJob() {
   cat > "$MKEXP2_SLURM_PARSE_JOB_SCRIPT" <<SCRIPT
 #!/usr/bin/env zsh
 #SBATCH --job-name=${parse_job_name}
-#SBATCH --time=${timelimit}
 #SBATCH --partition=${partition}
 SCRIPT
+
+  if [[ -n "$timelimit" ]]; then
+    echo "#SBATCH --time=$timelimit" >> "$MKEXP2_SLURM_PARSE_JOB_SCRIPT"
+  fi
 
   if [[ -n "$qos" ]]; then
     echo "#SBATCH --qos=$qos" >> "$MKEXP2_SLURM_PARSE_JOB_SCRIPT"

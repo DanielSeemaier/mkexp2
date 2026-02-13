@@ -10,13 +10,15 @@ Commands:
   generate  Only generate job files and submit script
   parse     Parse logs into CSV files under ./results
   check     Validate Experiment configuration without generating jobs
-  describe  Show partitioner defaults/hooks/aliases
+  describe  Show plugin defaults/hooks (partitioners + systems)
   init      Create ./Experiment from a preset
   help      Show this help
 
 Options:
   -v, --verbose              Stream full command output while running
   -j, --build-max-cores N    Limit build parallelism to N cores
+  --partitioner              With `describe`, force partitioner plugin lookup
+  --system                   With `describe`, force system/launcher plugin lookup
   --list-systems             List supported values for `System ...`
   --list-partitioners        List available partitioner plugin names
   --list-parsers             List available parser names
@@ -130,6 +132,7 @@ ParseCli() {
   local command_set=0
   local init_preset_set=0
   local list_flag_set=0
+  local describe_target_set=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -208,12 +211,40 @@ ParseCli() {
         MKEXP2_DO_PARSE=0
         MKEXP2_DO_DESCRIBE=1
         command_set=1
+        if [[ "$1" == "describe-partitioner" ]]; then
+          MKEXP2_DESCRIBE_KIND="partitioner"
+        fi
         shift
-        if [[ $# -eq 0 || "$1" == -* ]]; then
-          EchoFatal "describe requires a partitioner name (e.g. mkexp2 describe MtKaHIP)"
+        ;;
+      describe-system)
+        if (( command_set )); then
+          EchoFatal "multiple commands provided"
+          PrintHelp
           exit 1
         fi
-        MKEXP2_DESCRIBE_PARTITIONER="$1"
+        MKEXP2_MODE="describe"
+        MKEXP2_DO_INSTALL=0
+        MKEXP2_DO_GENERATE=0
+        MKEXP2_DO_PARSE=0
+        MKEXP2_DO_DESCRIBE=1
+        MKEXP2_DESCRIBE_KIND="system"
+        command_set=1
+        shift
+        ;;
+      --partitioner)
+        if [[ -n "$MKEXP2_DESCRIBE_KIND" && "$MKEXP2_DESCRIBE_KIND" != "partitioner" ]]; then
+          EchoFatal "cannot combine --partitioner and --system"
+          exit 1
+        fi
+        MKEXP2_DESCRIBE_KIND="partitioner"
+        shift
+        ;;
+      --system)
+        if [[ -n "$MKEXP2_DESCRIBE_KIND" && "$MKEXP2_DESCRIBE_KIND" != "system" ]]; then
+          EchoFatal "cannot combine --partitioner and --system"
+          exit 1
+        fi
+        MKEXP2_DESCRIBE_KIND="system"
         shift
         ;;
       init)
@@ -299,6 +330,17 @@ ParseCli() {
         shift
         ;;
       *)
+        if [[ "$MKEXP2_MODE" == "describe" && "$1" != -* ]]; then
+          if (( describe_target_set )); then
+            EchoFatal "describe accepts exactly one plugin name"
+            exit 1
+          fi
+          MKEXP2_DESCRIBE_TARGET="$1"
+          MKEXP2_DESCRIBE_PARTITIONER="$1"
+          describe_target_set=1
+          shift
+          continue
+        fi
         if [[ "$MKEXP2_MODE" == "init" && "$1" != -* && $init_preset_set -eq 0 ]]; then
           MKEXP2_INIT_PRESET="$1"
           init_preset_set=1
@@ -322,6 +364,16 @@ ParseCli() {
     MKEXP2_DO_INSTALL=0
     MKEXP2_DO_GENERATE=0
     MKEXP2_DO_PARSE=0
+  fi
+
+  if [[ "$MKEXP2_MODE" == "describe" ]]; then
+    if [[ -z "$MKEXP2_DESCRIBE_TARGET" ]]; then
+      EchoFatal "describe requires a plugin name (e.g. mkexp2 describe MtKaHIP)"
+      exit 1
+    fi
+  elif [[ -n "$MKEXP2_DESCRIBE_KIND" ]]; then
+    EchoFatal "--partitioner/--system can only be used with describe"
+    exit 1
   fi
 
   if [[ -n "$MKEXP2_BUILD_MAX_CORES" ]]; then

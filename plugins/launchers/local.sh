@@ -1,9 +1,5 @@
 #!/usr/bin/env zsh
 
-LauncherDefaults_local() {
-  SetSystemDefault "timelimit" "01:00:00"
-}
-
 LauncherWrapCommand_local() {
   local cmd="$1"
   local nodes="$2"
