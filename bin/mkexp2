@@ -62,6 +62,7 @@ for local_fn in "${experiment_functions[@]}"; do
   EchoStep "Processing experiment $display_name"
 
   ResetExperiment
+  LoadPartitionerAliasHooks
   # Re-source for each experiment function to restore global declarations.
   . "$PWD/Experiment"
   "$local_fn"

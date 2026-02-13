@@ -106,6 +106,7 @@ ExperimentStress() {
 Partitioner plugin `X` should define:
 
 - `PartitionerDefaults_X` (optional)
+- `PartitionerAliases_X` (optional; predefine algorithm aliases/properties)
 - `PartitionerFetch_X` (optional)
 - `PartitionerBuild_X` (required for install)
 - `PartitionerInvoke_X` (required for generate; set `PARTITIONER_INVOKE_CMD`)

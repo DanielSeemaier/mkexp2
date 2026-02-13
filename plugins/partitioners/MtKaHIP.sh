@@ -12,6 +12,14 @@ PartitionerDefaults_MtKaHIP() {
   SetPartitionerDefault "MtKaHIP" "epsilon_flag" "--imbalance"
 }
 
+PartitionerAliases_MtKaHIP() {
+  DefineAlgorithm MtKaHIP-LP MtKaHIP
+  AlgorithmProperty MtKaHIP-LP "preconfiguration" "socialparallel"
+
+  DefineAlgorithm MtKaHIP-FM MtKaHIP
+  AlgorithmProperty MtKaHIP-FM "preconfiguration" "multitrysocialparallel"
+}
+
 PartitionerFetch_MtKaHIP() {
   GenericGitFetch "$CTX_repo_url" "$CTX_repo_ref" "$CTX_source_dir"
 }

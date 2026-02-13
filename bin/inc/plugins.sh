@@ -21,6 +21,22 @@ LoadPartitionerPlugin() {
   fi
 }
 
+LoadPartitionerAliasHooks() {
+  local plugin_file=""
+  local base=""
+  local alias_fn=""
+
+  for plugin_file in "$MKEXP2_HOME/plugins/partitioners/"*.sh(N); do
+    base="${plugin_file:t:r}"
+    . "$plugin_file"
+
+    alias_fn="PartitionerAliases_${base}"
+    if FunctionExists "$alias_fn"; then
+      "$alias_fn"
+    fi
+  done
+}
+
 LoadLauncherPlugin() {
   local launcher="$1"
   if [[ -n "${LOADED_LAUNCHERS["$launcher"]:-}" ]]; then
