@@ -57,3 +57,125 @@ LoadLauncherPlugin() {
     "$defaults_fn"
   fi
 }
+
+DescribePartitioner() {
+  local base="$1"
+  if [[ -z "$base" ]]; then
+    EchoFatal "describe requires a partitioner name, e.g. 'mkexp2 describe MtKaHIP'"
+    return 1
+  fi
+
+  local plugin_file="$MKEXP2_HOME/plugins/partitioners/$base.sh"
+  if [[ ! -f "$plugin_file" ]]; then
+    EchoFatal "unknown partitioner '$base' ($plugin_file not found)"
+    return 1
+  fi
+
+  ResetExperiment
+  . "$plugin_file"
+
+  local defaults_fn="PartitionerDefaults_${base}"
+  local alias_fn="PartitionerAliases_${base}"
+  local fetch_fn="PartitionerFetch_${base}"
+  local build_fn="PartitionerBuild_${base}"
+  local invoke_fn="PartitionerInvoke_${base}"
+  local describe_fn="PartitionerDescribe_${base}"
+
+  if FunctionExists "$defaults_fn"; then
+    "$defaults_fn"
+  fi
+
+  EchoStep "Partitioner: $base"
+  EchoInfo "plugin: $plugin_file"
+
+  local -a hooks=()
+  if FunctionExists "$defaults_fn"; then hooks+=("defaults"); fi
+  if FunctionExists "$alias_fn"; then hooks+=("aliases"); fi
+  if FunctionExists "$fetch_fn"; then hooks+=("fetch"); fi
+  if FunctionExists "$build_fn"; then hooks+=("build"); fi
+  if FunctionExists "$invoke_fn"; then hooks+=("invoke"); fi
+  if FunctionExists "$describe_fn"; then hooks+=("describe"); fi
+  EchoInfo "hooks: ${(j:, :)hooks}"
+
+  local -a default_lines=()
+  local key=""
+  for key in ${(k)PARTITIONER_DEFAULTS}; do
+    key="${key#\"}"
+    key="${key%\"}"
+    if [[ "$key" != "${base}::"* ]]; then
+      continue
+    fi
+    local prop="${key#${base}::}"
+    default_lines+=("$prop=${PARTITIONER_DEFAULTS["$key"]}")
+  done
+
+  if (( ${#default_lines[@]} > 0 )); then
+    default_lines=("${(@on)default_lines}")
+    EchoInfo "defaults:"
+    local line=""
+    for line in "${default_lines[@]}"; do
+      echo "    - $line"
+    done
+  else
+    EchoInfo "defaults: (none)"
+  fi
+
+  local -a aliases=()
+  if FunctionExists "$alias_fn"; then
+    "$alias_fn"
+    local alias_name=""
+    for alias_name in ${(k)ALG_DEF_BASE}; do
+      alias_name="${alias_name#\"}"
+      alias_name="${alias_name%\"}"
+      if [[ "${ALG_DEF_BASE["$alias_name"]:-}" == "$base" ]]; then
+        aliases+=("$alias_name")
+      fi
+    done
+  fi
+
+  if (( ${#aliases[@]} == 0 )); then
+    EchoInfo "aliases: (none)"
+  else
+    aliases=("${(@on)aliases}")
+    EchoInfo "aliases:"
+    local alias_name=""
+    for alias_name in "${aliases[@]}"; do
+      echo "    - $alias_name"
+
+      local alias_args="${ALG_DEF_ARGS["$alias_name"]:-}"
+      local alias_version="${ALG_DEF_VERSION["$alias_name"]:-}"
+      local alias_build="${ALG_DEF_BUILD["$alias_name"]:-}"
+
+      if [[ -n "$alias_args" ]]; then
+        echo "      args: $alias_args"
+      fi
+      if [[ -n "$alias_version" ]]; then
+        echo "      version: $alias_version"
+      fi
+      if [[ -n "$alias_build" ]]; then
+        echo "      build: $alias_build"
+      fi
+
+      local -a alias_props=()
+      for key in ${(k)PROP_ALGORITHM}; do
+        key="${key#\"}"
+        key="${key%\"}"
+        if [[ "$key" == "${alias_name}::"* ]]; then
+          local prop_key="${key#${alias_name}::}"
+          alias_props+=("$prop_key=${PROP_ALGORITHM["$key"]}")
+        fi
+      done
+      if (( ${#alias_props[@]} > 0 )); then
+        alias_props=("${(@on)alias_props}")
+        local prop_line=""
+        for prop_line in "${alias_props[@]}"; do
+          echo "      property: $prop_line"
+        done
+      fi
+    done
+  fi
+
+  if FunctionExists "$describe_fn"; then
+    "$describe_fn"
+  fi
+}

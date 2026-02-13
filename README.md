@@ -66,6 +66,20 @@ Parse finished logs into CSV:
 mkexp2 parse
 ```
 
+Validate an `Experiment` without generating jobs:
+
+```bash
+mkexp2 check
+```
+
+Inspect a partitioner plugin (defaults, hooks, predefined aliases):
+
+```bash
+mkexp2 describe MtKaHIP
+# alias:
+mkexp2 describe-partitioner MtKaHIP
+```
+
 ## DSL essentials
 
 ```bash

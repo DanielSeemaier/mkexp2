@@ -9,6 +9,8 @@ Commands:
   install   Only fetch/build configured partitioners
   generate  Only generate job files and submit script
   parse     Parse logs into CSV files under ./results
+  check     Validate Experiment configuration without generating jobs
+  describe  Show partitioner defaults/hooks/aliases
   init      Create ./Experiment from a preset
   help      Show this help
 
@@ -178,6 +180,40 @@ ParseCli() {
         MKEXP2_DO_GENERATE=0
         MKEXP2_DO_PARSE=1
         command_set=1
+        shift
+        ;;
+      check)
+        if (( command_set )); then
+          EchoFatal "multiple commands provided"
+          PrintHelp
+          exit 1
+        fi
+        MKEXP2_MODE="check"
+        MKEXP2_DO_INSTALL=0
+        MKEXP2_DO_GENERATE=0
+        MKEXP2_DO_PARSE=0
+        MKEXP2_DO_CHECK=1
+        command_set=1
+        shift
+        ;;
+      describe|describe-partitioner)
+        if (( command_set )); then
+          EchoFatal "multiple commands provided"
+          PrintHelp
+          exit 1
+        fi
+        MKEXP2_MODE="describe"
+        MKEXP2_DO_INSTALL=0
+        MKEXP2_DO_GENERATE=0
+        MKEXP2_DO_PARSE=0
+        MKEXP2_DO_DESCRIBE=1
+        command_set=1
+        shift
+        if [[ $# -eq 0 || "$1" == -* ]]; then
+          EchoFatal "describe requires a partitioner name (e.g. mkexp2 describe MtKaHIP)"
+          exit 1
+        fi
+        MKEXP2_DESCRIBE_PARTITIONER="$1"
         shift
         ;;
       init)

@@ -20,6 +20,7 @@ MKEXP2_HOME=$(cd "$script_dir/.." && pwd)
 . "$MKEXP2_HOME/bin/inc/install.sh"
 . "$MKEXP2_HOME/bin/inc/generate.sh"
 . "$MKEXP2_HOME/bin/inc/parse.sh"
+. "$MKEXP2_HOME/bin/inc/check.sh"
 . "$MKEXP2_HOME/bin/inc/cli.sh"
 
 ParseCli "$@"
@@ -37,6 +38,11 @@ fi
 if [[ "$MKEXP2_MODE" == "init" ]]; then
   InitExperiment
   exit 0
+fi
+
+if [[ "$MKEXP2_MODE" == "describe" ]]; then
+  DescribePartitioner "$MKEXP2_DESCRIBE_PARTITIONER"
+  exit $?
 fi
 
 if [[ ! -f "$PWD/Experiment" ]]; then
@@ -70,6 +76,12 @@ for local_fn in "${experiment_functions[@]}"; do
   EnsureExperimentDefaults
   FlattenAlgorithmHierarchy
   RegisterCurrentExperimentParsers
+
+  if (( MKEXP2_DO_CHECK )); then
+    CheckCurrentExperiment "$display_name"
+    continue
+  fi
+
   LoadLauncherPlugin "$_system"
 
   install_mode=""
@@ -98,4 +110,8 @@ fi
 
 if (( MKEXP2_DO_PARSE )); then
   ParseLogs
+fi
+
+if (( MKEXP2_DO_CHECK )); then
+  FinalizeChecks
 fi
