@@ -273,6 +273,46 @@ GenerateCurrentExperiment() {
   local experiment_name="$1"
   local experiment_label=""
   experiment_label=$(SafeName "$experiment_name")
+  local experiment_display=""
+  experiment_display=$(DisplayExperimentName "$experiment_name")
+
+  local total_generated_calls=0
+  local -A generated_calls_per_algorithm=()
+  local -A generated_calls_per_topology=()
+  local -a generated_topologies=()
+  local -A seen_partitioners=()
+  local -a partitioners=()
+  local -a algorithm_labels=()
+  local -A seen_graph_names=()
+  local -a graph_names=()
+
+  local algorithm=""
+  for algorithm in "${_algorithms[@]}"; do
+    local base="${FLAT_ALGO_BASE["$algorithm"]:-}"
+    if [[ -z "$base" ]]; then
+      base=$(GetAlgorithmBase "$algorithm")
+    fi
+
+    if [[ "$algorithm" == "$base" ]]; then
+      algorithm_labels+=("$algorithm")
+    else
+      algorithm_labels+=("${algorithm}[$base]")
+    fi
+
+    if [[ -z "${seen_partitioners["$base"]:-}" ]]; then
+      seen_partitioners["$base"]=1
+      partitioners+=("$base")
+    fi
+  done
+
+  local graph=""
+  for graph in "${_graphs[@]}"; do
+    local graph_name="${graph:t}"
+    if [[ -z "${seen_graph_names["$graph_name"]:-}" ]]; then
+      seen_graph_names["$graph_name"]=1
+      graph_names+=("$graph_name")
+    fi
+  done
 
   if [[ "$_system" == "slurm" ]]; then
     local install_mode=""
@@ -321,7 +361,6 @@ GenerateCurrentExperiment() {
       exit 1
     fi
 
-    local algorithm=""
     for algorithm in "${_algorithms[@]}"; do
       PopulateBuildContext "$algorithm"
       LoadPartitionerPlugin "$CTX_base"
@@ -345,7 +384,6 @@ GenerateCurrentExperiment() {
         for epsilon in "${_epsilons[@]}"; do
           local k=""
           for k in "${_ks[@]}"; do
-            local graph=""
             for graph in "${_graphs[@]}"; do
               RUN_algorithm="$algorithm"
               RUN_base="$CTX_base"
@@ -393,6 +431,10 @@ GenerateCurrentExperiment() {
               local id="${graph_name}__k${k}__s${seed}__e${epsilon}__${topology}"
               local log_file="$log_dir/${id}.log"
               printf '%s\n' "$wrapped_cmd >> \"$log_file\" 2>&1" >> "$cmd_file"
+
+              total_generated_calls=$((total_generated_calls + 1))
+              generated_calls_per_algorithm["$algorithm"]=$(( ${generated_calls_per_algorithm["$algorithm"]:-0} + 1 ))
+              generated_calls_per_topology["$topology"]=$(( ${generated_calls_per_topology["$topology"]:-0} + 1 ))
             done
           done
         done
@@ -405,6 +447,7 @@ GenerateCurrentExperiment() {
       rm -f "$cmd_file"
       continue
     fi
+    generated_topologies+=("$topology")
 
     local timelimit=""
     timelimit=$(ResolveRunProperty "timelimit" "$_timelimit")
@@ -419,6 +462,43 @@ GenerateCurrentExperiment() {
     GENERATED_JOB_META["$job_key"]="${_system}|$job_script|$dependency_key"
     GENERATED_JOB_KEYS+=("$job_key")
   done
+
+  local algorithms_summary=""
+  local partitioners_summary=""
+  local graphs_summary=""
+  local ks_summary=""
+  local seeds_summary=""
+  local epsilons_summary=""
+  local topologies_summary=""
+  local -a calls_per_algorithm_parts=()
+  local -a calls_per_topology_parts=()
+
+  algorithms_summary="${(j:, :)algorithm_labels}"
+  partitioners_summary="${(j:, :)partitioners}"
+  graphs_summary="${(j:, :)graph_names}"
+  ks_summary="${(j:, :)_ks}"
+  seeds_summary="${(j:, :)_seeds}"
+  epsilons_summary="${(j:, :)_epsilons}"
+  topologies_summary="${(j:, :)generated_topologies}"
+
+  for algorithm in "${_algorithms[@]}"; do
+    calls_per_algorithm_parts+=("$algorithm=${generated_calls_per_algorithm["$algorithm"]:-0}")
+  done
+  local topology=""
+  for topology in "${generated_topologies[@]}"; do
+    calls_per_topology_parts+=("$topology=${generated_calls_per_topology["$topology"]:-0}")
+  done
+
+  EchoStep "Generated experiment summary: $experiment_display"
+  EchoInfo "launcher: $_system"
+  EchoInfo "algorithms: $algorithms_summary"
+  EchoInfo "partitioners: $partitioners_summary"
+  EchoInfo "graphs: $graphs_summary"
+  EchoInfo "ks: $ks_summary | epsilons: $epsilons_summary | seeds: $seeds_summary"
+  EchoInfo "topologies: $topologies_summary"
+  EchoInfo "calls: $total_generated_calls total (${#generated_topologies[@]} job script(s))"
+  EchoInfo "calls per algorithm: ${(j:, :)calls_per_algorithm_parts}"
+  EchoInfo "calls per topology: ${(j:, :)calls_per_topology_parts}"
 }
 
 FinalizeGenerateOutputs() {
