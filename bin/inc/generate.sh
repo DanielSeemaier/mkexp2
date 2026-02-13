@@ -285,10 +285,15 @@ GenerateCurrentExperiment() {
 
   local topology=""
   for topology in "${_threads[@]}"; do
-    local nodes mpis threads
-    nodes=$(ParseNodes "$topology")
-    mpis=$(ParseMpis "$topology")
-    threads=$(ParseThreads "$topology")
+    local nodes="1"
+    local mpis="1"
+    local threads="$topology"
+    if [[ "$topology" == *x*x* ]]; then
+      nodes="${topology%%x*}"
+      local without_threads="${topology%x*}"
+      mpis="${without_threads#*x}"
+      threads="${topology##*x}"
+    fi
     local distributed="false"
     if (( nodes > 1 || mpis > 1 )); then
       distributed="true"
