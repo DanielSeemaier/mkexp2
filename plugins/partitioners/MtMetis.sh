@@ -22,6 +22,7 @@ PartitionerDefaults_MtMetis() {
   SetPartitionerDefault "MtMetis" "use_openmp_env" "false"
   SetPartitionerDefault "MtMetis" "tar_url" ""
   SetPartitionerDefault "MtMetis" "binary" "mtmetis"
+  SetPartitionerDefault "MtMetis" "verbosity" "medium"
 }
 
 PartitionerFetch_MtMetis() {
@@ -107,11 +108,15 @@ PartitionerInvoke_MtMetis() {
 
   imbalance=$(awk -v e="$RUN_epsilon" 'BEGIN { printf "%.12g", 1 + e }')
 
+  local verbosity=""
+  verbosity=$(PartitionerProperty "verbosity" "medium")
+
   cmd="${(q)RUN_binary_path}"
   if [[ -n "$RUN_args" ]]; then
     cmd+=" $RUN_args"
   fi
   cmd+=" --seed=${(q)RUN_seed}"
+  cmd+=" --verbosity=${(q)verbosity}"
   cmd+=" -T${(q)RUN_threads}"
   cmd+=" -C -t"
   cmd+=" -b${(q)imbalance}"
