@@ -24,6 +24,7 @@ Requirements:
   - `Mock` (local smoke tests)
   - `KaMinPar`
   - `dKaMinPar`
+  - `MtKaHIP`
   - `MtMetis`
 
 ## Quickstart
