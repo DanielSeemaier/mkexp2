@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 
 PartitionerDefaults_MtKaHIP() {
-  SetPartitionerDefault "MtKaHIP" "repo_url" "https://github.com/KaHIP/mt-KaHIP.git"
+  SetPartitionerDefault "MtKaHIP" "repo_url" "https://github.com/DanielSeemaier/mt-KaHIP.git"
   SetPartitionerDefault "MtKaHIP" "repo_ref" "main"
   SetPartitionerDefault "MtKaHIP" "cmake_flags" ""
   SetPartitionerDefault "MtKaHIP" "supports_distributed" "false"
