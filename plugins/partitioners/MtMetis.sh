@@ -25,6 +25,14 @@ PartitionerDefaults_MtMetis() {
   SetPartitionerDefault "MtMetis" "verbosity" "medium"
 }
 
+PartitionerAliases_MtMetis() {
+  DefineAlgorithm MtMetis-G MtMetis
+
+  DefineAlgorithm MtMetis-H MtMetis -rhs
+
+  DefineAlgorithm MtMetis-R MtMetis -prb
+}
+
 PartitionerFetch_MtMetis() {
   local version=""
   local tar_url=""
