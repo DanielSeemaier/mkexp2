@@ -427,6 +427,12 @@ GenerateCurrentExperiment() {
     fi
 
     local job_name="${experiment_label}__${topology}"
+    local launcher_job_name="$job_name"
+    if [[ "$_system" == "slurm" ]]; then
+      local slurm_experiment_name=""
+      slurm_experiment_name=$(SafeName "$experiment_display")
+      launcher_job_name="${slurm_experiment_name}/${threads}"
+    fi
     local job_key="${experiment_name}:${topology}"
 
     local cmd_file="$PWD/jobs/${job_name}.cmds"
@@ -519,7 +525,7 @@ GenerateCurrentExperiment() {
     generated_topologies+=("$topology")
 
     local write_fn="LauncherWriteJob_${_system}"
-    "$write_fn" "$job_script" "$cmd_file" "$job_name" "$nodes" "$mpis" "$threads" "$timelimit" "$cmd_count"
+    "$write_fn" "$job_script" "$cmd_file" "$launcher_job_name" "$nodes" "$mpis" "$threads" "$timelimit" "$cmd_count"
     chmod +x "$job_script"
 
     local dependency_key=""

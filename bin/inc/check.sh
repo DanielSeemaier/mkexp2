@@ -74,6 +74,7 @@ _CheckValidateKnownProperties() {
     slurm.use_array
     slurm.array.max_parallel
     slurm.call_wrapper
+    slurm.minimal_header
     local.call_wrapper
   )
   for key in "${core_run_keys[@]}"; do
@@ -167,6 +168,12 @@ CheckCurrentExperiment() {
         call_wrapper=$(ResolveRunProperty "slurm.call_wrapper" "srun")
         if [[ "$call_wrapper" != "srun" && "$call_wrapper" != "taskset" ]]; then
           CheckError "invalid slurm.call_wrapper '$call_wrapper' (expected 'srun' or 'taskset')"
+        fi
+
+        local minimal_header=""
+        minimal_header=$(ResolveRunProperty "slurm.minimal_header" "false")
+        if [[ "$minimal_header" != "true" && "$minimal_header" != "false" ]]; then
+          CheckError "invalid slurm.minimal_header '$minimal_header' (expected 'true' or 'false')"
         fi
         ;;
       local)

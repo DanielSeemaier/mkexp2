@@ -90,6 +90,7 @@ mkexp2 describe-system slurm
 System local
 Property slurm.partition cpuonly
 Property slurm.call_wrapper srun
+Property slurm.minimal_header false
 # For local launcher:
 # Property local.call_wrapper taskset
 SystemProperty slurm.qos normal
@@ -158,6 +159,9 @@ Example:
   - `Property slurm.call_wrapper srun|taskset` (default: `srun`)
   - `Property local.call_wrapper taskset|none` (default: `taskset`)
   - `taskset` expands to `taskset -c 0-<nproc-1> <cmd>`
+- Slurm header controls:
+  - `Property slurm.minimal_header true|false` (default: `false`)
+  - when `true`, Slurm run jobs only emit `--job-name` and `--partition` (plus `--array` if applicable)
 - No timelimit is applied by default.
   - Set `Property timelimit <DD:HH:MM:SS|HH:MM:SS>` to add a Slurm job timelimit.
   - Set `Property timelimit.per_instance <DD:HH:MM:SS|HH:MM:SS>` to wrap each run with `timeout`.

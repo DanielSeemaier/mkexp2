@@ -8,6 +8,7 @@ LauncherDefaults_slurm() {
   SetSystemDefault "slurm.use_array" "false"
   SetSystemDefault "slurm.array.max_parallel" "32"
   SetSystemDefault "slurm.call_wrapper" "srun"
+  SetSystemDefault "slurm.minimal_header" "false"
 }
 
 LauncherWrapCommand_slurm() {
@@ -59,6 +60,7 @@ LauncherWriteJob_slurm() {
   local constraint=""
   local use_array=""
   local max_parallel=""
+  local minimal_header=""
 
   partition=$(ResolveRunProperty "slurm.partition" "default")
   qos=$(ResolveRunProperty "slurm.qos" "")
@@ -66,29 +68,35 @@ LauncherWriteJob_slurm() {
   constraint=$(ResolveRunProperty "slurm.constraint" "")
   use_array=$(ResolveRunProperty "slurm.use_array" "false")
   max_parallel=$(ResolveRunProperty "slurm.array.max_parallel" "32")
+  minimal_header=$(ResolveRunProperty "slurm.minimal_header" "false")
 
   cat > "$job_script" <<SCRIPT
 #!/usr/bin/env zsh
 #SBATCH --job-name=${job_name}
+#SBATCH --partition=${partition}
+SCRIPT
+
+  if [[ "$minimal_header" != "true" ]]; then
+    cat >> "$job_script" <<SCRIPT
 #SBATCH --nodes=${nodes}
 #SBATCH --ntasks=${total_tasks}
 #SBATCH --ntasks-per-node=${mpis}
 #SBATCH --cpus-per-task=${threads}
-#SBATCH --partition=${partition}
 SCRIPT
 
-  if [[ -n "$timelimit" ]]; then
-    echo "#SBATCH --time=$timelimit" >> "$job_script"
-  fi
+    if [[ -n "$timelimit" ]]; then
+      echo "#SBATCH --time=$timelimit" >> "$job_script"
+    fi
 
-  if [[ -n "$qos" ]]; then
-    echo "#SBATCH --qos=$qos" >> "$job_script"
-  fi
-  if [[ -n "$account" ]]; then
-    echo "#SBATCH --account=$account" >> "$job_script"
-  fi
-  if [[ -n "$constraint" ]]; then
-    echo "#SBATCH --constraint=$constraint" >> "$job_script"
+    if [[ -n "$qos" ]]; then
+      echo "#SBATCH --qos=$qos" >> "$job_script"
+    fi
+    if [[ -n "$account" ]]; then
+      echo "#SBATCH --account=$account" >> "$job_script"
+    fi
+    if [[ -n "$constraint" ]]; then
+      echo "#SBATCH --constraint=$constraint" >> "$job_script"
+    fi
   fi
 
   if [[ "$use_array" == "true" && "$cmd_count" -gt 1 ]]; then
