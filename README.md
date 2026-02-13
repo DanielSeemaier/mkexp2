@@ -132,6 +132,8 @@ Example:
 - `timelimit.per_instance` maps to `timeout` seconds in generated commands.
 - Install command output is concise by default and writes per-command logs to:
   `logs/install/local/<run-id>/commands/`
+- Use `mkexp2 ... --verbose` (or `-v`) to stream full stdout/stderr of each
+  command with prefixed, readable output.
 - On install failures, `mkexp2` prints the failing command log inline.
 - Build parallelism defaults to all available cores (`cmake --parallel`).
 - To limit build cores, pass a CLI option:

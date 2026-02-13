@@ -13,6 +13,7 @@ Commands:
   help      Show this help
 
 Options:
+  -v, --verbose              Stream full command output while running
   -j, --build-max-cores N    Limit build parallelism to N cores
   --list-systems             List supported values for `System ...`
   --list-partitioners        List available partitioner plugin names
@@ -215,6 +216,10 @@ ParseCli() {
           exit 1
         fi
         MKEXP2_BUILD_MAX_CORES="$1"
+        shift
+        ;;
+      -v|--verbose)
+        MKEXP2_RUN_VERBOSE=1
         shift
         ;;
       -j*)

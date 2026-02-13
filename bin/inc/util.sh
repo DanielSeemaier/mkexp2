@@ -161,8 +161,19 @@ Run() {
   if (( MKEXP2_RUN_VERBOSE )); then
     _UiTag run
     echo "  $MKEXP2_UI_TAG $cmd_display"
-    "$@"
-    return
+    set +e
+    "$@" 2>&1 | sed "s/^/    ${MKEXP2_UI_DIM}|${MKEXP2_UI_RESET} /"
+    local rc=${pipestatus[1]}
+    set -e
+
+    if (( rc == 0 )); then
+      _UiTag ok
+      echo "  $MKEXP2_UI_TAG $label"
+    else
+      _UiTag fail
+      echo "  $MKEXP2_UI_TAG $label (exit $rc)"
+    fi
+    return "$rc"
   fi
 
   PrepareInstallLogDir
