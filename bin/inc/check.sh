@@ -1,5 +1,17 @@
 #!/usr/bin/env zsh
 
+_CheckDivider() {
+  InitUi
+  printf "  %s%s%s\n" "$MKEXP2_UI_DIM" "------------------------------------------------------------" "$MKEXP2_UI_RESET"
+}
+
+_CheckInfoKV() {
+  local key="$1"
+  local value="$2"
+  _UiTag info
+  printf "  %s %-14s %s\n" "$MKEXP2_UI_TAG" "${key}:" "$value"
+}
+
 CheckError() {
   _UiTag fail
   echo "  $MKEXP2_UI_TAG $*"
@@ -31,10 +43,109 @@ _CheckGraphExists() {
   return 1
 }
 
+_CheckValidateKnownProperties() {
+  local -A known_run_keys=()
+  local -A known_algorithm_keys=()
+
+  local key=""
+  local prop_key=""
+  local algorithm=""
+  local base=""
+  local full_key=""
+
+  for key in ${(k)SYSTEM_DEFAULTS}; do
+    key="${key#\"}"
+    key="${key%\"}"
+    known_run_keys["$key"]=1
+  done
+
+  local -a core_run_keys=(
+    timelimit
+    timelimit.per_instance
+    parse.auto
+    parse.slurm.timelimit
+    slurm.install.mode
+    slurm.install.timelimit
+    slurm.dependency
+    slurm.partition
+    slurm.qos
+    slurm.account
+    slurm.constraint
+    slurm.use_array
+    slurm.array.max_parallel
+    slurm.call_wrapper
+    local.call_wrapper
+  )
+  for key in "${core_run_keys[@]}"; do
+    known_run_keys["$key"]=1
+  done
+
+  for full_key in ${(k)PARTITIONER_DEFAULTS}; do
+    full_key="${full_key#\"}"
+    full_key="${full_key%\"}"
+    prop_key="${full_key#*::}"
+    known_algorithm_keys["$prop_key"]=1
+  done
+
+  local -a core_algorithm_keys=(
+    parser
+    build_opts
+    build_options
+    repo_url
+    repo_ref
+    cmake_flags
+    supports_distributed
+    use_openmp_env
+    version
+  )
+  for key in "${core_algorithm_keys[@]}"; do
+    known_algorithm_keys["$key"]=1
+  done
+
+  for key in ${(ok)PROP_GLOBAL}; do
+    key="${key#\"}"
+    key="${key%\"}"
+    if [[ -z "${known_run_keys["$key"]:-}" ]]; then
+      CheckWarn "unknown Property '$key'"
+    fi
+  done
+
+  for key in ${(ok)PROP_SYSTEM}; do
+    key="${key#\"}"
+    key="${key%\"}"
+    if [[ -z "${known_run_keys["$key"]:-}" ]]; then
+      CheckWarn "unknown SystemProperty '$key'"
+    fi
+  done
+
+  for full_key in ${(ok)PROP_ALGORITHM}; do
+    full_key="${full_key#\"}"
+    full_key="${full_key%\"}"
+    algorithm="${full_key%%::*}"
+    prop_key="${full_key#*::}"
+
+    if (( ${_algorithms[(Ie)$algorithm]} == 0 )); then
+      continue
+    fi
+
+    base="${FLAT_ALGO_BASE["$algorithm"]:-}"
+    if [[ -z "$base" ]]; then
+      base=$(GetAlgorithmBase "$algorithm")
+    fi
+
+    if [[ -z "${known_algorithm_keys["$prop_key"]:-}" ]] && [[ -z "${PARTITIONER_DEFAULTS["$base::$prop_key"]:-}" ]]; then
+      CheckWarn "unknown AlgorithmProperty '$prop_key' for '$algorithm' [$base]"
+    fi
+  done
+}
+
 CheckCurrentExperiment() {
   local experiment_display="$1"
   local errors_before="$MKEXP2_CHECK_ERROR_COUNT"
   local warns_before="$MKEXP2_CHECK_WARN_COUNT"
+
+  EchoExperiment "Check: $experiment_display"
+  _CheckDivider
 
   local launcher_file="$MKEXP2_HOME/plugins/launchers/${_system}.sh"
   if [[ ! -f "$launcher_file" ]]; then
@@ -190,16 +301,48 @@ CheckCurrentExperiment() {
     fi
   done
 
+  _CheckValidateKnownProperties
+
   local experiment_errors=$((MKEXP2_CHECK_ERROR_COUNT - errors_before))
   local experiment_warns=$((MKEXP2_CHECK_WARN_COUNT - warns_before))
 
-  EchoStep "Check summary for $experiment_display: errors=$experiment_errors warnings=$experiment_warns"
-  EchoInfo "launcher: $_system"
-  EchoInfo "algorithms: ${#_algorithms[@]} | graphs: ${#_graphs[@]} | topologies: ${#_threads[@]}"
+  local summary_status="PASS"
+  local status_tag="ok"
+  if (( experiment_errors > 0 )); then
+    summary_status="FAIL"
+    status_tag="fail"
+  elif (( experiment_warns > 0 )); then
+    summary_status="WARN"
+    status_tag="warn"
+  fi
+
+  _UiTag "$status_tag"
+  printf "  %s %s\n" "$MKEXP2_UI_TAG" "Summary ($experiment_display): $summary_status"
+  _CheckInfoKV "launcher" "$_system"
+  _CheckInfoKV "algorithms" "${#_algorithms[@]}"
+  _CheckInfoKV "graphs" "${#_graphs[@]}"
+  _CheckInfoKV "topologies" "${#_threads[@]}"
+  _CheckInfoKV "errors" "$experiment_errors"
+  _CheckInfoKV "warnings" "$experiment_warns"
+  _CheckDivider
+  echo ""
 }
 
 FinalizeChecks() {
-  EchoStep "Check totals: errors=$MKEXP2_CHECK_ERROR_COUNT warnings=$MKEXP2_CHECK_WARN_COUNT"
+  local final_status="PASS"
+  local status_tag="ok"
+  if (( MKEXP2_CHECK_ERROR_COUNT > 0 )); then
+    final_status="FAIL"
+    status_tag="fail"
+  elif (( MKEXP2_CHECK_WARN_COUNT > 0 )); then
+    final_status="WARN"
+    status_tag="warn"
+  fi
+
+  _UiTag "$status_tag"
+  printf "%s %s\n" "$MKEXP2_UI_TAG" "Check totals: $final_status"
+  _CheckInfoKV "errors" "$MKEXP2_CHECK_ERROR_COUNT"
+  _CheckInfoKV "warnings" "$MKEXP2_CHECK_WARN_COUNT"
   if (( MKEXP2_CHECK_ERROR_COUNT > 0 )); then
     return 1
   fi
