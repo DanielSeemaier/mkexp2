@@ -1,5 +1,9 @@
 #!/usr/bin/env zsh
 
+LauncherDefaults_local() {
+  SetSystemDefault "local.call_wrapper" "taskset"
+}
+
 LauncherWrapCommand_local() {
   local cmd="$1"
   local nodes="$2"
@@ -17,6 +21,27 @@ LauncherWrapCommand_local() {
   if (( mpis > 1 )); then
     wrapped="mpirun -n $mpis $wrapped"
   fi
+
+  local call_wrapper=""
+  call_wrapper=$(ResolveRunProperty "local.call_wrapper" "taskset")
+  case "$call_wrapper" in
+    taskset)
+      local nproc=$((mpis * threads))
+      if (( nproc <= 0 )); then
+        EchoFatal "invalid topology for taskset wrapper: mpis=$mpis threads=$threads"
+        exit 1
+      fi
+      local cpu_end=$((nproc - 1))
+      wrapped="taskset -c 0-${cpu_end} $wrapped"
+      ;;
+    none)
+      ;;
+    *)
+      EchoFatal "invalid local.call_wrapper '$call_wrapper' (expected 'taskset' or 'none')"
+      exit 1
+      ;;
+  esac
+
   if (( threads > 1 )) && [[ "$use_openmp_env" == "true" ]]; then
     wrapped="OMP_NUM_THREADS=$threads OMP_PROC_BIND=spread OMP_PLACES=threads $wrapped"
   fi

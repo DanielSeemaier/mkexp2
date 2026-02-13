@@ -49,6 +49,22 @@ CheckCurrentExperiment() {
     if ! FunctionExists "$write_fn"; then
       CheckError "launcher $_system is missing $write_fn"
     fi
+
+    local call_wrapper=""
+    case "$_system" in
+      slurm)
+        call_wrapper=$(ResolveRunProperty "slurm.call_wrapper" "srun")
+        if [[ "$call_wrapper" != "srun" && "$call_wrapper" != "taskset" ]]; then
+          CheckError "invalid slurm.call_wrapper '$call_wrapper' (expected 'srun' or 'taskset')"
+        fi
+        ;;
+      local)
+        call_wrapper=$(ResolveRunProperty "local.call_wrapper" "taskset")
+        if [[ "$call_wrapper" != "taskset" && "$call_wrapper" != "none" ]]; then
+          CheckError "invalid local.call_wrapper '$call_wrapper' (expected 'taskset' or 'none')"
+        fi
+        ;;
+    esac
   fi
 
   if (( ${#_algorithms[@]} == 0 )); then

@@ -9,6 +9,8 @@ System local
 Property slurm.partition cpuonly
 Property slurm.use_array true
 Property slurm.array.max_parallel 64
+# Property slurm.call_wrapper srun        # or: taskset
+# Property local.call_wrapper taskset     # or: none
 # Build-core limit is a CLI option, e.g.:
 # mkexp2 install --build-max-cores 16
 # Property timelimit 01:00:00

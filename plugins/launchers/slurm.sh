@@ -7,6 +7,7 @@ LauncherDefaults_slurm() {
   SetSystemDefault "slurm.constraint" ""
   SetSystemDefault "slurm.use_array" "false"
   SetSystemDefault "slurm.array.max_parallel" "32"
+  SetSystemDefault "slurm.call_wrapper" "srun"
 }
 
 LauncherWrapCommand_slurm() {
@@ -17,8 +18,28 @@ LauncherWrapCommand_slurm() {
   local _distributed="$5"
   local _use_openmp_env="$6"
 
-  local total_tasks=$((nodes * mpis))
-  LAUNCHER_WRAPPED_CMD="srun --nodes=$nodes --ntasks=$total_tasks --ntasks-per-node=$mpis --cpus-per-task=$threads --cpu-bind=cores $cmd"
+  local call_wrapper=""
+  call_wrapper=$(ResolveRunProperty "slurm.call_wrapper" "srun")
+
+  case "$call_wrapper" in
+    srun)
+      local total_tasks=$((nodes * mpis))
+      LAUNCHER_WRAPPED_CMD="srun --nodes=$nodes --ntasks=$total_tasks --ntasks-per-node=$mpis --cpus-per-task=$threads --cpu-bind=cores $cmd"
+      ;;
+    taskset)
+      local nproc=$((nodes * mpis * threads))
+      if (( nproc <= 0 )); then
+        EchoFatal "invalid topology for taskset wrapper: nodes=$nodes mpis=$mpis threads=$threads"
+        exit 1
+      fi
+      local cpu_end=$((nproc - 1))
+      LAUNCHER_WRAPPED_CMD="taskset -c 0-${cpu_end} $cmd"
+      ;;
+    *)
+      EchoFatal "invalid slurm.call_wrapper '$call_wrapper' (expected 'srun' or 'taskset')"
+      exit 1
+      ;;
+  esac
 }
 
 LauncherWriteJob_slurm() {

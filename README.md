@@ -89,6 +89,9 @@ mkexp2 describe-system slurm
 ```bash
 System local
 Property slurm.partition cpuonly
+Property slurm.call_wrapper srun
+# For local launcher:
+# Property local.call_wrapper taskset
 SystemProperty slurm.qos normal
 AlgorithmProperty KaMinPar repo_url https://github.com/KaHIP/KaMinPar.git
 Property slurm.install.mode job
@@ -151,6 +154,10 @@ Example:
 - OpenMP env var prefixing (`OMP_NUM_THREADS`, `OMP_PROC_BIND`, `OMP_PLACES`) is opt-in per algorithm via `use_openmp_env`.
   - Default is `false` unless a partitioner plugin sets a default.
   - Override with `AlgorithmProperty <AlgorithmName> use_openmp_env true|false`.
+- Command wrappers are configurable per launcher:
+  - `Property slurm.call_wrapper srun|taskset` (default: `srun`)
+  - `Property local.call_wrapper taskset|none` (default: `taskset`)
+  - `taskset` expands to `taskset -c 0-<nproc-1> <cmd>`
 - No timelimit is applied by default.
   - Set `Property timelimit <DD:HH:MM:SS|HH:MM:SS>` to add a Slurm job timelimit.
   - Set `Property timelimit.per_instance <DD:HH:MM:SS|HH:MM:SS>` to wrap each run with `timeout`.
