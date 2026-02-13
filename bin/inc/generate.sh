@@ -323,6 +323,55 @@ GenerateCurrentExperiment() {
     fi
   fi
 
+  local wrap_fn="LauncherWrapCommand_${_system}"
+  if ! FunctionExists "$wrap_fn"; then
+    EchoFatal "launcher ${_system} is missing $wrap_fn"
+    exit 1
+  fi
+
+  local per_instance_limit=""
+  per_instance_limit=$(ResolveRunProperty "timelimit.per_instance" "$_timelimit_per_instance")
+  local timeout_prefix=""
+  if [[ -n "$per_instance_limit" ]]; then
+    local timeout_seconds=""
+    timeout_seconds=$(ParseTimelimitToSeconds "$per_instance_limit")
+    timeout_prefix="timeout -v ${timeout_seconds}s "
+  fi
+
+  local timelimit=""
+  timelimit=$(ResolveRunProperty "timelimit" "$_timelimit")
+
+  # Precompute algorithm runtime contexts once per experiment.
+  local -A ctx_base=()
+  local -A ctx_binary_path=()
+  local -A ctx_args=()
+  local -A ctx_supports_distributed=()
+  local -A ctx_use_openmp_env=()
+  local -A ctx_invoke_fn=()
+  local -A ctx_log_dir=()
+
+  for algorithm in "${_algorithms[@]}"; do
+    PopulateBuildContext "$algorithm"
+    LoadPartitionerPlugin "$CTX_base"
+
+    local invoke_fn="PartitionerInvoke_${CTX_base}"
+    if ! FunctionExists "$invoke_fn"; then
+      EchoFatal "plugin ${CTX_base} is missing $invoke_fn"
+      exit 1
+    fi
+
+    ctx_base["$algorithm"]="$CTX_base"
+    ctx_binary_path["$algorithm"]="$CTX_binary_path"
+    ctx_args["$algorithm"]="$CTX_args"
+    ctx_supports_distributed["$algorithm"]="$CTX_supports_distributed"
+    ctx_use_openmp_env["$algorithm"]="$CTX_use_openmp_env"
+    ctx_invoke_fn["$algorithm"]="$invoke_fn"
+
+    local log_dir="$PWD/logs/$algorithm/$experiment_label"
+    mkdir -p "$log_dir"
+    ctx_log_dir["$algorithm"]="$log_dir"
+  done
+
   local topology=""
   for topology in "${_threads[@]}"; do
     local nodes="1"
@@ -345,38 +394,19 @@ GenerateCurrentExperiment() {
     local cmd_file="$PWD/jobs/${job_name}.cmds"
     local job_script="$PWD/jobs/${job_name}.sh"
     : > "$cmd_file"
-
-    local per_instance_limit=""
-    per_instance_limit=$(ResolveRunProperty "timelimit.per_instance" "$_timelimit_per_instance")
-    local timeout_prefix=""
-    if [[ -n "$per_instance_limit" ]]; then
-      local timeout_seconds=""
-      timeout_seconds=$(ParseTimelimitToSeconds "$per_instance_limit")
-      timeout_prefix="timeout -v ${timeout_seconds}s "
-    fi
-
-    local wrap_fn="LauncherWrapCommand_${_system}"
-    if ! FunctionExists "$wrap_fn"; then
-      EchoFatal "launcher ${_system} is missing $wrap_fn"
-      exit 1
-    fi
+    local cmd_count=0
+    local cmd_fd=-1
+    exec {cmd_fd}> "$cmd_file"
 
     for algorithm in "${_algorithms[@]}"; do
-      PopulateBuildContext "$algorithm"
-      LoadPartitionerPlugin "$CTX_base"
-      if [[ "$distributed" == "true" && "$CTX_supports_distributed" != "true" ]]; then
+      if [[ "$distributed" == "true" && "${ctx_supports_distributed["$algorithm"]}" != "true" ]]; then
         EchoFatal "$algorithm does not support distributed mode ($topology)"
         exit 1
       fi
 
-      local invoke_fn="PartitionerInvoke_${CTX_base}"
-      if ! FunctionExists "$invoke_fn"; then
-        EchoFatal "plugin ${CTX_base} is missing $invoke_fn"
-        exit 1
-      fi
-
-      local log_dir="$PWD/logs/$algorithm/$experiment_label"
-      mkdir -p "$log_dir"
+      local invoke_fn="${ctx_invoke_fn["$algorithm"]}"
+      local use_openmp_env="${ctx_use_openmp_env["$algorithm"]}"
+      local log_dir="${ctx_log_dir["$algorithm"]}"
 
       local seed=""
       for seed in "${_seeds[@]}"; do
@@ -386,9 +416,9 @@ GenerateCurrentExperiment() {
           for k in "${_ks[@]}"; do
             for graph in "${_graphs[@]}"; do
               RUN_algorithm="$algorithm"
-              RUN_base="$CTX_base"
-              RUN_binary_path="$CTX_binary_path"
-              RUN_args="$CTX_args"
+              RUN_base="${ctx_base["$algorithm"]}"
+              RUN_binary_path="${ctx_binary_path["$algorithm"]}"
+              RUN_args="${ctx_args["$algorithm"]}"
               RUN_graph="$graph"
               RUN_k="$k"
               RUN_epsilon="$epsilon"
@@ -406,17 +436,17 @@ GenerateCurrentExperiment() {
                 raw_cmd=$("$invoke_fn")
               fi
               if [[ -z "$raw_cmd" ]]; then
-                EchoFatal "plugin ${CTX_base} produced an empty invoke command"
+                EchoFatal "plugin ${ctx_base["$algorithm"]} produced an empty invoke command"
                 exit 1
               fi
 
               local wrapped_cmd=""
               LAUNCHER_WRAPPED_CMD=""
-              "$wrap_fn" "$raw_cmd" "$nodes" "$mpis" "$threads" "$distributed" "$CTX_use_openmp_env" >/dev/null
+              "$wrap_fn" "$raw_cmd" "$nodes" "$mpis" "$threads" "$distributed" "$use_openmp_env" >/dev/null
               wrapped_cmd="$LAUNCHER_WRAPPED_CMD"
               if [[ -z "$wrapped_cmd" ]]; then
                 # Backward compatibility: older launchers may still print wrapped commands.
-                wrapped_cmd=$("$wrap_fn" "$raw_cmd" "$nodes" "$mpis" "$threads" "$distributed" "$CTX_use_openmp_env")
+                wrapped_cmd=$("$wrap_fn" "$raw_cmd" "$nodes" "$mpis" "$threads" "$distributed" "$use_openmp_env")
               fi
               if [[ -z "$wrapped_cmd" ]]; then
                 EchoFatal "launcher ${_system} produced an empty wrapped command"
@@ -430,9 +460,10 @@ GenerateCurrentExperiment() {
               local graph_name="${graph:t}"
               local id="${graph_name}__k${k}__s${seed}__e${epsilon}__${topology}"
               local log_file="$log_dir/${id}.log"
-              printf '%s\n' "$wrapped_cmd >> \"$log_file\" 2>&1" >> "$cmd_file"
+              print -r -- "$wrapped_cmd >> \"$log_file\" 2>&1" >&$cmd_fd
 
               total_generated_calls=$((total_generated_calls + 1))
+              cmd_count=$((cmd_count + 1))
               generated_calls_per_algorithm["$algorithm"]=$(( ${generated_calls_per_algorithm["$algorithm"]:-0} + 1 ))
               generated_calls_per_topology["$topology"]=$(( ${generated_calls_per_topology["$topology"]:-0} + 1 ))
             done
@@ -441,16 +472,13 @@ GenerateCurrentExperiment() {
       done
     done
 
-    local cmd_count=""
-    cmd_count=$(wc -l < "$cmd_file" | tr -d ' ')
-    if [[ "$cmd_count" == "0" ]]; then
+    exec {cmd_fd}>&-
+
+    if (( cmd_count == 0 )); then
       rm -f "$cmd_file"
       continue
     fi
     generated_topologies+=("$topology")
-
-    local timelimit=""
-    timelimit=$(ResolveRunProperty "timelimit" "$_timelimit")
 
     local write_fn="LauncherWriteJob_${_system}"
     "$write_fn" "$job_script" "$cmd_file" "$job_name" "$nodes" "$mpis" "$threads" "$timelimit" "$cmd_count"

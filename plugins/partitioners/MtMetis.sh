@@ -114,7 +114,7 @@ PartitionerInvoke_MtMetis() {
     return 1
   fi
 
-  imbalance=$(awk -v e="$RUN_epsilon" 'BEGIN { printf "%.12g", 1 + e }')
+  printf -v imbalance "%.12g" "$((1.0 + RUN_epsilon))"
 
   local verbosity=""
   verbosity=$(PartitionerProperty "verbosity" "medium")
