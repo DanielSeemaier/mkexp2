@@ -106,7 +106,18 @@ DescribePartitioner() {
       continue
     fi
     local prop="${key#${base}::}"
-    default_lines+=("$prop=${PARTITIONER_DEFAULTS["$key"]}")
+    local line="$prop=${PARTITIONER_DEFAULTS["$key"]}"
+    local allowed="${PARTITIONER_PROP_ALLOWED["$key"]:-any}"
+    local when_note="${PARTITIONER_PROP_WHEN["$key"]:-}"
+    if [[ "$allowed" == enum:* ]]; then
+      line+=" | values: ${allowed#enum:} (closed)"
+    else
+      line+=" | values: $allowed"
+    fi
+    if [[ -n "$when_note" ]]; then
+      line+=" | when: $when_note"
+    fi
+    default_lines+=("$line")
   done
 
   if (( ${#default_lines[@]} > 0 )); then
@@ -212,7 +223,18 @@ DescribeSystem() {
   for key in ${(k)SYSTEM_DEFAULTS}; do
     key="${key#\"}"
     key="${key%\"}"
-    default_lines+=("$key=${SYSTEM_DEFAULTS["$key"]}")
+    local line="$key=${SYSTEM_DEFAULTS["$key"]}"
+    local allowed="${SYSTEM_PROP_ALLOWED["$key"]:-any}"
+    local when_note="${SYSTEM_PROP_WHEN["$key"]:-}"
+    if [[ "$allowed" == enum:* ]]; then
+      line+=" | values: ${allowed#enum:} (closed)"
+    else
+      line+=" | values: $allowed"
+    fi
+    if [[ -n "$when_note" ]]; then
+      line+=" | when: $when_note"
+    fi
+    default_lines+=("$line")
   done
 
   if (( ${#default_lines[@]} > 0 )); then

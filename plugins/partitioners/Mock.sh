@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 
 PartitionerDefaults_Mock() {
-  SetPartitionerDefault "Mock" "supports_distributed" "true"
+  SetPartitionerDefault "Mock" "supports_distributed" "true" "enum:true|false"
 }
 
 PartitionerBuild_Mock() {

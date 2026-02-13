@@ -1,13 +1,13 @@
 #!/usr/bin/env zsh
 
 PartitionerDefaults_KaMinPar() {
-  SetPartitionerDefault "KaMinPar" "repo_url" "https://github.com/KaHIP/KaMinPar.git"
-  SetPartitionerDefault "KaMinPar" "repo_ref" "main"
-  SetPartitionerDefault "KaMinPar" "cmake_flags" ""
-  SetPartitionerDefault "KaMinPar" "supports_distributed" "false"
-  SetPartitionerDefault "KaMinPar" "use_openmp_env" "false"
-  SetPartitionerDefault "KaMinPar" "build_target" "KaMinParApp"
-  SetPartitionerDefault "KaMinPar" "binary" "KaMinPar"
+  SetPartitionerDefault "KaMinPar" "repo_url" "https://github.com/KaHIP/KaMinPar.git" "any"
+  SetPartitionerDefault "KaMinPar" "repo_ref" "main" "any"
+  SetPartitionerDefault "KaMinPar" "cmake_flags" "" "any"
+  SetPartitionerDefault "KaMinPar" "supports_distributed" "false" "enum:true|false"
+  SetPartitionerDefault "KaMinPar" "use_openmp_env" "false" "enum:true|false"
+  SetPartitionerDefault "KaMinPar" "build_target" "KaMinParApp" "any"
+  SetPartitionerDefault "KaMinPar" "binary" "KaMinPar" "any"
 }
 
 PartitionerFetch_KaMinPar() {

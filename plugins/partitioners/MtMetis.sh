@@ -18,11 +18,11 @@ _MtMetisResolveVersion() {
 }
 
 PartitionerDefaults_MtMetis() {
-  SetPartitionerDefault "MtMetis" "supports_distributed" "false"
-  SetPartitionerDefault "MtMetis" "use_openmp_env" "false"
-  SetPartitionerDefault "MtMetis" "tar_url" ""
-  SetPartitionerDefault "MtMetis" "binary" "mtmetis"
-  SetPartitionerDefault "MtMetis" "verbosity" "medium"
+  SetPartitionerDefault "MtMetis" "supports_distributed" "false" "enum:true|false"
+  SetPartitionerDefault "MtMetis" "use_openmp_env" "false" "enum:true|false"
+  SetPartitionerDefault "MtMetis" "tar_url" "" "any"
+  SetPartitionerDefault "MtMetis" "binary" "mtmetis" "any"
+  SetPartitionerDefault "MtMetis" "verbosity" "medium" "any"
 }
 
 PartitionerAliases_MtMetis() {

@@ -4,13 +4,21 @@ SetPartitionerDefault() {
   local base="$1"
   local key="$2"
   local value="$3"
+  local allowed="${4:-any}"
+  local when_note="${5:-}"
   PARTITIONER_DEFAULTS["$base::$key"]="$value"
+  PARTITIONER_PROP_ALLOWED["$base::$key"]="$allowed"
+  PARTITIONER_PROP_WHEN["$base::$key"]="$when_note"
 }
 
 SetSystemDefault() {
   local key="$1"
   local value="$2"
+  local allowed="${3:-any}"
+  local when_note="${4:-}"
   SYSTEM_DEFAULTS["$key"]="$value"
+  SYSTEM_PROP_ALLOWED["$key"]="$allowed"
+  SYSTEM_PROP_WHEN["$key"]="$when_note"
 }
 
 ResolveRunProperty() {

@@ -1,14 +1,14 @@
 #!/usr/bin/env zsh
 
 LauncherDefaults_slurm() {
-  SetSystemDefault "slurm.partition" "default"
-  SetSystemDefault "slurm.qos" ""
-  SetSystemDefault "slurm.account" ""
-  SetSystemDefault "slurm.constraint" ""
-  SetSystemDefault "slurm.use_array" "false"
-  SetSystemDefault "slurm.array.max_parallel" "32"
-  SetSystemDefault "slurm.call_wrapper" "srun"
-  SetSystemDefault "slurm.minimal_header" "false"
+  SetSystemDefault "slurm.partition" "default" "any"
+  SetSystemDefault "slurm.qos" "" "any" "used when slurm.minimal_header=false"
+  SetSystemDefault "slurm.account" "" "any" "used when slurm.minimal_header=false"
+  SetSystemDefault "slurm.constraint" "" "any" "used when slurm.minimal_header=false"
+  SetSystemDefault "slurm.use_array" "false" "enum:true|false"
+  SetSystemDefault "slurm.array.max_parallel" "32" "integer>=1" "used when slurm.use_array=true and command count > 1"
+  SetSystemDefault "slurm.call_wrapper" "srun" "enum:srun|taskset"
+  SetSystemDefault "slurm.minimal_header" "false" "enum:true|false"
 }
 
 LauncherWrapCommand_slurm() {

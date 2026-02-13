@@ -141,6 +141,12 @@ Launcher plugin `Y` should define:
 - `LauncherWrapCommand_Y` (required; set `LAUNCHER_WRAPPED_CMD`)
 - `LauncherWriteJob_Y` (required)
 
+Property defaults can also declare value domains in-plugin:
+- `SetSystemDefault "<key>" "<default>" "<allowed-values>" ["<when-note>"]`
+- `SetPartitionerDefault "<base>" "<key>" "<default>" "<allowed-values>" ["<when-note>"]`
+- closed set: `enum:a|b|c`; open set: `any` (or descriptive text like `integer>=1`)
+- `mkexp2 describe` prints these value domains, and `mkexp2 check` enforces closed sets.
+
 Inside `PartitionerFetch_*`, `PartitionerBuild_*`, and `PartitionerInvoke_*`, use:
 - `PartitionerProperty <key> [fallback]`
 

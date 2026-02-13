@@ -1,15 +1,15 @@
 #!/usr/bin/env zsh
 
 PartitionerDefaults_MtKaHIP() {
-  SetPartitionerDefault "MtKaHIP" "repo_url" "https://github.com/DanielSeemaier/mt-KaHIP.git"
-  SetPartitionerDefault "MtKaHIP" "repo_ref" "main"
-  SetPartitionerDefault "MtKaHIP" "cmake_flags" ""
-  SetPartitionerDefault "MtKaHIP" "supports_distributed" "false"
-  SetPartitionerDefault "MtKaHIP" "use_openmp_env" "false"
-  SetPartitionerDefault "MtKaHIP" "binary" "mtkahip"
-  SetPartitionerDefault "MtKaHIP" "preconfiguration" "socialparallel"
-  SetPartitionerDefault "MtKaHIP" "seed_flag" "--seed"
-  SetPartitionerDefault "MtKaHIP" "epsilon_flag" "--imbalance"
+  SetPartitionerDefault "MtKaHIP" "repo_url" "https://github.com/DanielSeemaier/mt-KaHIP.git" "any"
+  SetPartitionerDefault "MtKaHIP" "repo_ref" "main" "any"
+  SetPartitionerDefault "MtKaHIP" "cmake_flags" "" "any"
+  SetPartitionerDefault "MtKaHIP" "supports_distributed" "false" "enum:true|false"
+  SetPartitionerDefault "MtKaHIP" "use_openmp_env" "false" "enum:true|false"
+  SetPartitionerDefault "MtKaHIP" "binary" "mtkahip" "any"
+  SetPartitionerDefault "MtKaHIP" "preconfiguration" "socialparallel" "enum:socialparallel|multitrysocialparallel"
+  SetPartitionerDefault "MtKaHIP" "seed_flag" "--seed" "any"
+  SetPartitionerDefault "MtKaHIP" "epsilon_flag" "--imbalance" "any"
 }
 
 PartitionerAliases_MtKaHIP() {

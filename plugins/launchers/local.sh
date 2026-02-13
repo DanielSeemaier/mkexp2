@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 
 LauncherDefaults_local() {
-  SetSystemDefault "local.call_wrapper" "taskset"
+  SetSystemDefault "local.call_wrapper" "taskset" "enum:taskset|none"
 }
 
 LauncherWrapCommand_local() {

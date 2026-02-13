@@ -43,6 +43,29 @@ _CheckGraphExists() {
   return 1
 }
 
+_CheckValidateAllowedValue() {
+  local label="$1"
+  local value="$2"
+  local allowed="$3"
+
+  if [[ "$allowed" != enum:* ]]; then
+    return 0
+  fi
+
+  local choices="${allowed#enum:}"
+  local -a options=("${(@s:|:)choices}")
+
+  local option=""
+  for option in "${options[@]}"; do
+    if [[ "$value" == "$option" ]]; then
+      return 0
+    fi
+  done
+
+  CheckError "invalid $label '$value' (expected one of: $choices)"
+  return 0
+}
+
 _CheckValidateKnownProperties() {
   local -A known_run_keys=()
   local -A known_algorithm_keys=()
@@ -108,6 +131,11 @@ _CheckValidateKnownProperties() {
     key="${key%\"}"
     if [[ -z "${known_run_keys["$key"]:-}" ]]; then
       CheckWarn "unknown Property '$key'"
+      continue
+    fi
+
+    if [[ -n "${SYSTEM_PROP_ALLOWED["$key"]:-}" ]]; then
+      _CheckValidateAllowedValue "Property '$key'" "${PROP_GLOBAL["$key"]}" "${SYSTEM_PROP_ALLOWED["$key"]}"
     fi
   done
 
@@ -116,6 +144,11 @@ _CheckValidateKnownProperties() {
     key="${key%\"}"
     if [[ -z "${known_run_keys["$key"]:-}" ]]; then
       CheckWarn "unknown SystemProperty '$key'"
+      continue
+    fi
+
+    if [[ -n "${SYSTEM_PROP_ALLOWED["$key"]:-}" ]]; then
+      _CheckValidateAllowedValue "SystemProperty '$key'" "${PROP_SYSTEM["$key"]}" "${SYSTEM_PROP_ALLOWED["$key"]}"
     fi
   done
 
@@ -136,6 +169,14 @@ _CheckValidateKnownProperties() {
 
     if [[ -z "${known_algorithm_keys["$prop_key"]:-}" ]] && [[ -z "${PARTITIONER_DEFAULTS["$base::$prop_key"]:-}" ]]; then
       CheckWarn "unknown AlgorithmProperty '$prop_key' for '$algorithm' [$base]"
+      continue
+    fi
+
+    if [[ -n "${PARTITIONER_PROP_ALLOWED["$base::$prop_key"]:-}" ]]; then
+      _CheckValidateAllowedValue \
+        "AlgorithmProperty '$prop_key' for '$algorithm' [$base]" \
+        "${PROP_ALGORITHM["$full_key"]}" \
+        "${PARTITIONER_PROP_ALLOWED["$base::$prop_key"]}"
     fi
   done
 }
@@ -162,27 +203,6 @@ CheckCurrentExperiment() {
       CheckError "launcher $_system is missing $write_fn"
     fi
 
-    local call_wrapper=""
-    case "$_system" in
-      slurm)
-        call_wrapper=$(ResolveRunProperty "slurm.call_wrapper" "srun")
-        if [[ "$call_wrapper" != "srun" && "$call_wrapper" != "taskset" ]]; then
-          CheckError "invalid slurm.call_wrapper '$call_wrapper' (expected 'srun' or 'taskset')"
-        fi
-
-        local minimal_header=""
-        minimal_header=$(ResolveRunProperty "slurm.minimal_header" "false")
-        if [[ "$minimal_header" != "true" && "$minimal_header" != "false" ]]; then
-          CheckError "invalid slurm.minimal_header '$minimal_header' (expected 'true' or 'false')"
-        fi
-        ;;
-      local)
-        call_wrapper=$(ResolveRunProperty "local.call_wrapper" "taskset")
-        if [[ "$call_wrapper" != "taskset" && "$call_wrapper" != "none" ]]; then
-          CheckError "invalid local.call_wrapper '$call_wrapper' (expected 'taskset' or 'none')"
-        fi
-        ;;
-    esac
   fi
 
   if (( ${#_algorithms[@]} == 0 )); then
