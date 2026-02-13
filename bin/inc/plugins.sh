@@ -143,17 +143,9 @@ DescribePartitioner() {
       echo "    - $alias_name"
 
       local alias_args="${ALG_DEF_ARGS["$alias_name"]:-}"
-      local alias_version="${ALG_DEF_VERSION["$alias_name"]:-}"
-      local alias_build="${ALG_DEF_BUILD["$alias_name"]:-}"
 
       if [[ -n "$alias_args" ]]; then
         echo "      args: $alias_args"
-      fi
-      if [[ -n "$alias_version" ]]; then
-        echo "      version: $alias_version"
-      fi
-      if [[ -n "$alias_build" ]]; then
-        echo "      build: $alias_build"
       fi
 
       local -a alias_props=()

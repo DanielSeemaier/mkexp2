@@ -30,30 +30,16 @@ DefineAlgorithm() {
 
   ALG_DEF_BASE["$name"]="$base"
   ALG_DEF_ARGS["$name"]="$*"
-  ALG_DEF_VERSION["$name"]=""
-  ALG_DEF_BUILD["$name"]=""
 }
 
 DefineAlgorithmVersion() {
-  local name="$1"
-  local base="$2"
-  local version="$3"
-
-  ALG_DEF_BASE["$name"]="$base"
-  ALG_DEF_ARGS["$name"]=""
-  ALG_DEF_VERSION["$name"]="$version"
-  ALG_DEF_BUILD["$name"]=""
+  EchoFatal "DefineAlgorithmVersion is removed. Use DefineAlgorithm + AlgorithmProperty <name> repo_ref <ref>."
+  exit 1
 }
 
 DefineAlgorithmBuild() {
-  local name="$1"
-  local base="$2"
-  shift 2
-
-  ALG_DEF_BASE["$name"]="$base"
-  ALG_DEF_ARGS["$name"]=""
-  ALG_DEF_VERSION["$name"]=""
-  ALG_DEF_BUILD["$name"]="$*"
+  EchoFatal "DefineAlgorithmBuild is removed. Use DefineAlgorithm + AlgorithmProperty <name> build_opts <flags>."
+  exit 1
 }
 
 Algorithms() {
@@ -126,55 +112,22 @@ GetAlgorithmArgs() {
   fi
 }
 
-GetAlgorithmVersion() {
-  local algorithm="$1"
-  if [[ -n "${ALG_DEF_BASE["$algorithm"]:-}" ]]; then
-    if [[ -n "${ALG_DEF_VERSION["$algorithm"]:-}" ]]; then
-      echo "${ALG_DEF_VERSION["$algorithm"]}"
-    else
-      GetAlgorithmVersion "${ALG_DEF_BASE["$algorithm"]}"
-    fi
-  else
-    echo "latest"
-  fi
-}
-
-GetAlgorithmBuildOptions() {
-  local algorithm="$1"
-  if [[ -n "${ALG_DEF_BASE["$algorithm"]:-}" ]]; then
-    local inherited
-    inherited=$(GetAlgorithmBuildOptions "${ALG_DEF_BASE["$algorithm"]}")
-    echo "${ALG_DEF_BUILD["$algorithm"]:-} $inherited"
-  else
-    echo ""
-  fi
-}
-
 FlattenAlgorithmHierarchy() {
   FLAT_ALGO_BASE=()
   FLAT_ALGO_ARGS=()
-  FLAT_ALGO_VERSION=()
-  FLAT_ALGO_BUILD=()
 
   local algorithm=""
   for algorithm in "${_algorithms[@]}"; do
     local base=""
     local args=""
-    local version=""
-    local build_opts=""
 
     base=$(GetAlgorithmBase "$algorithm")
     args=$(GetAlgorithmArgs "$algorithm")
-    version=$(GetAlgorithmVersion "$algorithm")
-    build_opts=$(GetAlgorithmBuildOptions "$algorithm")
 
     # Normalize whitespace once so we don't rework these strings during command generation.
     args="${(j: :)=args}"
-    build_opts="${(j: :)=build_opts}"
 
     FLAT_ALGO_BASE["$algorithm"]="$base"
     FLAT_ALGO_ARGS["$algorithm"]="$args"
-    FLAT_ALGO_VERSION["$algorithm"]="$version"
-    FLAT_ALGO_BUILD["$algorithm"]="$build_opts"
   done
 }

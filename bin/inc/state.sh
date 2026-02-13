@@ -23,12 +23,8 @@ _system="local"
 # User-facing experiment DSL state.
 typeset -A ALG_DEF_BASE=()
 typeset -A ALG_DEF_ARGS=()
-typeset -A ALG_DEF_VERSION=()
-typeset -A ALG_DEF_BUILD=()
 typeset -A FLAT_ALGO_BASE=()
 typeset -A FLAT_ALGO_ARGS=()
-typeset -A FLAT_ALGO_VERSION=()
-typeset -A FLAT_ALGO_BUILD=()
 
 typeset -a _algorithms=()
 typeset -a _threads=()
@@ -104,12 +100,8 @@ ResetExperiment() {
 
   ALG_DEF_BASE=()
   ALG_DEF_ARGS=()
-  ALG_DEF_VERSION=()
-  ALG_DEF_BUILD=()
   FLAT_ALGO_BASE=()
   FLAT_ALGO_ARGS=()
-  FLAT_ALGO_VERSION=()
-  FLAT_ALGO_BUILD=()
 
   _algorithms=()
   _threads=()

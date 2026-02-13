@@ -20,9 +20,10 @@ Property slurm.array.max_parallel 64
 # AlgorithmProperty KaMinPar parser ./parsers/KaMinParCustom.awk
 
 # Example: override an algorithm repository and ref from the Experiment file.
-# DefineAlgorithmVersion KaMinPar-Dev KaMinPar feature/my-branch
+# DefineAlgorithm KaMinPar-Dev KaMinPar
 # AlgorithmProperty KaMinPar-Dev repo_url https://github.com/KaHIP/KaMinPar.git
 # AlgorithmProperty KaMinPar-Dev repo_ref origin/feature/my-branch
+# AlgorithmProperty KaMinPar-Dev build_opts -DCMAKE_BUILD_TYPE=Debug
 # AlgorithmProperty KaMinPar-Dev cmake_flags -DKAMINPAR_64BIT_IDS=On
 
 ExperimentBaseline() {

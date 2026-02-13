@@ -91,8 +91,10 @@ Property slurm.install.mode job
 Property slurm.install.timelimit 02:00:00
 Property parse.auto true
 
-DefineAlgorithmVersion KaMinPar-Dev KaMinPar origin/my/branch
-DefineAlgorithmBuild KaMinPar-Dbg KaMinPar -DCMAKE_BUILD_TYPE=Debug
+DefineAlgorithm KaMinPar-Dev KaMinPar
+AlgorithmProperty KaMinPar-Dev repo_ref origin/my/branch
+DefineAlgorithm KaMinPar-Dbg KaMinPar
+AlgorithmProperty KaMinPar-Dbg build_opts -DCMAKE_BUILD_TYPE=Debug
 DefineAlgorithm KaMinPar-FM KaMinPar -P fm
 
 ExperimentBaseline() {

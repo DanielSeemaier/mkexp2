@@ -10,22 +10,6 @@ PopulateBuildContext() {
   fi
   LoadPartitionerPlugin "$base"
 
-  local version=""
-  version="${FLAT_ALGO_VERSION["$algorithm"]:-}"
-  if [[ -z "$version" ]]; then
-    version=$(GetAlgorithmVersion "$algorithm")
-  fi
-  local default_ref="$version"
-  if [[ "$default_ref" == "latest" ]]; then
-    default_ref="main"
-  fi
-
-  local inherited_build=""
-  inherited_build="${FLAT_ALGO_BUILD["$algorithm"]:-}"
-  if [[ -z "$inherited_build" ]]; then
-    inherited_build=$(GetAlgorithmBuildOptions "$algorithm")
-    inherited_build="${(j: :)=inherited_build}"
-  fi
   local inherited_args=""
   inherited_args="${FLAT_ALGO_ARGS["$algorithm"]:-}"
   if [[ -z "$inherited_args" ]]; then
@@ -36,9 +20,12 @@ PopulateBuildContext() {
   CTX_algorithm="$algorithm"
   CTX_base="$base"
   CTX_args="$inherited_args"
-  CTX_build_opts="$inherited_build"
+  CTX_build_opts="$(ResolveAlgorithmProperty "$algorithm" build_opts "$(ResolveAlgorithmProperty "$algorithm" build_options "")")"
+  if [[ -n "$CTX_build_opts" ]]; then
+    CTX_build_opts="${(j: :)=CTX_build_opts}"
+  fi
   CTX_repo_url="$(ResolveAlgorithmProperty "$algorithm" repo_url "")"
-  CTX_repo_ref="$(ResolveAlgorithmProperty "$algorithm" repo_ref "$default_ref")"
+  CTX_repo_ref="$(ResolveAlgorithmProperty "$algorithm" repo_ref "main")"
   CTX_cmake_flags="$(ResolveAlgorithmProperty "$algorithm" cmake_flags "")"
   CTX_supports_distributed="$(ResolveAlgorithmProperty "$algorithm" supports_distributed "false")"
   CTX_use_openmp_env="$(ResolveAlgorithmProperty "$algorithm" use_openmp_env "false")"
