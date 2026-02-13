@@ -24,6 +24,10 @@ Requirements:
   - `Mock` (local smoke tests)
   - `KaMinPar`
   - `dKaMinPar`
+  - `Metis`
+  - `ParMETIS`
+  - `KaHIP`
+  - `ParHIP`
   - `MtKaHIP`
   - `MtMetis`
 
