@@ -269,6 +269,38 @@ BuildInstanceId() {
   echo "${graph_name}__k${k}__s${seed}__e${epsilon}__${topology}"
 }
 
+_GenerateFormatList() {
+  local max_items="$1"
+  shift
+
+  local -a items=("$@")
+  local count=${#items[@]}
+  if (( count == 0 )); then
+    echo "(none)"
+    return
+  fi
+
+  if (( count <= max_items )); then
+    echo "${(j:, :)items}"
+    return
+  fi
+
+  local -a head=("${(@)items[1,$max_items]}")
+  echo "${(j:, :)head} (+$((count - max_items)) more)"
+}
+
+_GenerateInfoKV() {
+  local key="$1"
+  local value="$2"
+  _UiTag info
+  printf "  %s %-14s %s\n" "$MKEXP2_UI_TAG" "${key}:" "$value"
+}
+
+_GenerateSummaryDivider() {
+  InitUi
+  printf "  %s%s%s\n" "$MKEXP2_UI_DIM" "------------------------------------------------------------" "$MKEXP2_UI_RESET"
+}
+
 GenerateCurrentExperiment() {
   local experiment_name="$1"
   local experiment_label=""
@@ -501,13 +533,13 @@ GenerateCurrentExperiment() {
   local -a calls_per_algorithm_parts=()
   local -a calls_per_topology_parts=()
 
-  algorithms_summary="${(j:, :)algorithm_labels}"
-  partitioners_summary="${(j:, :)partitioners}"
-  graphs_summary="${(j:, :)graph_names}"
-  ks_summary="${(j:, :)_ks}"
-  seeds_summary="${(j:, :)_seeds}"
-  epsilons_summary="${(j:, :)_epsilons}"
-  topologies_summary="${(j:, :)generated_topologies}"
+  algorithms_summary=$(_GenerateFormatList 5 "${algorithm_labels[@]}")
+  partitioners_summary=$(_GenerateFormatList 6 "${partitioners[@]}")
+  graphs_summary=$(_GenerateFormatList 8 "${graph_names[@]}")
+  ks_summary=$(_GenerateFormatList 8 "${_ks[@]}")
+  seeds_summary=$(_GenerateFormatList 8 "${_seeds[@]}")
+  epsilons_summary=$(_GenerateFormatList 8 "${_epsilons[@]}")
+  topologies_summary=$(_GenerateFormatList 8 "${generated_topologies[@]}")
 
   for algorithm in "${_algorithms[@]}"; do
     calls_per_algorithm_parts+=("$algorithm=${generated_calls_per_algorithm["$algorithm"]:-0}")
@@ -518,15 +550,19 @@ GenerateCurrentExperiment() {
   done
 
   EchoStep "Generated experiment summary: $experiment_display"
-  EchoInfo "launcher: $_system"
-  EchoInfo "algorithms: $algorithms_summary"
-  EchoInfo "partitioners: $partitioners_summary"
-  EchoInfo "graphs: $graphs_summary"
-  EchoInfo "ks: $ks_summary | epsilons: $epsilons_summary | seeds: $seeds_summary"
-  EchoInfo "topologies: $topologies_summary"
-  EchoInfo "calls: $total_generated_calls total (${#generated_topologies[@]} job script(s))"
-  EchoInfo "calls per algorithm: ${(j:, :)calls_per_algorithm_parts}"
-  EchoInfo "calls per topology: ${(j:, :)calls_per_topology_parts}"
+  _GenerateSummaryDivider
+  _GenerateInfoKV "launcher" "$_system"
+  _GenerateInfoKV "calls" "$total_generated_calls total (${#generated_topologies[@]} job script(s))"
+  _GenerateInfoKV "algorithms" "$algorithms_summary"
+  _GenerateInfoKV "partitioners" "$partitioners_summary"
+  _GenerateInfoKV "graphs" "$graphs_summary"
+  _GenerateInfoKV "ks" "$ks_summary"
+  _GenerateInfoKV "epsilons" "$epsilons_summary"
+  _GenerateInfoKV "seeds" "$seeds_summary"
+  _GenerateInfoKV "topologies" "$topologies_summary"
+  _GenerateInfoKV "per algorithm" "$(_GenerateFormatList 8 "${calls_per_algorithm_parts[@]}")"
+  _GenerateInfoKV "per topology" "$(_GenerateFormatList 8 "${calls_per_topology_parts[@]}")"
+  _GenerateSummaryDivider
 }
 
 FinalizeGenerateOutputs() {
