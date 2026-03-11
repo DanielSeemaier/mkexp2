@@ -318,11 +318,18 @@ ShellQuote() {
 PartitionerProperty() {
   local key="$1"
   local fallback="${2:-}"
+  local algorithm=""
 
-  if [[ -z "$CTX_algorithm" ]]; then
-    EchoFatal "PartitionerProperty called without an active CTX_algorithm"
+  if [[ -n "$MKEXP2_ACTIVE_ALGORITHM" ]]; then
+    algorithm="$MKEXP2_ACTIVE_ALGORITHM"
+  elif [[ -n "$RUN_algorithm" ]]; then
+    algorithm="$RUN_algorithm"
+  elif [[ -n "$CTX_algorithm" ]]; then
+    algorithm="$CTX_algorithm"
+  else
+    EchoFatal "PartitionerProperty called without an active algorithm context"
     exit 1
   fi
 
-  ResolveAlgorithmProperty "$CTX_algorithm" "$key" "$fallback"
+  ResolveAlgorithmProperty "$algorithm" "$key" "$fallback"
 }

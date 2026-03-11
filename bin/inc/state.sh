@@ -63,6 +63,7 @@ MKEXP2_INSTALL_LOG_DIR="${MKEXP2_INSTALL_LOG_DIR:-}"
 MKEXP2_RUN_VERBOSE="${MKEXP2_RUN_VERBOSE:-0}"
 MKEXP2_INSTALL_COUNTER=0
 MKEXP2_LAST_INSTALL_LOG_FILE=""
+MKEXP2_ACTIVE_ALGORITHM=""
 MKEXP2_SLURM_INSTALL_JOB_REQUIRED=0
 MKEXP2_SLURM_INSTALL_JOB_SCRIPT=""
 MKEXP2_SLURM_INSTALL_JOB_KEY="__install__"
@@ -132,6 +133,34 @@ ResetExperiment() {
 
   _timelimit=""
   _timelimit_per_instance=""
+  MKEXP2_ACTIVE_ALGORITHM=""
+
+  CTX_algorithm=""
+  CTX_base=""
+  CTX_args=""
+  CTX_build_opts=""
+  CTX_repo_url=""
+  CTX_repo_ref=""
+  CTX_cmake_flags=""
+  CTX_supports_distributed=""
+  CTX_use_openmp_env=""
+  CTX_build_max_cores=""
+  CTX_build_key=""
+  CTX_source_dir=""
+  CTX_binary_path=""
+
+  RUN_algorithm=""
+  RUN_base=""
+  RUN_binary_path=""
+  RUN_args=""
+  RUN_graph=""
+  RUN_k=""
+  RUN_epsilon=""
+  RUN_seed=""
+  RUN_nodes=""
+  RUN_mpis=""
+  RUN_threads=""
+
   PARTITIONER_INVOKE_CMD=""
   LAUNCHER_WRAPPED_CMD=""
 

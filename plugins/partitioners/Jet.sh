@@ -28,15 +28,21 @@ PartitionerInvoke_Jet() {
     return 1
   fi
 
-  config_dir=$(PartitionerProperty "config_dir" ".jet")
-  global_binary=$(PartitionerProperty "global_binary" "$HOME/local.backus/bin/jet")
+  local config_dir=""
+  local config_dir_path=""
+  local global_binary=""
+  local config=""
+
+  config_dir=$(PartitionerProperty "config_dir" ".jet/")
+  config_dir_path="${config_dir%/}"
+  global_binary=$(PartitionerProperty "global_binary" "$HOME/local.$(hostname)/bin/jet")
 
   if [[ ! -d "$config_dir" ]]; then
       echo "$config_dir" >> .gitignore
       mkdir -p "$config_dir"
   fi
 
-  config="${(q)config_dir}/${(q)RUN_k}.cfg"
+  config="${(q)config_dir_path}/${(q)RUN_k}.cfg"
   if [[ ! -f "$config" ]]; then
     echo "0" >> "$config"
     echo "${(q)RUN_k}" >> "$config"

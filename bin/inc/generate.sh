@@ -471,12 +471,14 @@ GenerateCurrentExperiment() {
 
               local raw_cmd=""
               PARTITIONER_INVOKE_CMD=""
+              MKEXP2_ACTIVE_ALGORITHM="$RUN_algorithm"
               "$invoke_fn" >/dev/null
               raw_cmd="$PARTITIONER_INVOKE_CMD"
               if [[ -z "$raw_cmd" ]]; then
                 # Backward compatibility: older plugins may still print the command.
                 raw_cmd=$("$invoke_fn")
               fi
+              MKEXP2_ACTIVE_ALGORITHM=""
               if [[ -z "$raw_cmd" ]]; then
                 EchoFatal "plugin ${ctx_base["$algorithm"]} produced an empty invoke command"
                 exit 1

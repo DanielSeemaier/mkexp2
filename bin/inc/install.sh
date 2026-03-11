@@ -73,6 +73,7 @@ InstallCurrentExperiment() {
     local fetch_fn="PartitionerFetch_${CTX_base}"
     local build_fn="PartitionerBuild_${CTX_base}"
 
+    MKEXP2_ACTIVE_ALGORITHM="$CTX_algorithm"
     if FunctionExists "$fetch_fn"; then
       "$fetch_fn"
     fi
@@ -82,6 +83,7 @@ InstallCurrentExperiment() {
       EchoFatal "plugin ${CTX_base} is missing $build_fn"
       exit 1
     fi
+    MKEXP2_ACTIVE_ALGORITHM=""
 
     INSTALLED_BUILDS["$CTX_build_key"]="$CTX_binary_path"
   done

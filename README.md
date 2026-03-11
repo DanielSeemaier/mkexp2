@@ -154,10 +154,18 @@ Property defaults can also declare value domains in-plugin:
 Inside `PartitionerFetch_*`, `PartitionerBuild_*`, and `PartitionerInvoke_*`, use:
 - `PartitionerProperty <key> [fallback]`
 
+`PartitionerProperty` resolves against the active algorithm for the current phase:
+- fetch/build hooks see the algorithm currently being installed
+- invoke hooks see the algorithm currently being generated/run
+
+That means `AlgorithmProperty <AlgorithmName> ...` overrides apply consistently in all three hook phases, not just at install time.
+
 Example:
 - in plugin defaults: `SetPartitionerDefault "KaMinPar" "build_target" "KaMinParApp"`
 - in Experiment: `AlgorithmProperty KaMinPar build_target KaMinParApp`
 - in plugin build hook: `build_target=$(PartitionerProperty build_target KaMinParApp)`
+- in Experiment: `AlgorithmProperty Jet-Custom global_binary /path/to/jet`
+- in plugin invoke hook: `global_binary=$(PartitionerProperty global_binary /path/to/default/jet)`
 
 ## Notes
 
