@@ -50,7 +50,7 @@ InstallCurrentExperiment() {
   PrepareInstallLogDir
 
   EchoStep "Installing dependencies for $experiment_name"
-  EchoInfo "logs: $MKEXP2_INSTALL_LOG_DIR"
+  EchoInfo "command logs: $MKEXP2_INSTALL_LOG_DIR"
 
   local algorithm=""
   for algorithm in "${_algorithms[@]}"; do

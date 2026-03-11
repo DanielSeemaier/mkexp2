@@ -87,14 +87,33 @@ DisplayExperimentName() {
 
 PrepareInstallLogDir() {
   if [[ -z "$MKEXP2_INSTALL_LOG_DIR" ]]; then
-    MKEXP2_INSTALL_LOG_DIR="$PWD/logs/install/local/$MKEXP2_RUN_ID/commands"
+    MKEXP2_INSTALL_LOG_DIR="$PWD/logs/install"
   fi
   mkdir -p "$MKEXP2_INSTALL_LOG_DIR"
 }
 
-_NextInstallLogFile() {
+_SanitizeInstallLogLabel() {
+  local label="$1"
+  label="${label//[^[:alnum:]._-]/_}"
+  label="${label##[_-]}"
+  label="${label%%[_-]}"
+  if [[ -z "$label" ]]; then
+    label="command"
+  fi
+  printf '%s' "$label"
+}
+
+SetNextInstallLogFile() {
+  local label="$1"
+  local timestamp="$(date +%Y%m%d-%H%M%S)"
+  local safe_label=""
   MKEXP2_INSTALL_COUNTER=$((MKEXP2_INSTALL_COUNTER + 1))
-  printf '%s/%04d.log' "$MKEXP2_INSTALL_LOG_DIR" "$MKEXP2_INSTALL_COUNTER"
+  safe_label="$(_SanitizeInstallLogLabel "$label")"
+  MKEXP2_LAST_INSTALL_LOG_FILE=$(printf '%s/%s-%04d-%s.log' \
+    "$MKEXP2_INSTALL_LOG_DIR" \
+    "$timestamp" \
+    "$MKEXP2_INSTALL_COUNTER" \
+    "$safe_label")
 }
 
 _RunWithSpinner() {
@@ -159,10 +178,14 @@ Run() {
   local label="${cmd_display:-command}"
 
   if (( MKEXP2_RUN_VERBOSE )); then
+    PrepareInstallLogDir
+    SetNextInstallLogFile "$label"
+    local log_file="$MKEXP2_LAST_INSTALL_LOG_FILE"
+
     _UiTag run
     echo "  $MKEXP2_UI_TAG $cmd_display"
     set +e
-    "$@" 2>&1 | sed "s/^/    ${MKEXP2_UI_DIM}|${MKEXP2_UI_RESET} /"
+    "$@" 2>&1 | tee "$log_file" | sed "s/^/    ${MKEXP2_UI_DIM}|${MKEXP2_UI_RESET} /"
     local rc=${pipestatus[1]}
     set -e
 
@@ -177,8 +200,8 @@ Run() {
   fi
 
   PrepareInstallLogDir
-  local log_file
-  log_file=$(_NextInstallLogFile)
+  SetNextInstallLogFile "$label"
+  local log_file="$MKEXP2_LAST_INSTALL_LOG_FILE"
   _RunWithSpinner "$label" "$log_file" "$@"
 }
 
