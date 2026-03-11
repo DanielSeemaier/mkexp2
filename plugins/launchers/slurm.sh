@@ -41,6 +41,10 @@ LauncherWrapCommand_slurm() {
       exit 1
       ;;
   esac
+
+  if (( threads > 1 )) && [[ "$use_openmp_env" == "true" ]]; then
+    LAUNCHER_WRAPPED_CMD="OMP_NUM_THREADS=$threads OMP_PROC_BIND=spread OMP_PLACES=threads $LAUNCHER_WRAPPED_CMD"
+  fi
 }
 
 LauncherWriteJob_slurm() {
