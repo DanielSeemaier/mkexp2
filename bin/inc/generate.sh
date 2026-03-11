@@ -272,7 +272,7 @@ BuildInstanceId() {
 
   local graph_name=""
   graph_name=$(basename "$graph")
-  echo "${graph_name}__k${k}__s${seed}__e${epsilon}__${topology}"
+  echo "${graph_name}___k${k}_seed${seed}_eps${epsilon}_P${topology}"
 }
 
 _GenerateFormatList() {
@@ -502,7 +502,7 @@ GenerateCurrentExperiment() {
               fi
 
               local graph_name="${graph:t}"
-              local id="${graph_name}__k${k}__s${seed}__e${epsilon}__${topology}"
+              local id="${graph_name}___k${k}_seed${seed}_eps${epsilon}_P${topology}"
               local log_file="$log_dir/${id}.log"
               print -r -- "$wrapped_cmd >> \"$log_file\" 2>&1" >&$cmd_fd
 
