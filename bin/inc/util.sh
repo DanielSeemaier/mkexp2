@@ -94,11 +94,19 @@ PrepareInstallLogDir() {
 
 _SanitizeInstallLogLabel() {
   local label="$1"
+  local original_label="$label"
+  local max_label_len=96
   label="${label//[^[:alnum:]._-]/_}"
   label="${label##[_-]}"
   label="${label%%[_-]}"
   if [[ -z "$label" ]]; then
     label="command"
+  fi
+  if (( ${#label} > max_label_len )); then
+    local label_hash=""
+    local prefix_len=$((max_label_len - 13))
+    label_hash=$(HashString "$original_label")
+    label="${label[1,$prefix_len]}-${label_hash[1,12]}"
   fi
   printf '%s' "$label"
 }

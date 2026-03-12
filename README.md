@@ -186,7 +186,8 @@ Example:
 - `timelimit.per_instance` maps to `timeout` seconds in generated commands.
 - Install command output is concise by default and writes per-command logs to:
   `logs/install/`
-  with filenames prefixed by the current date/time.
+  with filenames prefixed by the current date/time; long command names are
+  shortened and get a hash suffix.
 - Use `mkexp2 ... --verbose` (or `-v`) to stream full stdout/stderr of each
   command with prefixed, readable output.
 - On install failures, `mkexp2` prints the failing command log inline.
