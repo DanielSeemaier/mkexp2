@@ -63,8 +63,7 @@ BuildInstanceId() {
   local epsilon="$4"
   local topology="$5"
 
-  local graph_name=""
-  graph_name=$(basename "$graph")
+  local graph_name="${graph:t}"
   echo "${graph_name}___k${k}_seed${seed}_eps${epsilon}_P${topology}"
 }
 
