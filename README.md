@@ -22,7 +22,6 @@ Requirements:
   - `slurm` (supports arrays and dependencies between `Experiment*` functions)
 - Working partitioner plugins:
   - `Mock` (local smoke tests)
-  - `TestHarness` (internal end-to-end test plugin)
   - `KaMinPar`
   - `dKaMinPar`
   - `Metis`

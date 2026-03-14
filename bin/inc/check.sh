@@ -228,8 +228,9 @@ CheckCurrentExperiment() {
     fi
     algorithm_base["$algorithm"]="$base"
 
-    local plugin_file="$MKEXP2_HOME/plugins/partitioners/${base}.sh"
-    if [[ ! -f "$plugin_file" ]]; then
+    local plugin_file=""
+    plugin_file=$(ResolvePartitionerPluginFile "$base" || true)
+    if [[ -z "$plugin_file" || ! -f "$plugin_file" ]]; then
       CheckError "algorithm '$algorithm' resolves to unknown partitioner '$base'"
       continue
     fi

@@ -72,6 +72,7 @@ ResolveParserScriptPath() {
 
   local -a candidates=(
     "$MKEXP2_HOME/parsers/$filename"
+    "$MKEXP2_HOME/parsers/.$filename"
     "$PWD/parsers/$filename"
     "$PWD/$filename"
   )

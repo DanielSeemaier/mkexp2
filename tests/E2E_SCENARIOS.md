@@ -5,7 +5,8 @@ The end-to-end suite covers these workflows:
 1. `init` and discoverability
    - `mkexp2 init Default` creates `Experiment`
    - `.gitignore` gets `.mkexp2/` and `logs/`
-   - list commands expose bundled presets and partitioners, including the test-only `TestHarness` plugin
+   - list commands expose bundled presets and user-facing partitioners
+   - the hidden internal `TestHarness` plugin stays out of normal discoverability output
 
 2. Local install + generate + submit with multiple algorithms
    - multiple algorithms in one experiment

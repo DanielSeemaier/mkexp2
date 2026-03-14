@@ -52,11 +52,28 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local message="$3"
+  if [[ "$haystack" == *"$needle"* ]]; then
+    echo "did not expect to find: $needle" >&2
+    fail "$message"
+  fi
+}
+
 assert_file_contains() {
   local file="$1"
   local needle="$2"
   local message="$3"
   assert_contains "$(<"$file")" "$needle" "$message"
+}
+
+assert_file_not_contains() {
+  local file="$1"
+  local needle="$2"
+  local message="$3"
+  assert_not_contains "$(<"$file")" "$needle" "$message"
 }
 
 assert_path_exists() {

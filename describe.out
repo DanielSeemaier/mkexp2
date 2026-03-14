@@ -1,5 +1,5 @@
 ==> Partitioner: TestHarness
-  [info] plugin: /Users/Daniel/Code/mkexp2/plugins/partitioners/TestHarness.sh
+  [info] plugin: /Users/Daniel/Code/mkexp2/plugins/partitioners/.TestHarness.sh
   [info] hooks: defaults, aliases, build, invoke
   [info] defaults:
     - extra= | values: any

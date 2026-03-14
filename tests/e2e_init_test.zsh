@@ -15,7 +15,7 @@ test_e2e_init_and_discoverability() {
 
     "$MKEXP2" --list-partitioners > partitioners.out
     assert_file_contains partitioners.out "Mock" "list-partitioners includes Mock"
-    assert_file_contains partitioners.out "TestHarness" "list-partitioners includes TestHarness test plugin"
+    assert_file_not_contains partitioners.out "TestHarness" "hidden test plugin is not listed by discoverability"
 
     "$MKEXP2" --list-presets > presets.out
     assert_file_contains presets.out "Default" "list-presets includes Default"

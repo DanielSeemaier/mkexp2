@@ -1,13 +1,31 @@
 #!/usr/bin/env zsh
 
+ResolvePartitionerPluginFile() {
+  local base="$1"
+  local visible_file="$MKEXP2_HOME/plugins/partitioners/$base.sh"
+  local hidden_file="$MKEXP2_HOME/plugins/partitioners/.$base.sh"
+
+  if [[ -f "$visible_file" ]]; then
+    echo "$visible_file"
+    return 0
+  fi
+  if [[ -f "$hidden_file" ]]; then
+    echo "$hidden_file"
+    return 0
+  fi
+
+  return 1
+}
+
 LoadPartitionerPlugin() {
   local base="$1"
   if [[ -n "${LOADED_PARTITIONERS["$base"]:-}" ]]; then
     return
   fi
 
-  local plugin_file="$MKEXP2_HOME/plugins/partitioners/$base.sh"
-  if [[ ! -f "$plugin_file" ]]; then
+  local plugin_file=""
+  plugin_file=$(ResolvePartitionerPluginFile "$base")
+  if [[ -z "$plugin_file" ]]; then
     EchoFatal "unknown partitioner plugin '$base' ($plugin_file not found)"
     exit 1
   fi
@@ -26,8 +44,9 @@ LoadPartitionerAliasHooks() {
   local base=""
   local alias_fn=""
 
-  for plugin_file in "$MKEXP2_HOME/plugins/partitioners/"*.sh(N); do
+  for plugin_file in "$MKEXP2_HOME/plugins/partitioners/"*.sh(N) "$MKEXP2_HOME/plugins/partitioners"/.*.sh(N); do
     base="${plugin_file:t:r}"
+    base="${base#.}"
     . "$plugin_file"
 
     alias_fn="PartitionerAliases_${base}"
@@ -65,8 +84,9 @@ DescribePartitioner() {
     return 1
   fi
 
-  local plugin_file="$MKEXP2_HOME/plugins/partitioners/$base.sh"
-  if [[ ! -f "$plugin_file" ]]; then
+  local plugin_file=""
+  plugin_file=$(ResolvePartitionerPluginFile "$base")
+  if [[ -z "$plugin_file" ]]; then
     EchoFatal "unknown partitioner '$base' ($plugin_file not found)"
     return 1
   fi
@@ -257,12 +277,13 @@ DescribePlugin() {
   local name="$1"
   local kind="${2:-}"
 
-  local part_file="$MKEXP2_HOME/plugins/partitioners/$name.sh"
+  local part_file=""
   local sys_file="$MKEXP2_HOME/plugins/launchers/$name.sh"
   local has_part=0
   local has_system=0
 
-  [[ -f "$part_file" ]] && has_part=1
+  part_file=$(ResolvePartitionerPluginFile "$name" || true)
+  [[ -n "$part_file" ]] && has_part=1
   [[ -f "$sys_file" ]] && has_system=1
 
   case "$kind" in
