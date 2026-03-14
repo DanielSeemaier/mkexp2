@@ -37,18 +37,20 @@ PartitionerInvoke_Jet() {
   config_dir_path="${config_dir%/}"
   global_binary=$(PartitionerProperty "global_binary" "$HOME/local.$(hostname)/bin/jet")
 
-  if [[ ! -d "$config_dir" ]]; then
-      echo "$config_dir" >> .gitignore
-      mkdir -p "$config_dir"
-  fi
-
   config="${(q)config_dir_path}/${(q)RUN_k}.cfg"
-  if [[ ! -f "$config" ]]; then
-    echo "0" >> "$config"
-    echo "${(q)RUN_k}" >> "$config"
-    echo "1" >> "$config"
-    echo "$((RUN_epsilon+1))" >> "$config"
-    echo "0" >> "$config"
+  if (( ! MKEXP2_PROBE_MODE )); then
+    if [[ ! -d "$config_dir" ]]; then
+        echo "$config_dir" >> .gitignore
+        mkdir -p "$config_dir"
+    fi
+
+    if [[ ! -f "$config" ]]; then
+      echo "0" >> "$config"
+      echo "${(q)RUN_k}" >> "$config"
+      echo "1" >> "$config"
+      echo "$((RUN_epsilon+1))" >> "$config"
+      echo "0" >> "$config"
+    fi
   fi
 
 

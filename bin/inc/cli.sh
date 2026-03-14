@@ -10,6 +10,7 @@ Commands:
   generate  Only generate job files and submit script
   parse     Parse logs into CSV files under ./results
   check     Validate Experiment configuration without generating jobs
+  probe     Inspect Experiment definitions and print JSON
   describe  Show plugin defaults/hooks (partitioners + systems)
   init      Create ./Experiment from a preset
   help      Show this help
@@ -24,6 +25,13 @@ Options:
   --list-parsers             List available parser names
   --list-presets             List installable init presets
   --list-all                 List all of the above
+  --algorithms               With `probe`, return resolved algorithms only
+  --graphs                   With `probe`, return graph metadata only
+  --topologies               With `probe`, return topology metadata only
+  --run-properties           With `probe`, return resolved run properties only
+  --jobs                     With `probe`, return detailed job metadata
+  --calls                    With `probe`, return expanded call details
+  --property A.B             With `probe`, print a resolved algorithm property
 HELP
 }
 
@@ -133,6 +141,7 @@ ParseCli() {
   local init_preset_set=0
   local list_flag_set=0
   local describe_target_set=0
+  local probe_target_set=0
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -196,6 +205,21 @@ ParseCli() {
         MKEXP2_DO_GENERATE=0
         MKEXP2_DO_PARSE=0
         MKEXP2_DO_CHECK=1
+        command_set=1
+        shift
+        ;;
+      probe)
+        if (( command_set )); then
+          EchoFatal "multiple commands provided"
+          PrintHelp
+          exit 1
+        fi
+        MKEXP2_MODE="probe"
+        MKEXP2_DO_INSTALL=0
+        MKEXP2_DO_GENERATE=0
+        MKEXP2_DO_PARSE=0
+        MKEXP2_DO_CHECK=0
+        MKEXP2_DO_PROBE=1
         command_set=1
         shift
         ;;
@@ -301,6 +325,43 @@ ParseCli() {
         MKEXP2_BUILD_MAX_CORES="${1#*=}"
         shift
         ;;
+      --algorithms)
+        MKEXP2_PROBE_ALGORITHMS=1
+        shift
+        ;;
+      --graphs)
+        MKEXP2_PROBE_GRAPHS=1
+        shift
+        ;;
+      --topologies)
+        MKEXP2_PROBE_TOPOLOGIES=1
+        shift
+        ;;
+      --run-properties)
+        MKEXP2_PROBE_RUN_PROPERTIES=1
+        shift
+        ;;
+      --jobs)
+        MKEXP2_PROBE_JOBS=1
+        shift
+        ;;
+      --calls)
+        MKEXP2_PROBE_CALLS=1
+        shift
+        ;;
+      --property)
+        shift
+        if [[ $# -eq 0 ]]; then
+          EchoFatal "missing value for --property"
+          exit 1
+        fi
+        MKEXP2_PROBE_PROPERTY="$1"
+        shift
+        ;;
+      --property=*)
+        MKEXP2_PROBE_PROPERTY="${1#*=}"
+        shift
+        ;;
       --list-systems)
         MKEXP2_LIST_SYSTEMS=1
         list_flag_set=1
@@ -347,6 +408,16 @@ ParseCli() {
           shift
           continue
         fi
+        if [[ "$MKEXP2_MODE" == "probe" && "$1" != -* ]]; then
+          if (( probe_target_set )); then
+            EchoFatal "probe accepts at most one experiment selector"
+            exit 1
+          fi
+          MKEXP2_PROBE_TARGET="$1"
+          probe_target_set=1
+          shift
+          continue
+        fi
         EchoFatal "unknown argument '$1'"
         PrintHelp
         exit 1
@@ -371,8 +442,33 @@ ParseCli() {
       EchoFatal "describe requires a plugin name (e.g. mkexp2 describe MtKaHIP)"
       exit 1
     fi
+  elif [[ "$MKEXP2_MODE" == "probe" ]]; then
+    local probe_aspect_count=0
+    probe_aspect_count=$((MKEXP2_PROBE_ALGORITHMS + MKEXP2_PROBE_GRAPHS + MKEXP2_PROBE_TOPOLOGIES + MKEXP2_PROBE_RUN_PROPERTIES + MKEXP2_PROBE_JOBS + MKEXP2_PROBE_CALLS))
+
+    if (( probe_aspect_count > 0 )) && [[ -z "$MKEXP2_PROBE_TARGET" ]]; then
+      EchoFatal "probe aspect flags require an experiment selector"
+      exit 1
+    fi
+    if [[ -n "$MKEXP2_PROBE_PROPERTY" && -z "$MKEXP2_PROBE_TARGET" ]]; then
+      EchoFatal "--property requires an experiment selector"
+      exit 1
+    fi
+    if [[ -n "$MKEXP2_PROBE_PROPERTY" && $probe_aspect_count -gt 0 ]]; then
+      EchoFatal "--property cannot be combined with other probe aspect flags"
+      exit 1
+    fi
   elif [[ -n "$MKEXP2_DESCRIBE_KIND" ]]; then
     EchoFatal "--partitioner/--system can only be used with describe"
+    exit 1
+  fi
+
+  if (( MKEXP2_PROBE_ALGORITHMS || MKEXP2_PROBE_GRAPHS || MKEXP2_PROBE_TOPOLOGIES || MKEXP2_PROBE_RUN_PROPERTIES || MKEXP2_PROBE_JOBS || MKEXP2_PROBE_CALLS )) && [[ "$MKEXP2_MODE" != "probe" ]]; then
+    EchoFatal "probe aspect flags can only be used with probe"
+    exit 1
+  fi
+  if [[ -n "$MKEXP2_PROBE_PROPERTY" && "$MKEXP2_MODE" != "probe" ]]; then
+    EchoFatal "--property can only be used with probe"
     exit 1
   fi
 

@@ -76,6 +76,17 @@ Validate an `Experiment` without generating jobs:
 mkexp2 check
 ```
 
+Inspect experiments as JSON:
+
+```bash
+mkexp2 probe
+mkexp2 probe Baseline
+mkexp2 probe Baseline --algorithms
+mkexp2 probe Baseline --jobs
+mkexp2 probe Baseline --calls
+mkexp2 probe Baseline --property Mock.supports_distributed
+```
+
 Inspect a plugin (partitioner or system/launcher):
 
 ```bash
@@ -213,4 +224,24 @@ Example:
     - relative path from experiment directory
     - bundled parser name in `mkexp2/parsers/`
     - local parser name in `./parsers/` or `./`
+- Probe support:
+  - `mkexp2 probe` lists all `Experiment*` functions as JSON
+  - `mkexp2 probe <experiment>` returns declared and resolved experiment state as JSON
+  - selectors accept either the display name (`Baseline`) or function name (`ExperimentBaseline`)
+  - aspect flags narrow the payload:
+    - `--algorithms`
+    - `--graphs`
+    - `--topologies`
+    - `--run-properties`
+    - `--jobs`
+    - `--calls`
+  - `--property <Algorithm>.<property>` prints a single resolved algorithm property as JSON
 - `mkexp2 init` adds `.mkexp2/` and `logs/` to `.gitignore`; CSV results are intentionally not ignored.
+
+## Tests
+
+Run the probe-focused regression suite with:
+
+```bash
+./tests/run-probe-tests.zsh
+```

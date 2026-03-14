@@ -104,9 +104,16 @@ GetAlgorithmArgs() {
   local algorithm="$1"
   if [[ -n "${ALG_DEF_BASE["$algorithm"]:-}" ]]; then
     local base="${ALG_DEF_BASE["$algorithm"]}"
-    local inherited
+    local inherited=""
+    local own_args="${ALG_DEF_ARGS["$algorithm"]:-}"
     inherited=$(GetAlgorithmArgs "$base")
-    echo "${ALG_DEF_ARGS["$algorithm"]:-} $inherited"
+    if [[ -n "$own_args" && -n "$inherited" ]]; then
+      echo "$own_args $inherited"
+    elif [[ -n "$own_args" ]]; then
+      echo "$own_args"
+    else
+      echo "$inherited"
+    fi
   else
     echo ""
   fi

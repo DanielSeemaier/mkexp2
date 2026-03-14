@@ -17,10 +17,12 @@ MKEXP2_HOME=$(cd "$script_dir/.." && pwd)
 . "$MKEXP2_HOME/bin/inc/dsl.sh"
 . "$MKEXP2_HOME/bin/inc/props.sh"
 . "$MKEXP2_HOME/bin/inc/plugins.sh"
+. "$MKEXP2_HOME/bin/inc/expand.sh"
 . "$MKEXP2_HOME/bin/inc/install.sh"
 . "$MKEXP2_HOME/bin/inc/generate.sh"
 . "$MKEXP2_HOME/bin/inc/parse.sh"
 . "$MKEXP2_HOME/bin/inc/check.sh"
+. "$MKEXP2_HOME/bin/inc/probe.sh"
 . "$MKEXP2_HOME/bin/inc/cli.sh"
 
 ParseCli "$@"
@@ -61,28 +63,23 @@ if [[ ${#experiment_functions[@]} -eq 0 ]]; then
   exit 1
 fi
 
+if [[ "$MKEXP2_MODE" == "probe" ]]; then
+  ProbeCommand "$PWD/Experiment" "${experiment_functions[@]}"
+  exit $?
+fi
+
 local_fn=""
 for local_fn in "${experiment_functions[@]}"; do
   local display_name=""
   display_name=$(DisplayExperimentName "$local_fn")
   EchoStep "Processing experiment $display_name"
 
-  ResetExperiment
-  LoadPartitionerAliasHooks
-  # Re-source for each experiment function to restore global declarations.
-  . "$PWD/Experiment"
-  "$local_fn"
-
-  EnsureExperimentDefaults
-  FlattenAlgorithmHierarchy
-  RegisterCurrentExperimentParsers
+  LoadExperimentFunctionState "$PWD/Experiment" "$local_fn"
 
   if (( MKEXP2_DO_CHECK )); then
     CheckCurrentExperiment "$display_name"
     continue
   fi
-
-  LoadLauncherPlugin "$_system"
 
   install_mode=""
   install_mode=$(ResolveRunProperty "slurm.install.mode" "local")

@@ -243,36 +243,6 @@ SCRIPT
   chmod +x "$MKEXP2_SLURM_PARSE_JOB_SCRIPT"
 }
 
-ResolveDependencyKey() {
-  local topology="$1"
-
-  local dep=""
-  dep=$(ResolveRunProperty "slurm.dependency" "")
-  if [[ -z "$dep" ]]; then
-    echo ""
-    return
-  fi
-
-  if [[ "$dep" == afterok:* ]]; then
-    local dep_name="${dep#afterok:}"
-    echo "${dep_name}:${topology}"
-  else
-    echo "$dep"
-  fi
-}
-
-BuildInstanceId() {
-  local graph="$1"
-  local k="$2"
-  local seed="$3"
-  local epsilon="$4"
-  local topology="$5"
-
-  local graph_name=""
-  graph_name=$(basename "$graph")
-  echo "${graph_name}___k${k}_seed${seed}_eps${epsilon}_P${topology}"
-}
-
 _GenerateFormatList() {
   local max_items="$1"
   shift
@@ -307,231 +277,43 @@ _GenerateSummaryDivider() {
 
 GenerateCurrentExperiment() {
   local experiment_name="$1"
-  local experiment_label=""
-  experiment_label=$(SafeName "$experiment_name")
-  local experiment_display=""
-  experiment_display=$(DisplayExperimentName "$experiment_name")
+  ExpandCurrentExperiment "$experiment_name" "generate"
 
-  local total_generated_calls=0
-  local -A generated_calls_per_algorithm=()
-  local -A generated_calls_per_topology=()
-  local -a generated_topologies=()
-  local -A seen_partitioners=()
-  local -a partitioners=()
-  local -a algorithm_labels=()
-  local -A seen_graph_names=()
-  local -a graph_names=()
-
-  local algorithm=""
-  for algorithm in "${_algorithms[@]}"; do
-    local base="${FLAT_ALGO_BASE["$algorithm"]:-}"
-    if [[ -z "$base" ]]; then
-      base=$(GetAlgorithmBase "$algorithm")
-    fi
-
-    if [[ "$algorithm" == "$base" ]]; then
-      algorithm_labels+=("$algorithm")
-    else
-      algorithm_labels+=("${algorithm}[$base]")
-    fi
-
-    if [[ -z "${seen_partitioners["$base"]:-}" ]]; then
-      seen_partitioners["$base"]=1
-      partitioners+=("$base")
-    fi
-  done
-
-  local graph=""
-  for graph in "${_graphs[@]}"; do
-    local graph_name="${graph:t}"
-    if [[ -z "${seen_graph_names["$graph_name"]:-}" ]]; then
-      seen_graph_names["$graph_name"]=1
-      graph_names+=("$graph_name")
-    fi
-  done
-
-  if [[ "$_system" == "slurm" ]]; then
-    local install_mode=""
-    install_mode=$(ResolveRunProperty "slurm.install.mode" "local")
-    if [[ "$install_mode" == "job" ]]; then
-      MKEXP2_SLURM_INSTALL_JOB_REQUIRED=1
-      EnsureSlurmInstallJob
-    fi
+  if [[ "$_system" == "slurm" && "$EXPAND_SLURM_INSTALL_MODE" == "job" ]]; then
+    MKEXP2_SLURM_INSTALL_JOB_REQUIRED=1
+    EnsureSlurmInstallJob
   fi
 
-  local wrap_fn="LauncherWrapCommand_${_system}"
-  if ! FunctionExists "$wrap_fn"; then
-    EchoFatal "launcher ${_system} is missing $wrap_fn"
+  local job_key=""
+  for job_key in "${EXPAND_JOB_KEYS[@]}"; do
+    : > "${EXPAND_JOB["$job_key::cmd_file"]}"
+  done
+
+  local call_id=""
+  for call_id in "${EXPAND_CALL_IDS[@]}"; do
+    mkdir -p "$(dirname "${EXPAND_CALL["$call_id::log_file"]}")"
+    job_key="${EXPAND_CALL["$call_id::job_key"]}"
+    print -r -- "${EXPAND_CALL["$call_id::final_command"]} >> \"${EXPAND_CALL["$call_id::log_file"]}\" 2>&1" >> "${EXPAND_JOB["$job_key::cmd_file"]}"
+  done
+
+  local write_fn="LauncherWriteJob_${_system}"
+  if ! FunctionExists "$write_fn"; then
+    EchoFatal "launcher ${_system} is missing $write_fn"
     exit 1
   fi
 
-  local per_instance_limit=""
-  per_instance_limit=$(ResolveRunProperty "timelimit.per_instance" "$_timelimit_per_instance")
-  local timeout_prefix=""
-  if [[ -n "$per_instance_limit" ]]; then
-    local timeout_seconds=""
-    timeout_seconds=$(ParseTimelimitToSeconds "$per_instance_limit")
-    timeout_prefix="timeout -v ${timeout_seconds}s "
-  fi
-
-  local timelimit=""
-  timelimit=$(ResolveRunProperty "timelimit" "$_timelimit")
-
-  # Precompute algorithm runtime contexts once per experiment.
-  local -A ctx_base=()
-  local -A ctx_binary_path=()
-  local -A ctx_args=()
-  local -A ctx_supports_distributed=()
-  local -A ctx_use_openmp_env=()
-  local -A ctx_invoke_fn=()
-  local -A ctx_log_dir=()
-
-  for algorithm in "${_algorithms[@]}"; do
-    PopulateBuildContext "$algorithm"
-    LoadPartitionerPlugin "$CTX_base"
-
-    local invoke_fn="PartitionerInvoke_${CTX_base}"
-    if ! FunctionExists "$invoke_fn"; then
-      EchoFatal "plugin ${CTX_base} is missing $invoke_fn"
-      exit 1
-    fi
-
-    ctx_base["$algorithm"]="$CTX_base"
-    ctx_binary_path["$algorithm"]="$CTX_binary_path"
-    ctx_args["$algorithm"]="$CTX_args"
-    ctx_supports_distributed["$algorithm"]="$CTX_supports_distributed"
-    ctx_use_openmp_env["$algorithm"]="$CTX_use_openmp_env"
-    ctx_invoke_fn["$algorithm"]="$invoke_fn"
-
-    local log_dir="$PWD/logs/$algorithm/$experiment_label"
-    mkdir -p "$log_dir"
-    ctx_log_dir["$algorithm"]="$log_dir"
-  done
-
-  local topology=""
-  for topology in "${_threads[@]}"; do
-    local nodes="1"
-    local mpis="1"
-    local threads="$topology"
-    if [[ "$topology" == *x*x* ]]; then
-      nodes="${topology%%x*}"
-      local without_threads="${topology%x*}"
-      mpis="${without_threads#*x}"
-      threads="${topology##*x}"
-    fi
-    local distributed="false"
-    if (( nodes > 1 || mpis > 1 )); then
-      distributed="true"
-    fi
-
-    local job_name="${experiment_label}__${topology}"
-    local launcher_job_name="$job_name"
-    if [[ "$_system" == "slurm" ]]; then
-      local slurm_experiment_name=""
-      slurm_experiment_name=$(SafeName "$experiment_display")
-      launcher_job_name="${slurm_experiment_name}/${threads}"
-    fi
-    local job_key="${experiment_name}:${topology}"
-
-    local cmd_file="$PWD/jobs/${job_name}.cmds"
-    local job_script="$PWD/jobs/${job_name}.sh"
-    : > "$cmd_file"
-    local cmd_count=0
-    local cmd_fd=-1
-    exec {cmd_fd}> "$cmd_file"
-
-    for algorithm in "${_algorithms[@]}"; do
-      if [[ "$distributed" == "true" && "${ctx_supports_distributed["$algorithm"]}" != "true" ]]; then
-        EchoFatal "$algorithm does not support distributed mode ($topology)"
-        exit 1
-      fi
-
-      local invoke_fn="${ctx_invoke_fn["$algorithm"]}"
-      local use_openmp_env="${ctx_use_openmp_env["$algorithm"]}"
-      local log_dir="${ctx_log_dir["$algorithm"]}"
-
-      local seed=""
-      for seed in "${_seeds[@]}"; do
-        local epsilon=""
-        for epsilon in "${_epsilons[@]}"; do
-          local k=""
-          for k in "${_ks[@]}"; do
-            for graph in "${_graphs[@]}"; do
-              RUN_algorithm="$algorithm"
-              RUN_base="${ctx_base["$algorithm"]}"
-              RUN_binary_path="${ctx_binary_path["$algorithm"]}"
-              RUN_args="${ctx_args["$algorithm"]}"
-              RUN_graph="$graph"
-              RUN_k="$k"
-              RUN_epsilon="$epsilon"
-              RUN_seed="$seed"
-              RUN_nodes="$nodes"
-              RUN_mpis="$mpis"
-              RUN_threads="$threads"
-
-              local raw_cmd=""
-              PARTITIONER_INVOKE_CMD=""
-              MKEXP2_ACTIVE_ALGORITHM="$RUN_algorithm"
-              "$invoke_fn" >/dev/null
-              raw_cmd="$PARTITIONER_INVOKE_CMD"
-              if [[ -z "$raw_cmd" ]]; then
-                # Backward compatibility: older plugins may still print the command.
-                raw_cmd=$("$invoke_fn")
-              fi
-              MKEXP2_ACTIVE_ALGORITHM=""
-              if [[ -z "$raw_cmd" ]]; then
-                EchoFatal "plugin ${ctx_base["$algorithm"]} produced an empty invoke command"
-                exit 1
-              fi
-
-              local wrapped_cmd=""
-              LAUNCHER_WRAPPED_CMD=""
-              "$wrap_fn" "$raw_cmd" "$nodes" "$mpis" "$threads" "$distributed" "$use_openmp_env" >/dev/null
-              wrapped_cmd="$LAUNCHER_WRAPPED_CMD"
-              if [[ -z "$wrapped_cmd" ]]; then
-                # Backward compatibility: older launchers may still print wrapped commands.
-                wrapped_cmd=$("$wrap_fn" "$raw_cmd" "$nodes" "$mpis" "$threads" "$distributed" "$use_openmp_env")
-              fi
-              if [[ -z "$wrapped_cmd" ]]; then
-                EchoFatal "launcher ${_system} produced an empty wrapped command"
-                exit 1
-              fi
-
-              if [[ -n "$timeout_prefix" ]]; then
-                wrapped_cmd="${timeout_prefix}${wrapped_cmd}"
-              fi
-
-              local graph_name="${graph:t}"
-              local id="${graph_name}___k${k}_seed${seed}_eps${epsilon}_P${topology}"
-              local log_file="$log_dir/${id}.log"
-              print -r -- "$wrapped_cmd >> \"$log_file\" 2>&1" >&$cmd_fd
-
-              total_generated_calls=$((total_generated_calls + 1))
-              cmd_count=$((cmd_count + 1))
-              generated_calls_per_algorithm["$algorithm"]=$(( ${generated_calls_per_algorithm["$algorithm"]:-0} + 1 ))
-              generated_calls_per_topology["$topology"]=$(( ${generated_calls_per_topology["$topology"]:-0} + 1 ))
-            done
-          done
-        done
-      done
-    done
-
-    exec {cmd_fd}>&-
-
-    if (( cmd_count == 0 )); then
-      rm -f "$cmd_file"
-      continue
-    fi
-    generated_topologies+=("$topology")
-
-    local write_fn="LauncherWriteJob_${_system}"
-    "$write_fn" "$job_script" "$cmd_file" "$launcher_job_name" "$nodes" "$mpis" "$threads" "$timelimit" "$cmd_count"
-    chmod +x "$job_script"
-
-    local dependency_key=""
-    dependency_key=$(ResolveDependencyKey "$topology")
-
-    GENERATED_JOB_META["$job_key"]="${_system}|$job_script|$dependency_key"
+  for job_key in "${EXPAND_JOB_KEYS[@]}"; do
+    "$write_fn" \
+      "${EXPAND_JOB["$job_key::job_script"]}" \
+      "${EXPAND_JOB["$job_key::cmd_file"]}" \
+      "${EXPAND_JOB["$job_key::launcher_job_name"]}" \
+      "${EXPAND_JOB["$job_key::nodes"]}" \
+      "${EXPAND_JOB["$job_key::mpis"]}" \
+      "${EXPAND_JOB["$job_key::threads"]}" \
+      "$EXPAND_TIMELIMIT" \
+      "${EXPAND_JOB["$job_key::cmd_count"]}"
+    chmod +x "${EXPAND_JOB["$job_key::job_script"]}"
+    GENERATED_JOB_META["$job_key"]="${_system}|${EXPAND_JOB["$job_key::job_script"]}|${EXPAND_JOB["$job_key::dependency_key"]}"
     GENERATED_JOB_KEYS+=("$job_key")
   done
 
@@ -545,26 +327,27 @@ GenerateCurrentExperiment() {
   local -a calls_per_algorithm_parts=()
   local -a calls_per_topology_parts=()
 
-  algorithms_summary=$(_GenerateFormatList 5 "${algorithm_labels[@]}")
-  partitioners_summary=$(_GenerateFormatList 6 "${partitioners[@]}")
-  graphs_summary=$(_GenerateFormatList 8 "${graph_names[@]}")
+  algorithms_summary=$(_GenerateFormatList 5 "${EXPAND_ALGORITHM_LABELS[@]}")
+  partitioners_summary=$(_GenerateFormatList 6 "${EXPAND_PARTITIONERS[@]}")
+  graphs_summary=$(_GenerateFormatList 8 "${EXPAND_GRAPH_NAMES[@]}")
   ks_summary=$(_GenerateFormatList 8 "${_ks[@]}")
   seeds_summary=$(_GenerateFormatList 8 "${_seeds[@]}")
   epsilons_summary=$(_GenerateFormatList 8 "${_epsilons[@]}")
-  topologies_summary=$(_GenerateFormatList 8 "${generated_topologies[@]}")
+  topologies_summary=$(_GenerateFormatList 8 "${EXPAND_GENERATED_TOPOLOGIES[@]}")
 
+  local algorithm=""
   for algorithm in "${_algorithms[@]}"; do
-    calls_per_algorithm_parts+=("$algorithm=${generated_calls_per_algorithm["$algorithm"]:-0}")
+    calls_per_algorithm_parts+=("$algorithm=${EXPAND_CALL_COUNT_BY_ALGORITHM["$algorithm"]:-0}")
   done
   local topology=""
-  for topology in "${generated_topologies[@]}"; do
-    calls_per_topology_parts+=("$topology=${generated_calls_per_topology["$topology"]:-0}")
+  for topology in "${EXPAND_GENERATED_TOPOLOGIES[@]}"; do
+    calls_per_topology_parts+=("$topology=${EXPAND_CALL_COUNT_BY_TOPOLOGY["$topology"]:-0}")
   done
 
-  EchoStep "Generated experiment summary: $experiment_display"
+  EchoStep "Generated experiment summary: $EXPAND_EXPERIMENT_DISPLAY"
   _GenerateSummaryDivider
   _GenerateInfoKV "launcher" "$_system"
-  _GenerateInfoKV "calls" "$total_generated_calls total (${#generated_topologies[@]} job script(s))"
+  _GenerateInfoKV "calls" "$EXPAND_TOTAL_CALLS total (${#EXPAND_GENERATED_TOPOLOGIES[@]} job script(s))"
   _GenerateInfoKV "algorithms" "$algorithms_summary"
   _GenerateInfoKV "partitioners" "$partitioners_summary"
   _GenerateInfoKV "graphs" "$graphs_summary"
