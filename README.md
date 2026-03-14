@@ -22,6 +22,7 @@ Requirements:
   - `slurm` (supports arrays and dependencies between `Experiment*` functions)
 - Working partitioner plugins:
   - `Mock` (local smoke tests)
+  - `TestHarness` (internal end-to-end test plugin)
   - `KaMinPar`
   - `dKaMinPar`
   - `Metis`
@@ -246,4 +247,16 @@ Run the probe-focused regression suite with:
 
 ```bash
 ./tests/run-probe-tests.zsh
+```
+
+Run the end-to-end suite with:
+
+```bash
+./tests/run-e2e-tests.zsh
+```
+
+Run everything with:
+
+```bash
+./tests/run-all-tests.zsh
 ```

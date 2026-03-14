@@ -1,0 +1,12 @@
+==> Partitioner: TestHarness
+  [info] plugin: /Users/Daniel/Code/mkexp2/plugins/partitioners/TestHarness.sh
+  [info] hooks: defaults, aliases, build, invoke
+  [info] defaults:
+    - extra= | values: any
+    - mode=baseline | values: baseline|debug|custom|stress (closed)
+    - supports_distributed=true | values: true|false (closed)
+    - use_openmp_env=false | values: true|false (closed)
+  [info] aliases:
+    - TestHarness-Dbg
+      args: --dbg
+      property: mode=debug

@@ -42,6 +42,40 @@ assert_file_eq() {
   assert_eq "$actual" "$expected" "$message"
 }
 
+assert_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local message="$3"
+  if [[ "$haystack" != *"$needle"* ]]; then
+    echo "expected to find: $needle" >&2
+    fail "$message"
+  fi
+}
+
+assert_file_contains() {
+  local file="$1"
+  local needle="$2"
+  local message="$3"
+  assert_contains "$(<"$file")" "$needle" "$message"
+}
+
+assert_path_exists() {
+  local path="$1"
+  local message="$2"
+  if [[ ! -e "$path" ]]; then
+    fail "$message"
+  fi
+}
+
+assert_line_count() {
+  local file="$1"
+  local expected="$2"
+  local message="$3"
+  local actual=""
+  actual=$(wc -l < "$file" | tr -d ' ')
+  assert_eq "$actual" "$expected" "$message"
+}
+
 assert_cmd_fails() {
   local message="$1"
   shift
