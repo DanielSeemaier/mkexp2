@@ -31,7 +31,7 @@ Options:
   --run-properties           With `probe`, return resolved run properties only
   --jobs                     With `probe`, return detailed job metadata
   --calls                    With `probe`, return expanded call details
-  --property A.B             With `probe`, print a resolved algorithm property
+  --property A[.B]           With `probe`, print algorithm properties or one resolved property
 HELP
 }
 

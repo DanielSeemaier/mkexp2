@@ -84,6 +84,7 @@ mkexp2 probe Baseline
 mkexp2 probe Baseline --algorithms
 mkexp2 probe Baseline --jobs
 mkexp2 probe Baseline --calls
+mkexp2 probe Baseline --property Mock
 mkexp2 probe Baseline --property Mock.supports_distributed
 ```
 
@@ -235,6 +236,7 @@ Example:
     - `--run-properties`
     - `--jobs`
     - `--calls`
+  - `--property <Algorithm>` prints the resolved property map for that algorithm as a JSON object
   - `--property <Algorithm>.<property>` prints a single resolved algorithm property as JSON
 - `mkexp2 init` adds `.mkexp2/` and `logs/` to `.gitignore`; CSV results are intentionally not ignored.
 

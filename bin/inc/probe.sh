@@ -650,17 +650,24 @@ ProbePrintExperimentList() {
 ProbePrintPropertyValue() {
   local selector="$1"
   local algorithm="${selector%%.*}"
-  local property="${selector#*.}"
+  local property=""
   local base=""
   local -a keys=()
 
-  if [[ -z "$algorithm" || -z "$property" || "$algorithm" == "$selector" ]]; then
-    EchoFatal "invalid --property selector '$selector' (expected <algorithm>.<property>)"
+  if [[ -z "$algorithm" ]]; then
+    EchoFatal "invalid --property selector '$selector' (expected <algorithm> or <algorithm>.<property>)"
     return 1
   fi
   if (( ${_algorithms[(Ie)$algorithm]} == 0 )); then
     EchoFatal "unknown algorithm '$algorithm' in --property selector"
     return 1
+  fi
+  if [[ "$selector" == *.* ]]; then
+    property="${selector#*.}"
+    if [[ -z "$property" || "$algorithm" == "$selector" ]]; then
+      EchoFatal "invalid --property selector '$selector' (expected <algorithm> or <algorithm>.<property>)"
+      return 1
+    fi
   fi
 
   base="${FLAT_ALGO_BASE["$algorithm"]:-}"
@@ -668,6 +675,12 @@ ProbePrintPropertyValue() {
     base=$(GetAlgorithmBase "$algorithm")
   fi
   keys=($(ProbeCollectAlgorithmPropertyKeys "$algorithm" "$base"))
+
+  if [[ -z "$property" ]]; then
+    printf '%s\n' "$(ProbeEmitResolvedAlgorithmProperties "$algorithm" "$base")"
+    return 0
+  fi
+
   if (( ${keys[(Ie)$property]} == 0 )); then
     EchoFatal "unknown property '$property' for algorithm '$algorithm'"
     return 1

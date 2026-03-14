@@ -53,6 +53,9 @@ EOF
     assert_eq "$(json_value calls.json 'has("jobs")')" "false" "calls-only output omits jobs block"
     assert_eq "$(json_value calls.json '.calls | length')" "2" "calls-only output returns expanded calls"
 
+    "$MKEXP2" probe Inspect --property MockFast > property-map.json
+    assert_eq "$(json_value property-map.json '.use_openmp_env')" "true" "algorithm-only property probe returns property map"
+    assert_eq "$(json_value property-map.json '.parser')" './parsers/mock.awk' "algorithm-only property probe includes resolved parser value"
     assert_eq "$("$MKEXP2" probe Inspect --property MockFast.use_openmp_env)" "true" "property probe returns JSON scalar"
   )
 

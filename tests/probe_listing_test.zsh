@@ -22,7 +22,7 @@ test_probe_listing_and_selectors() {
 
     assert_cmd_fails "unknown experiment fails" "$MKEXP2" probe Missing
     assert_cmd_fails "probe flags require a selector" "$MKEXP2" probe --algorithms
-    assert_cmd_fails "malformed property selector fails" "$MKEXP2" probe Baseline --property malformed
+    assert_cmd_fails "malformed property selector fails" "$MKEXP2" probe Baseline --property .broken
   )
 
   pass "list mode and selectors"
