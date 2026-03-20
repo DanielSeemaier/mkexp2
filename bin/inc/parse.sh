@@ -128,9 +128,16 @@ ParseAlgorithmLogs() {
     return 1
   fi
 
+  local -a awk_args=()
+  local lib_file="${parser_file:h}/csv.awk"
+  if [[ -f "$lib_file" ]]; then
+    awk_args+=(-f "$lib_file")
+  fi
+  awk_args+=(-f "$parser_file")
+
   EchoStep "Parsing logs for $algorithm"
   EchoInfo "parser: $parser_file"
-  if ! "$awk_bin" -f "$parser_file" < <(_StreamLogsForParser "$algorithm") > "$csv_file"; then
+  if ! "$awk_bin" "${awk_args[@]}" < <(_StreamLogsForParser "$algorithm") > "$csv_file"; then
     EchoWarn "failed to parse $algorithm logs with parser $parser_spec"
     return 1
   fi
