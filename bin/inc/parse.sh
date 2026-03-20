@@ -129,7 +129,7 @@ ParseAlgorithmLogs() {
   fi
 
   local -a awk_args=()
-  local lib_file="${parser_file:h}/csv.awk"
+  local lib_file="${parser_file:h}/.csv.awk"
   if [[ -f "$lib_file" ]]; then
     awk_args+=(-f "$lib_file")
   fi
