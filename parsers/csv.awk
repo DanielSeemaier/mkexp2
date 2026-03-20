@@ -43,7 +43,7 @@ function csv_flush(    i, sep, col, failed) {
         printf sep _csv_fmts[col], data[col]
         sep = ","
     }
-    printf ",%d,%d\n", data["Timeout"], failed
+    printf ",%d,%d,%d\n", data["NumNodes"] * data["NumMPIsPerNode"] * data["NumThreadsPerMPI"], data["Timeout"], failed
 
     csv_reset()
 }
@@ -54,7 +54,7 @@ function _csv_print_header(    i, sep) {
         printf "%s%s", sep, _csv_cols[i]
         sep = ","
     }
-    print ",Timeout,Failed"
+    print ",Cores,Timeout,Failed"
 }
 
 # ---------------------------------------------------------------------------
