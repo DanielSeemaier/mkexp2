@@ -111,7 +111,7 @@ set -euo pipefail
 line=\$(sed -n "\$((SLURM_ARRAY_TASK_ID + 1))p" "${cmd_file}")
 [[ -z "\$line" ]] && { echo "No command for array task \$SLURM_ARRAY_TASK_ID"; exit 1; }
 echo "+ \$line"
-eval "\$line"
+eval "\$line" < /dev/null || true
 SCRIPT
   else
     cat >> "$job_script" <<SCRIPT
@@ -119,7 +119,7 @@ set -euo pipefail
 while IFS= read -r line; do
   [[ -z "\$line" ]] && continue
   echo "+ \$line"
-  eval "\$line"
+  eval "\$line" < /dev/null || true
 done < "${cmd_file}"
 SCRIPT
   fi
