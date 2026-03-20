@@ -2,7 +2,7 @@
 #
 # Usage in a parser:
 #   1. Call csv_col(name, default, fmt) once per column in BEGIN, in order.
-#      "Failed" is reserved and auto-computed — do not register it.
+#      "Timeout" and "Failed" are reserved and auto-computed — do not register them.
 #   2. Set _csv_failed_key to the column whose empty value signals failure.
 #   3. Call csv_init() after all csv_col() declarations to print the header.
 #   4. In pattern rules, set data[key] = value as needed.
@@ -10,7 +10,7 @@
 #
 # parse_marker() and strip_prefix() are shared helpers for the standard
 # __BEGIN_FILE__ marker format:
-#   <graph>__k<K>__s<Seed>__e<Epsilon>__<nodes>x<mpis>x<threads>.log
+#   <graph>___k<K>_seed<Seed>_eps<Epsilon>_P<nodes>x<mpis>x<threads>.log
 
 function csv_col(name, default, fmt) {
     _csv_ncols++
@@ -29,6 +29,7 @@ function csv_reset(    i) {
     for (i = 1; i <= _csv_ncols; i++) {
         data[_csv_cols[i]] = _csv_defaults[_csv_cols[i]]
     }
+    data["Timeout"] = 0
 }
 
 function csv_flush(    i, sep, col, failed) {
@@ -42,7 +43,7 @@ function csv_flush(    i, sep, col, failed) {
         printf sep _csv_fmts[col], data[col]
         sep = ","
     }
-    printf ",%d\n", failed
+    printf ",%d,%d\n", data["Timeout"], failed
 
     csv_reset()
 }
@@ -53,7 +54,15 @@ function _csv_print_header(    i, sep) {
         printf "%s%s", sep, _csv_cols[i]
         sep = ","
     }
-    print ",Failed"
+    print ",Timeout,Failed"
+}
+
+# ---------------------------------------------------------------------------
+# Generic pattern rules
+# ---------------------------------------------------------------------------
+
+/timeout: sending signal TERM to command/ {
+    data["Timeout"] = 1
 }
 
 # ---------------------------------------------------------------------------
@@ -61,29 +70,28 @@ function _csv_print_header(    i, sep) {
 # ---------------------------------------------------------------------------
 
 # Parses a log filename (without path) of the form:
-#   <graph>__k<K>__s<Seed>__e<Epsilon>__<nodes>x<mpis>x<threads>[.log]
+#   <graph>___k<K>_seed<Seed>_eps<Epsilon>_P<nodes>x<mpis>x<threads>[.log]
 # and populates data["Graph"], data["K"], data["Seed"], data["Epsilon"],
 # data["NumNodes"], data["NumMPIsPerNode"], data["NumThreadsPerMPI"].
-function parse_marker(marker,    parts, n, i, graph) {
+function parse_marker(marker,    sep_pos, params, parts, topo) {
     sub(/\.log$/, "", marker)
 
-    n = split(marker, parts, "__")
-    if (n < 5) {
+    sep_pos = index(marker, "___")
+    if (sep_pos == 0) {
         data["Graph"] = marker
         return
     }
 
-    graph = parts[1]
-    for (i = 2; i <= n - 4; ++i) {
-        graph = graph "__" parts[i]
-    }
-    data["Graph"] = graph
+    data["Graph"] = substr(marker, 1, sep_pos - 1)
+    params = substr(marker, sep_pos + 3)
 
-    data["K"]       = strip_prefix(parts[n - 3], "k") + 0
-    data["Seed"]    = strip_prefix(parts[n - 2], "s") + 0
-    data["Epsilon"] = strip_prefix(parts[n - 1], "e") + 0
+    # params: k<K>_seed<Seed>_eps<Epsilon>_P<nodes>x<mpis>x<threads>
+    split(params, parts, "_")
+    data["K"]       = strip_prefix(parts[1], "k")    + 0
+    data["Seed"]    = strip_prefix(parts[2], "seed")  + 0
+    data["Epsilon"] = strip_prefix(parts[3], "eps")   + 0
 
-    split(parts[n], topo, "x")
+    split(strip_prefix(parts[4], "P"), topo, "x")
     if (length(topo[1]) > 0) data["NumNodes"]         = topo[1] + 0
     if (length(topo[2]) > 0) data["NumMPIsPerNode"]   = topo[2] + 0
     if (length(topo[3]) > 0) data["NumThreadsPerMPI"] = topo[3] + 0
