@@ -66,7 +66,7 @@ set -euo pipefail
 while IFS= read -r line; do
   [[ -z "\$line" ]] && continue
   echo "+ \$line"
-  eval "\$line"
+  eval "\$line" < /dev/null || true
 done < "${cmd_file}"
 SCRIPT
 }
