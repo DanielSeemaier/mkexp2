@@ -89,7 +89,7 @@ ListPresets() {
 ListParsers() {
   local file=""
   local -a names=()
-  for file in "$MKEXP2_HOME/parsers/"*.awk(N); do
+  for file in "$MKEXP2_HOME/plugins/parsers/"*.awk(N); do
     names+=("${file:t:r}")
   done
 
