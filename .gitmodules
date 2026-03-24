@@ -1,0 +1,3 @@
+[submodule "plots"]
+	path = plots
+	url = https://github.com/DanielSeemaier/plots
