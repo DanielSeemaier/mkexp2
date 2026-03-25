@@ -9,6 +9,7 @@ Commands:
   install   Only fetch/build configured partitioners
   generate  Only generate job files and submit script
   parse     Parse logs into CSV files under ./results
+  plot      Generate plots from parsed CSV results (requires Docker)
   check     Validate Experiment configuration without generating jobs
   probe     Inspect Experiment definitions and print JSON
   describe  Show plugin defaults/hooks (partitioners + systems)
@@ -32,6 +33,9 @@ Options:
   --jobs                     With `probe`, return detailed job metadata
   --calls                    With `probe`, return expanded call details
   --property A[.B]           With `probe`, print algorithm properties or one resolved property
+  --performance-profile      With `plot`, include performance profile plot
+  --speedup                  With `plot`, include speedup plot (first algorithm is baseline)
+  --running-time             With `plot`, include running time box plot
 HELP
 }
 
@@ -191,6 +195,20 @@ ParseCli() {
         MKEXP2_DO_INSTALL=0
         MKEXP2_DO_GENERATE=0
         MKEXP2_DO_PARSE=1
+        command_set=1
+        shift
+        ;;
+      plot)
+        if (( command_set )); then
+          EchoFatal "multiple commands provided"
+          PrintHelp
+          exit 1
+        fi
+        MKEXP2_MODE="plot"
+        MKEXP2_DO_INSTALL=0
+        MKEXP2_DO_GENERATE=0
+        MKEXP2_DO_PARSE=0
+        MKEXP2_DO_PLOT=1
         command_set=1
         shift
         ;;
@@ -390,6 +408,21 @@ ParseCli() {
         list_flag_set=1
         shift
         ;;
+      --performance-profile)
+        MKEXP2_PLOT_PERFORMANCE_PROFILE=1
+        MKEXP2_PLOT_EXPLICIT_SELECTION=1
+        shift
+        ;;
+      --speedup)
+        MKEXP2_PLOT_SPEEDUP=1
+        MKEXP2_PLOT_EXPLICIT_SELECTION=1
+        shift
+        ;;
+      --running-time)
+        MKEXP2_PLOT_RUNNING_TIME=1
+        MKEXP2_PLOT_EXPLICIT_SELECTION=1
+        shift
+        ;;
       *)
         if [[ "$MKEXP2_MODE" == "describe" && "$1" != -* ]]; then
           if (( describe_target_set )); then
@@ -415,6 +448,11 @@ ParseCli() {
           fi
           MKEXP2_PROBE_TARGET="$1"
           probe_target_set=1
+          shift
+          continue
+        fi
+        if [[ "$MKEXP2_MODE" == "plot" && "$1" != -* ]]; then
+          MKEXP2_PLOT_ALGORITHMS+=("$1")
           shift
           continue
         fi
@@ -472,6 +510,11 @@ ParseCli() {
     exit 1
   fi
 
+  if (( MKEXP2_PLOT_EXPLICIT_SELECTION )) && [[ "$MKEXP2_MODE" != "plot" ]]; then
+    EchoFatal "--performance-profile/--speedup/--running-time can only be used with plot"
+    exit 1
+  fi
+
   if [[ -n "$MKEXP2_BUILD_MAX_CORES" ]]; then
     if [[ "$MKEXP2_BUILD_MAX_CORES" != <-> ]] || (( MKEXP2_BUILD_MAX_CORES <= 0 )); then
       EchoFatal "--build-max-cores must be a positive integer, got '$MKEXP2_BUILD_MAX_CORES'"
@@ -514,6 +557,11 @@ EnsureExperimentGitignore() {
   # Experiment run logs can grow very large; keep them out of git by default.
   if ! grep -qxF "logs/" "$gitignore_file"; then
     printf '%s\n' "logs/" >> "$gitignore_file"
+    changed=1
+  fi
+
+  if ! grep -qxF "plots.pdf" "$gitignore_file"; then
+    printf '%s\n' "plots.pdf" >> "$gitignore_file"
     changed=1
   fi
 
