@@ -10,6 +10,12 @@ PartitionerDefaults_KaMinPar() {
   SetPartitionerDefault "KaMinPar" "binary" "KaMinPar" "any"
 }
 
+PartitionerAliases_KaMinPar() {
+  DefineAlgorithm KaMinPar-Fast KaMinPar -P fast
+  DefineAlgorithm KaMinPar-Eco KaMinPar -P eco
+  DefineAlgorithm KaMinPar-Strong KaMinPar -P strong
+}
+
 PartitionerFetch_KaMinPar() {
   GenericGitFetch "$CTX_repo_url" "$CTX_repo_ref" "$CTX_source_dir"
 }

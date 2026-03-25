@@ -1,0 +1,21 @@
+#!/usr/bin/env zsh
+
+System local
+Property local.call_wrapper none
+
+DefineAlgorithm Feature KaMinPar # possibly additional args here
+AlgorithmProperty Feature repo_ref origin/some/feature/branch
+
+Experiment() {
+  # Compare Feature vs KaMinPar baseline (-P fast)
+  Algorithms Feature
+  Algorithms KaMinPar # same as KaMinPar-Fast
+
+  Ks 32
+  Seeds 1
+  Epsilons 0.03
+  Threads 1x1x16
+
+  Graphs $HOME/Graphs/
+}
+
