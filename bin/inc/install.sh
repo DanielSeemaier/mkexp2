@@ -41,6 +41,7 @@ PopulateBuildContext() {
   CTX_build_key="$(HashString "$build_identity")"
   CTX_source_dir="$MKEXP2_WORK_DIR/src/${CTX_base}-${CTX_build_key}"
   CTX_binary_path="$MKEXP2_WORK_DIR/bin/${CTX_base}-${CTX_build_key}"
+  CTX_usr_dir="$MKEXP2_WORK_DIR/"
 }
 
 InstallCurrentExperiment() {
