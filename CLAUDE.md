@@ -19,6 +19,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # After generate, submit jobs:
 ./submit.sh
 
+# Parse logs into CSV (run after jobs finish):
+./bin/mkexp2 parse
+
+# Generate plots from CSV results (requires Docker / Colima):
+./bin/mkexp2 plot                        # all algorithms, all plots
+./bin/mkexp2 plot KaMinPar-FM KaMinPar-LP  # explicit algorithm list
+./bin/mkexp2 plot --performance-profile  # subset of plots
+./bin/mkexp2 plot --speedup --running-time
+
 # Tests
 ./tests/run-all-tests.zsh       # run all tests
 ./tests/run-probe-tests.zsh     # probe/inspection tests only
@@ -33,7 +42,7 @@ There is no linting configuration or CI setup.
 
 ### Entry Point & Module Loading
 
-`bin/mkexp2` sources all modules from `bin/inc/` (state, util, dsl, props, plugins, expand, install, generate, parse, check, probe, cli), parses the CLI, discovers `Experiment*()` functions in the user's `Experiment` file, and loops over them.
+`bin/mkexp2` sources all modules from `bin/inc/` (state, util, dsl, props, plugins, expand, install, generate, parse, plot, check, probe, cli), parses the CLI, discovers `Experiment*()` functions in the user's `Experiment` file, and loops over them.
 
 ### Data Flow
 
@@ -53,6 +62,8 @@ There is no linting configuration or CI setup.
 
 8. **Probe** (`bin/inc/probe.sh`): Runs expansion in probe mode (`MKEXP2_PROBE_MODE=1`) and serializes the model as JSON.
 
+9. **Plot** (`bin/inc/plot.sh`): Reads the list of active algorithms from the `Experiment` file (or CLI args), writes a Docker Compose file to `.mkexp2/plots-compose.yml`, installs R packages into `plots/.r-libs` on first run (cached), then runs `plots/mkplots.R` inside the container to produce `plots.pdf` in the experiment directory.
+
 ### Key Conventions
 
 - **Global state via associative arrays.** All experiment state is in module-level zsh associative arrays. `ResetExperiment` clears them between `Experiment*()` function calls.
@@ -68,3 +79,11 @@ There is no linting configuration or CI setup.
 - **`PartitionerProperty key [fallback]`** — inside plugin hooks, resolves a property for the currently active algorithm. Works consistently during install, generate, and probe phases.
 
 - **TAP test output.** `pass` / `fail` helpers in `tests/lib/test_framework.zsh` print `ok N - msg` / `not ok - msg`. Driver scripts print `1..$TEST_COUNT` at the end.
+
+- **Plot submodule.** `plots/` is a git submodule. R plotting code lives there. The submodule's `.gitignore` excludes `.r-libs/` (cached packages) and `.cache/`. The generated `.mkexp2/` directory in experiment dirs is excluded by the main repo's `.gitignore`. The output `plots.pdf` is added to the experiment's `.gitignore` automatically by `mkexp2 plot`.
+
+- **Docker for plots.** `mkexp2 plot` requires Docker (tested with Colima on macOS). If using Colima, set `DOCKER_HOST="unix://${HOME}/.colima/default/docker.sock"` in your shell profile.
+
+## Instructions for Claude
+
+- **Always update `CLAUDE.md`** after completing any non-trivial task — add new commands, modules, conventions, or environmental notes so the file stays accurate.
