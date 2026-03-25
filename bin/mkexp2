@@ -21,6 +21,7 @@ MKEXP2_HOME=$(cd "$script_dir/.." && pwd)
 . "$MKEXP2_HOME/bin/inc/install.sh"
 . "$MKEXP2_HOME/bin/inc/generate.sh"
 . "$MKEXP2_HOME/bin/inc/parse.sh"
+. "$MKEXP2_HOME/bin/inc/plot.sh"
 . "$MKEXP2_HOME/bin/inc/check.sh"
 . "$MKEXP2_HOME/bin/inc/probe.sh"
 . "$MKEXP2_HOME/bin/inc/cli.sh"
@@ -65,6 +66,11 @@ fi
 
 if [[ "$MKEXP2_MODE" == "probe" ]]; then
   ProbeCommand "$PWD/Experiment" "${experiment_functions[@]}"
+  exit $?
+fi
+
+if [[ "$MKEXP2_MODE" == "plot" ]]; then
+  GeneratePlots
   exit $?
 fi
 
