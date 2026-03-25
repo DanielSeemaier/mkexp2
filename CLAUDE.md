@@ -22,6 +22,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Parse logs into CSV (run after jobs finish):
 ./bin/mkexp2 parse
 
+# Check run completion progress (counts existing log files vs. expected):
+./bin/mkexp2 progress
+
 # Generate plots from CSV results (requires Docker / Colima):
 ./bin/mkexp2 plot                        # all algorithms, all plots
 ./bin/mkexp2 plot KaMinPar-FM KaMinPar-LP  # explicit algorithm list
@@ -42,7 +45,7 @@ There is no linting configuration or CI setup.
 
 ### Entry Point & Module Loading
 
-`bin/mkexp2` sources all modules from `bin/inc/` (state, util, dsl, props, plugins, expand, install, generate, parse, plot, check, probe, cli), parses the CLI, discovers `Experiment*()` functions in the user's `Experiment` file, and loops over them.
+`bin/mkexp2` sources all modules from `bin/inc/` (state, util, dsl, props, plugins, expand, install, generate, parse, plot, check, probe, progress, cli), parses the CLI, discovers `Experiment*()` functions in the user's `Experiment` file, and loops over them.
 
 ### Data Flow
 
@@ -62,7 +65,9 @@ There is no linting configuration or CI setup.
 
 8. **Probe** (`bin/inc/probe.sh`): Runs expansion in probe mode (`MKEXP2_PROBE_MODE=1`) and serializes the model as JSON.
 
-9. **Plot** (`bin/inc/plot.sh`): Reads the list of active algorithms from the `Experiment` file (or CLI args), writes a Docker Compose file to `.mkexp2/plots-compose.yml`, installs R packages into `plots/.r-libs` on first run (cached), then runs `plots/mkplots.R` inside the container to produce `plots.pdf` in the experiment directory.
+9. **Progress** (`bin/inc/progress.sh`): Runs expansion in probe mode across all experiment functions and compares expected log file paths against existing files on disk, printing a per-algorithm progress bar table.
+
+10. **Plot** (`bin/inc/plot.sh`): Reads the list of active algorithms from the `Experiment` file (or CLI args), writes a Docker Compose file to `.mkexp2/plots-compose.yml`, installs R packages into `plots/.r-libs` on first run (cached), then runs `plots/mkplots.R` inside the container to produce `plots.pdf` in the experiment directory.
 
 ### Key Conventions
 
