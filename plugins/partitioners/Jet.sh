@@ -127,12 +127,10 @@ PartitionerInvoke_Jet() {
 
   local config_dir=""
   local config_dir_path=""
-  local global_binary=""
   local config=""
 
   config_dir=$(PartitionerProperty "config_dir")
   config_dir_path="${config_dir%/}"
-  global_binary=$(PartitionerProperty "global_binary")
 
   config="${(q)config_dir_path}/${(q)RUN_k}.cfg"
   if (( ! MKEXP2_PROBE_MODE )); then
@@ -151,7 +149,7 @@ PartitionerInvoke_Jet() {
   fi
 
 
-  local cmd="${(q)global_binary}"
+  local cmd="${RUN_binary_path}"
   if [[ -n "$RUN_args" ]]; then
     cmd+=" $RUN_args"
   fi
