@@ -1,4 +1,5 @@
 .claude/
 .DS_Store
 .mkexp2/
+slurm/
 describe.out

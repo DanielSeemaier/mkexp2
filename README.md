@@ -191,7 +191,9 @@ Example:
   - `taskset` expands to `taskset -c 0-<nproc-1> <cmd>`
 - Slurm header controls:
   - `Property slurm.minimal_header true|false` (default: `false`)
-  - when `true`, Slurm run jobs only emit `--job-name` and `--partition` (plus `--array` if applicable)
+  - when `true`, Slurm run jobs only emit `--job-name`, `--partition`, `--output`, and `--error` (plus `--array` if applicable)
+- Slurm run, install, and parse job scripts are generated under `slurm/`.
+- Slurm scheduler stdout/stderr files are also written under `slurm/` (`slurm-%j.out` for regular jobs, `slurm-%A_%a.out` for array tasks).
 - No timelimit is applied by default.
   - Set `Property timelimit <DD:HH:MM:SS|HH:MM:SS>` to add a Slurm job timelimit.
   - Set `Property timelimit.per_instance <DD:HH:MM:SS|HH:MM:SS>` to wrap each run with `timeout`.
@@ -238,7 +240,7 @@ Example:
     - `--calls`
   - `--property <Algorithm>` prints the resolved property map for that algorithm as a JSON object
   - `--property <Algorithm>.<property>` prints a single resolved algorithm property as JSON
-- `mkexp2 init` adds `.mkexp2/` and `logs/` to `.gitignore`; CSV results are intentionally not ignored.
+- `mkexp2 init` adds `.mkexp2/`, `logs/`, and `slurm/` to `.gitignore`; CSV results are intentionally not ignored.
 
 ## Tests
 

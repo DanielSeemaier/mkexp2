@@ -74,10 +74,17 @@ LauncherWriteJob_slurm() {
   max_parallel=$(ResolveRunProperty "slurm.array.max_parallel" "32")
   minimal_header=$(ResolveRunProperty "slurm.minimal_header" "false")
 
+  local slurm_output="slurm/slurm-%j.out"
+  if [[ "$use_array" == "true" && "$cmd_count" -gt 1 ]]; then
+    slurm_output="slurm/slurm-%A_%a.out"
+  fi
+
   cat > "$job_script" <<SCRIPT
 #!/usr/bin/env zsh
 #SBATCH --job-name=${job_name}
 #SBATCH --partition=${partition}
+#SBATCH --output=${slurm_output}
+#SBATCH --error=${slurm_output}
 SCRIPT
 
   if [[ "$minimal_header" != "true" ]]; then

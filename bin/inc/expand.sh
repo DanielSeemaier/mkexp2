@@ -176,6 +176,9 @@ ExpandCurrentExperiment() {
     local job_key="${experiment_name}:${topology}"
     local cmd_file="$PWD/jobs/${job_name}.cmds"
     local job_script="$PWD/jobs/${job_name}.sh"
+    if [[ "$_system" == "slurm" ]]; then
+      job_script="$PWD/slurm/${job_name}.sh"
+    fi
     local dependency_key=""
     dependency_key=$(ResolveDependencyKey "$topology")
     local cmd_count=0

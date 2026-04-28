@@ -85,10 +85,35 @@ EOF
     assert_eq "$(json_value probe-jobs.json '.jobs.run_jobs[0].array_max_parallel')" "5" "probe reports array max parallel"
     assert_eq "$(json_value probe-jobs.json '.jobs.install_job.mode')" 'job' "probe reports install job summary"
     assert_eq "$(json_value probe-jobs.json '.jobs.parse_job.launcher')" 'slurm' "probe reports slurm parse job summary"
+    assert_eq "$(json_value probe-jobs.json '.jobs.run_jobs[0].job_script | endswith("/slurm/ExperimentBeta__2x1x3.sh")')" "true" "probe reports slurm job script directory"
 
     assert_file_eq jobs/ExperimentBeta__2x1x3.cmds expected.cmds "probe call expansion matches generated slurm command file"
-    if ! grep -q '^#SBATCH --array=0-1%5$' jobs/ExperimentBeta__2x1x3.sh; then
+    if ! grep -q '^#SBATCH --array=0-1%5$' slurm/ExperimentBeta__2x1x3.sh; then
       fail "generated slurm job script contains expected array setting"
+    fi
+    if ! grep -q '^#SBATCH --output=slurm/slurm-%A_%a.out$' slurm/ExperimentBeta__2x1x3.sh; then
+      fail "generated slurm job script writes array output under slurm directory"
+    fi
+    if ! grep -q '^#SBATCH --error=slurm/slurm-%A_%a.out$' slurm/ExperimentBeta__2x1x3.sh; then
+      fail "generated slurm job script writes array errors under slurm directory"
+    fi
+    if ! grep -q '^#SBATCH --output=slurm/slurm-%j.out$' slurm/ExperimentAlpha__2x1x3.sh; then
+      fail "generated slurm run job writes non-array output under slurm directory"
+    fi
+    if ! grep -q '^#SBATCH --error=slurm/slurm-%j.out$' slurm/ExperimentAlpha__2x1x3.sh; then
+      fail "generated slurm run job writes non-array errors under slurm directory"
+    fi
+    if ! grep -q '^#SBATCH --output=slurm/slurm-%j.out$' slurm/install__*.sh; then
+      fail "generated slurm install job writes output under slurm directory"
+    fi
+    if ! grep -q '^#SBATCH --error=slurm/slurm-%j.out$' slurm/install__*.sh; then
+      fail "generated slurm install job writes errors under slurm directory"
+    fi
+    if ! grep -q '^#SBATCH --output=slurm/slurm-%j.out$' slurm/parse__*.sh; then
+      fail "generated slurm parse job writes output under slurm directory"
+    fi
+    if ! grep -q '^#SBATCH --error=slurm/slurm-%j.out$' slurm/parse__*.sh; then
+      fail "generated slurm parse job writes errors under slurm directory"
     fi
     if ! grep -q '^submit_install_slurm ' submit.sh; then
       fail "submit script contains install job submission"

@@ -12,6 +12,7 @@ test_e2e_init_and_discoverability() {
     assert_path_exists .gitignore "init creates .gitignore"
     assert_file_contains .gitignore ".mkexp2/" "init adds .mkexp2/ to .gitignore"
     assert_file_contains .gitignore "logs/" "init adds logs/ to .gitignore"
+    assert_file_contains .gitignore "slurm/" "init adds slurm/ to .gitignore"
 
     "$MKEXP2" --list-partitioners > partitioners.out
     assert_file_contains partitioners.out "Mock" "list-partitioners includes Mock"

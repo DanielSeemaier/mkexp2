@@ -575,6 +575,11 @@ EnsureExperimentGitignore() {
     changed=1
   fi
 
+  if ! grep -qxF "slurm/" "$gitignore_file"; then
+    printf '%s\n' "slurm/" >> "$gitignore_file"
+    changed=1
+  fi
+
   if ! grep -qxF "plots.pdf" "$gitignore_file"; then
     printf '%s\n' "plots.pdf" >> "$gitignore_file"
     changed=1

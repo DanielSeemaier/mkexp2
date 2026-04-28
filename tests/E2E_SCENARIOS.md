@@ -4,7 +4,7 @@ The end-to-end suite covers these workflows:
 
 1. `init` and discoverability
    - `mkexp2 init Default` creates `Experiment`
-   - `.gitignore` gets `.mkexp2/` and `logs/`
+   - `.gitignore` gets `.mkexp2/`, `logs/`, and `slurm/`
    - list commands expose bundled presets and user-facing partitioners
    - the hidden internal `TestHarness` plugin stays out of normal discoverability output
 
