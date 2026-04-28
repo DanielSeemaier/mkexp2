@@ -24,9 +24,9 @@ LoadPartitionerPlugin() {
   fi
 
   local plugin_file=""
-  plugin_file=$(ResolvePartitionerPluginFile "$base")
+  plugin_file=$(ResolvePartitionerPluginFile "$base" || true)
   if [[ -z "$plugin_file" ]]; then
-    EchoFatal "unknown partitioner plugin '$base' ($plugin_file not found)"
+    EchoFatal "unknown partitioner plugin '$base'"
     exit 1
   fi
 
@@ -85,9 +85,9 @@ DescribePartitioner() {
   fi
 
   local plugin_file=""
-  plugin_file=$(ResolvePartitionerPluginFile "$base")
+  plugin_file=$(ResolvePartitionerPluginFile "$base" || true)
   if [[ -z "$plugin_file" ]]; then
-    EchoFatal "unknown partitioner '$base' ($plugin_file not found)"
+    EchoFatal "unknown partitioner '$base'"
     return 1
   fi
 

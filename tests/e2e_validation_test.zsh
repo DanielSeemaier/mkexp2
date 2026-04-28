@@ -27,6 +27,28 @@ EOF
     assert_file_contains check.out "invalid AlgorithmProperty 'mode'" "check reports invalid algorithm property"
   )
 
+  cat > "$tmp/Experiment" <<'EOF'
+System local
+
+DefineAlgorithm Known TestHarness
+
+ExperimentUnknown() {
+  Algorithms Missing
+  Graph missing_graph
+  Ks 2
+  Seeds 1
+  Epsilons 0.03
+  Threads 1x1x1
+}
+EOF
+
+  (
+    cd "$tmp"
+    assert_cmd_fails "install fails for unknown algorithm with a fatal message" "$MKEXP2" install
+    "$MKEXP2" install > install.out 2>&1 || true
+    assert_file_contains install.out "unknown partitioner plugin 'Missing'" "install reports unknown algorithm"
+  )
+
   (
     cd "$ROOT"
     "$MKEXP2" describe TestHarness > describe.out
