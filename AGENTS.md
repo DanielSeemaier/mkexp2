@@ -57,6 +57,8 @@ There is no linting configuration or CI setup.
 
 4. **Build context** (`bin/inc/install.sh`): `PopulateBuildContext` computes `CTX_*` variables and a content-addressed `CTX_build_key` (SHA1 of `base|url|ref|build_opts|cmake_flags`) for caching. Binaries go to `.mkexp2/bin/<base>-<hash>`.
 
+   Install/build commands executed through `Run` append command sections and output to one Markdown log at `logs/install.md`; individual per-command install log files are not generated.
+
 5. **Expansion engine** (`bin/inc/expand.sh`): `ExpandCurrentExperiment` iterates the Cartesian product of `(topology × algorithm × seed × epsilon × k × graph)`, calling plugin hooks to produce commands. Results go into `EXPAND_CALL` / `EXPAND_JOB` maps.
 
 6. **Generate** (`bin/inc/generate.sh`): Writes `.cmds` files (one line per invocation) and job scripts, then builds a master `submit.sh`. Local job scripts live under `jobs/`; Slurm job scripts live under `slurm/`.

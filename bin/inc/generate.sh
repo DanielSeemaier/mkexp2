@@ -135,8 +135,7 @@ EnsureSlurmInstallJob() {
     install_cmd+=" --build-max-cores $(ShellQuote "$MKEXP2_BUILD_MAX_CORES")"
   fi
 
-  local install_log_dir="$PWD/logs/install"
-  local run_log_file="$install_log_dir/${MKEXP2_RUN_ID}-install.log"
+  local install_log_file="$PWD/logs/install.md"
 
   cat > "$MKEXP2_SLURM_INSTALL_JOB_SCRIPT" <<SCRIPT
 #!/usr/bin/env zsh
@@ -164,19 +163,19 @@ SCRIPT
 set -euo pipefail
 
 cd "$PWD"
-mkdir -p "$install_log_dir"
+mkdir -p "$PWD/logs"
 
 echo "[mkexp2] install job started"
-echo "[mkexp2] install log: $run_log_file"
+echo "[mkexp2] install log: $install_log_file"
 
 set +e
-MKEXP2_INSTALL_LOG_DIR="$install_log_dir" MKEXP2_RUN_VERBOSE=1 $install_cmd > "$run_log_file" 2>&1
+MKEXP2_INSTALL_LOG_FILE="$install_log_file" MKEXP2_RUN_VERBOSE=1 $install_cmd
 install_exit_code=\$?
 set -e
 
 if (( install_exit_code != 0 )); then
-  echo "[mkexp2] install failed, log: $run_log_file"
-  tail -n 200 "$run_log_file"
+  echo "[mkexp2] install failed, log: $install_log_file"
+  tail -n 200 "$install_log_file"
 fi
 
 exit \$install_exit_code

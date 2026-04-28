@@ -198,10 +198,8 @@ Example:
   - Set `Property timelimit <DD:HH:MM:SS|HH:MM:SS>` to add a Slurm job timelimit.
   - Set `Property timelimit.per_instance <DD:HH:MM:SS|HH:MM:SS>` to wrap each run with `timeout`.
 - `timelimit.per_instance` maps to `timeout` seconds in generated commands.
-- Install command output is concise by default and writes per-command logs to:
-  `logs/install/`
-  with filenames prefixed by the current date/time; long command names are
-  shortened and get a hash suffix.
+- Install command output is concise by default and appends every build command
+  and its output to one Markdown log: `logs/install.md`.
 - Use `mkexp2 ... --verbose` (or `-v`) to stream full stdout/stderr of each
   command with prefixed, readable output.
 - On install failures, `mkexp2` prints the failing command log inline.
@@ -212,8 +210,8 @@ Example:
 - Slurm can run install as a dedicated dependency job before compute jobs:
   - `Property slurm.install.mode job`
   - optional: `Property slurm.install.timelimit 02:00:00` (otherwise no `#SBATCH --time`)
-  - command logs still go to: `logs/install/`
-  - the Slurm wrapper output also goes to: `logs/install/<run-id>-install.log`
+  - command logs still go to: `logs/install.md`
+  - the Slurm wrapper output goes to the generated Slurm output file under `slurm/`
 - Parse support:
   - `mkexp2 parse` writes CSV files to `results/<algorithm>.csv`
   - `Property parse.auto true` appends parsing automatically after generated runs complete

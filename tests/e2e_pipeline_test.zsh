@@ -38,6 +38,10 @@ test_e2e_local_pipeline_and_parse() {
     assert_file_contains all.out "build cores: 1" "CLI build flag is reflected during install"
     assert_file_contains all.out "TestHarness-Dbg (already built in this run)" "derived alias reuses existing build"
     assert_file_contains all.out "TestHarness-Custom (already built in this run)" "user-defined alias reuses existing build"
+    assert_path_exists logs/install.md "install writes a single markdown log"
+    assert_file_contains logs/install.md "# mkexp2 install log" "install markdown log has a title"
+    assert_file_contains logs/install.md "## 0001." "install markdown log records command sections"
+    assert_file_contains logs/install.md "test-harness build: TestHarness" "install markdown log captures command output"
 
     zsh ./submit.sh > submit.out
 

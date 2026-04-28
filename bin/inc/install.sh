@@ -47,11 +47,10 @@ PopulateBuildContext() {
 InstallCurrentExperiment() {
   local experiment_name="$1"
   mkdir -p "$MKEXP2_WORK_DIR/src" "$MKEXP2_WORK_DIR/bin"
-  mkdir -p "$PWD/logs/install"
-  PrepareInstallLogDir
+  PrepareInstallLogFile
 
   EchoStep "Installing dependencies for $experiment_name"
-  EchoInfo "command logs: $MKEXP2_INSTALL_LOG_DIR"
+  EchoInfo "install log: $MKEXP2_INSTALL_LOG_FILE"
 
   local algorithm=""
   for algorithm in "${_algorithms[@]}"; do
