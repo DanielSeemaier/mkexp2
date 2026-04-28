@@ -35,3 +35,12 @@ test_parser_mt_kahypar_example() {
 
   pass "Mt-KaHyPar parser fixture"
 }
+
+test_parser_kaminpar_example() {
+  run_parser_fixture \
+    "KaMinPar" \
+    "$ROOT/tests/fixtures/parsers/KaMinPar" \
+    "KaMinPar parser"
+
+  pass "KaMinPar parser fixture"
+}

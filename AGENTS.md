@@ -91,7 +91,7 @@ There is no linting configuration or CI setup.
 
 - **TAP test output.** `pass` / `fail` helpers in `tests/lib/test_framework.zsh` print `ok N - msg` / `not ok - msg`. Driver scripts print `1..$TEST_COUNT` at the end.
 
-- **Parser fixture tests.** Parser regression tests live in `tests/parser_plugins_test.zsh`. Fixtures are grouped under `tests/fixtures/parsers/<ParserName>/` as one or more `.log` files plus `expected.csv`; the helper copies those logs into a temporary experiment and runs `mkexp2 parse`.
+- **Parser fixture tests.** Parser regression tests live in `tests/parser_plugins_test.zsh`. Fixtures are grouped under `tests/fixtures/parsers/<ParserName>/` as one or more `.log` files plus `expected.csv`; the helper copies those logs into a temporary experiment and runs `mkexp2 parse`. Current fixtures cover `KaMinPar` and `MtKaHyPar`.
 
 - **Plot submodule.** `plots/` is a git submodule. R plotting code lives there. The submodule's `.gitignore` excludes `.r-libs/` (cached packages) and `.cache/`. The generated `.mkexp2/` directory in experiment dirs is excluded by the main repo's `.gitignore`. The output `plots.pdf` is added to the experiment's `.gitignore` automatically by `mkexp2 plot`.
 

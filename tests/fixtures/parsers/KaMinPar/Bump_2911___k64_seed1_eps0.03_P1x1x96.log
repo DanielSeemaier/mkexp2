@@ -1,0 +1,120 @@
+################################################################################
+#                _  __       __  __  _         ____                            #
+#               | |/ / __ _ |  \/  |(_) _ __  |  _ \  __ _  _ __               #
+#               | ' / / _` || |\/| || || '_ \ | |_) |/ _` || '__|              #
+#               | . \| (_| || |  | || || | | ||  __/| (_| || |                 #
+#               |_|\_\\__,_||_|  |_||_||_| |_||_|    \__,_||_|                 #
+#                                                                              #
+################################################################################
+Commit:                       5867308ecda263a8bb3b64625fdde8f160fb0938
+Assertion level:              always+light
+Types:                        NID: 4, EID: 4, NW: 4, EW: 4
+############################################################## Input Summary ###
+Threads:                      96
+Seed:                         1
+Graph:                        Bump_2911 [node ordering: deg-buckets] [edge ordering: natural]
+  Number of nodes:              2911419 (unweighted)
+  Number of edges:            124818480 (unweighted)
+Number of blocks:             64
+  Maximum block weight:       46855 (45491 + 3% / 3%)
+  Minimum block weight:       0
+---------------------------------------------------------- Graph Compression ---
+Enabled:                      no
+-------------------------------------------------------- Partitioning Scheme ---
+Partitioning mode:            deep
+  Initial partitioning mode:  async-parallel / 1
+----------------------------------------------------------------- Coarsening ---
+Contraction limit:            2000
+Coarsening algorithm:         basic-clustering
+  Cluster weight limit:       epsilon-block-weight x 1
+  Shrink factor:              1.79769e+308
+  Max mem-free level:         1
+  Clustering algorithm:       lp
+    Number of iterations:     5
+    High degree threshold:    4294967295
+    Max degree:               4294967295
+    Tie breaking strategy:    uniform
+    Implementation:           two-phase
+      Relabel:                no
+    2-hop clustering:         match-threadwise, if |Vcoarse| > 0.500000 * |V|
+    Isolated nodes:           match-during-two-hop
+  Forced hierarchy levels:    <none> (leeway: U=10.000000, L=1.100000)
+Contraction algorithm:        unbuffered
+  Implementation:             two-phase
+------------------------------------------------------- Initial Partitioning ---
+Adaptive algorithm selection: yes
+Refinement algorithms:        [simple-fm]
+----------------------------------------------------------------- Refinement ---
+Refinement algorithms:        [overload-balancer -> lp -> fm -> overload-balancer]
+Label propagation:
+  Number of iterations:       5
+  Tie breaking strategy:      uniform
+  Implementation:             single-phase
+k-way FM:
+  Number of iterations:       10 [or improvement drops below < 0.100000%]
+  Number of seed nodes:       10
+  Locking strategies:         seed nodes: unlock, locally moved nodes: unlock
+  Gain cache:                 compact-hashing
+############################################################## Preprocessing ###
+Removed 58989 isolated nodes
+  Remaining nodes:             2852430
+  Remaining total node weight: 2852430
+############################################################### Partitioning ###
+Input graph:
+ Number of nodes: 2852430 | Number of edges: 124818480
+ Maximum node weight: 1
+
+Coarsening -> Level 1 [max cluster weight: 2285]:
+ Total edge weight:   45818174
+ Number of nodes:     22822 | Number of edges: 321102
+ Maximum node weight: 1626
+
+==> Coarsening terminated with less than 192000 nodes
+
+Initial partitioning:
+ Number of blocks: 16
+
+Uncoarsening -> Level 0
+ Number of nodes: 2852430 | Number of edges: 124818480
+  Running refinement on 16 blocks
+   1. Overload Balancer (no effect)
+   2. Label Propagation
+   3. FM (no effect)
+   4. Overload Balancer (no effect)
+  Extending partition from 16 blocks to 64 blocks
+
+Toplevel:
+ Number of nodes: 2852430 | Number of edges: 124818480
+  Running refinement on 64 blocks
+   1. Overload Balancer
+   2. Label Propagation
+   3. FM (no effect)
+   4. Overload Balancer (no effect)
+############################################################# Result Summary ###
+RESULT cut=3328698 imbalance=0.029984 feasible=1 k=64
+TIME read_input_graph=0.842 partitioning=2.484 partitioning.rearrange_by_degree-buckets=0.019 partitioning.coarsening=0.106 partitioning.initial_partitioning_scheme=0.116 partitioning.uncoarsening=2.234 partitioning.deallocation=0.002 io=0.000
+MEMORY disabled
+
+Global Timer: ................................... 3.328 s
+|- Read input graph: ............................ 0.842 s
+|- Partitioning: ................................ 2.484 s
+|  |- Rearrange by degree-buckets: .............. 0.019 s
+|  |- Coarsening: ............................... 0.106 s
+|  |- Initial partitioning scheme: .............. 0.116 s
+|  |- Uncoarsening: ............................. 2.234 s
+|  |- Deallocation: ............................. 0.002 s
+|  `- Re-integrate isolated nodes: .............. 0.003 s
+`- IO: .......................................... 0.000 s
+
+Partition summary:
+  Number of blocks: 64
+  Edge cut:         3328698
+  Imbalance:        0.029984
+  Imbalance (min):  -0.214306
+  Feasible:         yes
+
+Block weights:
+  w(0 ) = 46855     w(1 ) = 46855     w(2 ) = 46855     w(3 ) = 46855
+  w(4 ) = 46855     w(5 ) = 46855     w(6 ) = 46855     w(7 ) = 46855
+
+Maximum resident set size: 3065864 KiB
