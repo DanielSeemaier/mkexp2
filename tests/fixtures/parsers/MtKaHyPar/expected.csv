@@ -1,0 +1,2 @@
+Graph,N,M,K,Seed,Cut,Epsilon,Imbalance,Time,NumNodes,NumMPIsPerNode,NumThreadsPerMPI,Cores,Timeout,Failed
+Bump_2911,2911419,62409240,64,1,3249244,0.03,0.029984,1.72863,1,1,96,96,0,0

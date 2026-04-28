@@ -63,7 +63,7 @@ There is no linting configuration or CI setup.
 
 6. **Generate** (`bin/inc/generate.sh`): Writes `.cmds` files (one line per invocation) and job scripts, then builds a master `submit.sh`. Local job scripts live under `jobs/`; Slurm job scripts live under `slurm/`.
 
-7. **Parse** (`bin/inc/parse.sh`): Streams log files through awk parsers (`plugins/parsers/*.awk`) using a `__BEGIN_FILE__ <marker>` / `__END_FILE__` protocol. The shared `plugins/parsers/.csv.awk` provides helpers for CSV output.
+7. **Parse** (`bin/inc/parse.sh`): Streams log files through awk parsers (`plugins/parsers/*.awk`) using a `__BEGIN_FILE__ <marker>` / `__END_FILE__` protocol. The shared `plugins/parsers/.csv.awk` provides helpers for CSV output. Bundled parsers include `KaMinPar`, `dKaMinPar`, and `MtKaHyPar`.
 
 8. **Probe** (`bin/inc/probe.sh`): Runs expansion in probe mode (`MKEXP2_PROBE_MODE=1`) and serializes the model as JSON.
 
@@ -90,6 +90,8 @@ There is no linting configuration or CI setup.
 - **Unknown algorithm names.** An algorithm not created with `DefineAlgorithm` resolves to a partitioner plugin of the same name; if no such plugin exists, `mkexp2 install/generate` should fail with a clear `unknown partitioner plugin '<name>'` fatal message.
 
 - **TAP test output.** `pass` / `fail` helpers in `tests/lib/test_framework.zsh` print `ok N - msg` / `not ok - msg`. Driver scripts print `1..$TEST_COUNT` at the end.
+
+- **Parser fixture tests.** Parser regression tests live in `tests/parser_plugins_test.zsh`. Fixtures are grouped under `tests/fixtures/parsers/<ParserName>/` as one or more `.log` files plus `expected.csv`; the helper copies those logs into a temporary experiment and runs `mkexp2 parse`.
 
 - **Plot submodule.** `plots/` is a git submodule. R plotting code lives there. The submodule's `.gitignore` excludes `.r-libs/` (cached packages) and `.cache/`. The generated `.mkexp2/` directory in experiment dirs is excluded by the main repo's `.gitignore`. The output `plots.pdf` is added to the experiment's `.gitignore` automatically by `mkexp2 plot`.
 

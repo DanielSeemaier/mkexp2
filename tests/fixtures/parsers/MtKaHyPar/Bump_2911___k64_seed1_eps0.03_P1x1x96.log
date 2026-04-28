@@ -1,0 +1,145 @@
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
++         __  __ _______       _  __     _    _       _____                   +
++        |  \/  |__   __|     | |/ /    | |  | |     |  __ \                  +
++        | \  / |  | |  ____  | ' / __ _| |__| |_   _| |__) |_ _ _ __         +
++        | |\/| |  | | |____| |  < / _` |  __  | | | |  ___/ _` | '__|        +
++        | |  | |  | |        | . \ (_| | |  | | |_| | |  | (_| | |           +
++        |_|  |_|  |_|        |_|\_\__,_|_|  |_|\__, |_|   \__,_|_|           +
++                                                __/ |                        +
++                                               |___/                         +
++          Karlsruhe Shared Memory Hypergraph Partitioning Framework          +
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ [INFO]  Current objective function is equivalent to the edge cut metric for graphs. Objective function is set to edge cut metric.
+*******************************************************************************
+*                            Partitioning Context                             *
+*******************************************************************************
+Partitioning Parameters:
+  Hypergraph:                         /nfs/work/graph_benchmark_sets/ufm_paper/combined/Bump_2911.metis
+  Input File Format:                  Metis (-> graph)
+  Preset:                             default
+  k:                                  64
+  epsilon:                            0.03
+  Objective:                          cut
+  seed:                               1
+  Number of V-Cycles:                 0
+  Ignore HE Size Threshold:           1000
+  Large HE Size Threshold:            50000
+-------------------------------------------------------------------------------
+Preprocessing Parameters:
+  Use Community Detection:            true
+  Disable C. D. for Mesh Graphs:      true
+
+  Community Detection Parameters:
+    Edge Weight Function:                uniform
+    Maximum Louvain-Pass Iterations:     5
+    Minimum Vertex Move Fraction:        0.01
+    Vertex Degree Sampling Threshold:    200000
+-------------------------------------------------------------------------------
+Coarsening Parameters:
+  Algorithm:                          multilevel_coarsener
+  Use Adaptive Edge Size:             true
+  Max Allowed Weight Multiplier:      1
+  Contraction Limit Multiplier:       160
+  Contraction Limit:                  10240
+  Minimum Shrink Factor:              1.01
+  Maximum Shrink Factor:              2.5
+  Vertex Degree Sampling Threshold:   200000
+-------------------------------------------------------------------------------
+Initial Partitioning Parameters:
+  Initial Partitioning Mode:          recursive_bipartitioning
+  Number of Runs:                     20
+  Use Adaptive IP Runs:               true
+  Min Adaptive IP Runs:               5
+  Perform Refinement On Best:         true
+  FM Refinement Rounds:               1
+-------------------------------------------------------------------------------
+Refinement Parameters:
+  Refine Until No Improvement:        false
+
+  Label Propagation Parameters:
+    Algorithm:                        label_propagation
+    Maximum Iterations:               5
+    Unconstrained:                    true
+    Rebalancing:                      false
+    HE Size Activation Threshold:     100
+    Relative Improvement Threshold:   0.001
+
+  Jet Parameters:                     disabled
+
+  FM Parameters:
+    Algorithm:                        unconstrained_fm
+    Multitry Rounds:                  10
+    Rollback Bal. Violation Factor:   1
+    Num Seed Nodes:                   25
+    Minimum Improvement Factor:       -1
+    Unconstrained Rounds:             8
+    Threshold Border Node Inclusion:  0.7
+    Minimum Imbalance Penalty Factor: 0.2
+    Maximum Imbalance Penalty Factor: 1
+    Unc. Minimum Improvement Factor:  0.002
+
+  Flow Parameters:                    disabled
+
+  Rebalancing Parameters:
+    Algorithm:                        advanced_rebalancer
+-------------------------------------------------------------------------------
+Shared Memory Parameters:
+  Number of Threads:                  96
+  Use Localized Random Shuffle:       false
+-------------------------------------------------------------------------------
+
+********************************************************************************
+*                                    Input                                     *
+********************************************************************************
+Hypergraph Information
+Name : Bump_2911.metis
+# HNs: 2911419  # HEs: 62409240  # pins: 124818480  # graph edges: 62409240
+HE size             HE weight           HN degree           HN weight
+| min= 2            | min= 1            | min= 0            | min= 1
+| Q1 = 2            | Q1 = 1            | Q1 = 44           | Q1 = 1
+| med= 2            | med= 1            | med= 44           | med= 1
+| Q3 = 2            | Q3 = 1            | Q3 = 44           | Q3 = 1
+| max= 2            | max= 1            | max= 194          | max= 1
+| avg= 2            | avg= 1            | avg= 42.872       | avg= 1
+| sd = 0            | sd = 0            | sd = 6.96867      | sd = 0
+********************************************************************************
+*                                Coarsening...                                 *
+********************************************************************************
+Hypergraph Information
+Name : Coarsened Hypergraph
+# HNs: 11411  # HEs: 97526  # pins: 195052  # graph edges: 97526
+HE size             HE weight           HN degree           HN weight
+| min= 2            | min= 1            | min= 1            | min= 1
+| Q1 = 2            | Q1 = 65           | Q1 = 15           | Q1 = 238
+| med= 2            | med= 189          | med= 17           | med= 269
+| Q3 = 2            | Q3 = 366          | Q3 = 19           | Q3 = 284
+| max= 2            | max= 1795         | max= 31           | max= 384
+| avg= 2            | avg= 240.722      | avg= 17.0933      | avg= 249.972
+| sd = 0            | sd = 211.036      | sd = 3.61385      | sd = 50.0235
+
+********************************************************************************
+*                           Initial Partitioning...                            *
+********************************************************************************
+Initial Partitioning Results:
+cut       = 5172640
+imbalance = 0.0297861
+
+********************************************************************************
+*                               Local Search...                                *
+********************************************************************************
+Local Search Results:
+cut       = 3249244
+imbalance = 0.029984
+
+********************************************************************************
+*                             Partitioning Result                              *
+********************************************************************************
+Objectives:
+  cut                  = 3249244 (primary objective function)
+  Imbalance            = 0.029984
+  Partitioning Time    = 1.728630 s
+
+Partition sizes and weights:
+Avg Block Weight = 45490
+Min Block Weight = 42394 <= 46855 (Block 11)
+Max Block Weight = 46855 <= 46855 (Block 8)

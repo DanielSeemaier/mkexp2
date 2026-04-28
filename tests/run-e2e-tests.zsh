@@ -5,9 +5,11 @@ set -euo pipefail
 . "$ROOT/tests/e2e_init_test.zsh"
 . "$ROOT/tests/e2e_pipeline_test.zsh"
 . "$ROOT/tests/e2e_validation_test.zsh"
+. "$ROOT/tests/parser_plugins_test.zsh"
 
 test_e2e_init_and_discoverability
 test_e2e_local_pipeline_and_parse
 test_e2e_check_and_describe
+test_parser_mt_kahypar_example
 
 echo "1..$TEST_COUNT"
