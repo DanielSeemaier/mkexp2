@@ -238,7 +238,7 @@ Example:
     - `--calls`
   - `--property <Algorithm>` prints the resolved property map for that algorithm as a JSON object
   - `--property <Algorithm>.<property>` prints a single resolved algorithm property as JSON
-- `mkexp2 init` adds `.mkexp2/`, `logs/*`, `!logs/install.md`, and `slurm/` to `.gitignore`; CSV results and the install log are intentionally not ignored.
+- `mkexp2 init` adds `.mkexp2/`, `logs/*`, `!logs/install.md`, and `slurm/` to `.gitignore`; CSV results, `plots.pdf`, and the install log are intentionally not ignored.
 
 ## Tests
 

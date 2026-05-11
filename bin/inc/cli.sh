@@ -585,11 +585,6 @@ EnsureExperimentGitignore() {
     changed=1
   fi
 
-  if ! grep -qxF "plots.pdf" "$gitignore_file"; then
-    printf '%s\n' "plots.pdf" >> "$gitignore_file"
-    changed=1
-  fi
-
   if (( changed )); then
     EchoStep "Updated $gitignore_file with mkexp2 ignores"
   fi
