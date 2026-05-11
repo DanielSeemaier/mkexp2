@@ -1,0 +1,23 @@
+#!/usr/bin/env zsh
+
+System slurm
+Property slurm.partition diffie
+Property slurm.use_array true
+
+Threads 1x1x96
+
+Ks 2 16 128
+Seeds 1
+Epsilons 0.03
+Graphs /nfs/work/graph_benchmark_sets/ufm_paper/combined
+
+DefineAlgorithm Baseline KaMinPar
+
+DefineAlgorithm MyBranch KaMinPar
+AlgorithmProperty MyBranch repo_ref origin/my/branch
+
+Experiment() {
+  Algorithms Baseline
+  Algorithms MyBranch
+}
+
