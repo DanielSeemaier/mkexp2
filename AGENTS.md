@@ -81,6 +81,8 @@ There is no linting configuration or CI setup.
 
 - **Log file naming.** `logs/<algorithm>/<experiment_label>/<graph>___k<K>_seed<S>_eps<E>_P<topology>.log` — the filename encodes all parameters needed by the parser.
 
+- **Generated `.gitignore`.** `mkexp2 init` ignores generated log contents with `logs/*` but explicitly unignores `logs/install.md`, so the single install log remains visible for debugging failed setup runs.
+
 - **Slurm artifacts.** Slurm run/install/parse job scripts are generated under `slurm/`. Slurm scheduler stdout/stderr is directed to `slurm/slurm-%j.out` for regular jobs and `slurm/slurm-%A_%a.out` for array tasks, while mkexp2 command manifests remain under `jobs/*.cmds`.
 
 - **Hidden plugins.** Dot-prefixed files (`.TestHarness.sh`, `.TestHarness.awk`) are internal test fixtures excluded from `--list-*` output.

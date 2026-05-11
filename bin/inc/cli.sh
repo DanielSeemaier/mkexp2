@@ -569,9 +569,14 @@ EnsureExperimentGitignore() {
     changed=1
   fi
 
-  # Experiment run logs can grow very large; keep them out of git by default.
-  if ! grep -qxF "logs/" "$gitignore_file"; then
-    printf '%s\n' "logs/" >> "$gitignore_file"
+  # Experiment run logs can grow very large; keep them out of git by default,
+  # but leave the single install log visible so failed setups are easy to share.
+  if ! grep -qxF "logs/*" "$gitignore_file"; then
+    printf '%s\n' "logs/*" >> "$gitignore_file"
+    changed=1
+  fi
+  if ! grep -qxF "!logs/install.md" "$gitignore_file"; then
+    printf '%s\n' "!logs/install.md" >> "$gitignore_file"
     changed=1
   fi
 
