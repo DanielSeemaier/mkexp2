@@ -126,12 +126,11 @@ PrepareInstallLogFile() {
 
 _AppendInstallCommandHeader() {
   local cmd_display="$1"
-  local label="$2"
+  local title="$2"
 
-  MKEXP2_INSTALL_COUNTER=$((MKEXP2_INSTALL_COUNTER + 1))
   {
     echo
-    printf '## %04d. `%s`\n' "$MKEXP2_INSTALL_COUNTER" "$label"
+    printf '## `%s`\n' "$title"
     echo
     echo "- Started: $(date '+%Y-%m-%d %H:%M:%S %Z')"
     echo
@@ -152,6 +151,21 @@ _AppendInstallCommandFooter() {
   } >> "$MKEXP2_INSTALL_LOG_FILE"
 }
 
+_StripInstallLogAnsi() {
+  if command -v perl >/dev/null 2>&1; then
+    perl -pe 's/\e\[[0-?]*[ -\/]*[@-~]//g; s/\e\][^\a]*(?:\a|\e\\)//g; s/\e[P^_].*?\e\\//g; s/\e[@-_]//g'
+    return
+  fi
+
+  local esc=$'\033'
+  sed -E "s/${esc}\\[[0-?]*[ -\\/]*[@-~]//g; s/${esc}[@-_]//g"
+}
+
+_CleanInstallLogText() {
+  local text="$1"
+  printf '%s' "$text" | _StripInstallLogAnsi
+}
+
 _RunWithSpinner() {
   local label="$1"
   local log_file="$2"
@@ -160,10 +174,15 @@ _RunWithSpinner() {
   local exit_code=0
   local -a spinner=('|' '/' '-' "\\")
   local idx=1
+  local tmp_file=""
+  if ! tmp_file=$(mktemp "${TMPDIR:-/tmp}/mkexp2-run.XXXXXX"); then
+    EchoWarn "could not create temporary install log file"
+    return 1
+  fi
 
   if [[ -t 1 ]]; then
     set +e
-    "$@" >> "$log_file" 2>&1 &
+    "$@" >> "$tmp_file" 2>&1 &
     local pid=$!
     while kill -0 "$pid" 2>/dev/null; do
       local spinner_label="$label"
@@ -190,10 +209,13 @@ _RunWithSpinner() {
     printf "\r\033[K"
   else
     set +e
-    "$@" >> "$log_file" 2>&1
+    "$@" >> "$tmp_file" 2>&1
     exit_code=$?
     set -e
   fi
+
+  _StripInstallLogAnsi < "$tmp_file" >> "$log_file"
+  rm -f "$tmp_file"
 
   if (( exit_code == 0 )); then
     _UiTag ok
@@ -209,16 +231,20 @@ _RunWithSpinner() {
 Run() {
   local -a cmd=("$@")
   local cmd_display="${(j: :)cmd}"
+  cmd_display="$(_CleanInstallLogText "$cmd_display")"
   local label="${cmd_display:-command}"
+  local title="${cmd[1]:-command}"
+  title="$(_CleanInstallLogText "$title")"
+  [[ -n "$title" ]] || title="command"
 
   PrepareInstallLogFile
-  _AppendInstallCommandHeader "$cmd_display" "$label"
+  _AppendInstallCommandHeader "$cmd_display" "$title"
 
   if (( MKEXP2_RUN_VERBOSE )); then
     _UiTag run
     echo "  $MKEXP2_UI_TAG $cmd_display"
     set +e
-    "$@" 2>&1 | tee -a "$MKEXP2_INSTALL_LOG_FILE" | sed "s/^/    ${MKEXP2_UI_DIM}|${MKEXP2_UI_RESET} /"
+    "$@" 2>&1 | _StripInstallLogAnsi | tee -a "$MKEXP2_INSTALL_LOG_FILE" | sed "s/^/    ${MKEXP2_UI_DIM}|${MKEXP2_UI_RESET} /"
     local rc=${pipestatus[1]}
     set -e
     _AppendInstallCommandFooter "$rc"

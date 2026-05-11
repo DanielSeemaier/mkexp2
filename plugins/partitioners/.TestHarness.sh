@@ -14,7 +14,7 @@ PartitionerAliases_TestHarness() {
 
 PartitionerBuild_TestHarness() {
   mkdir -p "$(dirname "$CTX_binary_path")"
-  Run zsh -c 'echo "test-harness build: $1"' -- "$CTX_algorithm"
+  Run zsh -c 'printf "\033[31mtest-harness build: %s\033[0m\n" "$1"' -- "$CTX_algorithm"
 
   cat > "$CTX_binary_path" <<'SCRIPT'
 #!/usr/bin/env zsh
