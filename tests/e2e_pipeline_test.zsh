@@ -40,6 +40,8 @@ test_e2e_local_pipeline_and_parse() {
     assert_file_contains all.out "TestHarness-Custom (already built in this run)" "user-defined alias reuses existing build"
     assert_path_exists logs/install.md "install writes a single markdown log"
     assert_file_contains logs/install.md "# mkexp2 install log" "install markdown log has a title"
+    assert_file_contains logs/install.md "## Machine info" "install markdown log records machine info"
+    assert_file_contains logs/install.md "### \`uname -a\`" "install markdown log captures uname output"
     assert_file_contains logs/install.md "## \`zsh\`" "install markdown log headings use command names"
     assert_file_contains logs/install.md "$ zsh -c" "install markdown log records the full command in a code block"
     assert_file_not_contains logs/install.md "## 0001." "install markdown log omits numbered command prefixes"

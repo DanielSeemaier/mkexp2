@@ -120,8 +120,61 @@ PrepareInstallLogFile() {
       echo
     } > "$MKEXP2_INSTALL_LOG_FILE"
   fi
+  _AppendInstallMachineInfo
 
   MKEXP2_INSTALL_LOG_INITIALIZED="$MKEXP2_INSTALL_LOG_FILE"
+}
+
+_AppendInstallProbeCommand() {
+  local command_line="$1"
+  local first_word="${command_line%% *}"
+
+  if ! command -v "$first_word" >/dev/null 2>&1; then
+    return
+  fi
+  if [[ "$first_word" == "sysctl" ]] && ! zsh -c "$command_line" >/dev/null 2>&1; then
+    return
+  fi
+
+  {
+    printf '### `%s`\n' "$command_line"
+    echo
+    echo '```console'
+    printf '$ %s\n' "$command_line"
+  } >> "$MKEXP2_INSTALL_LOG_FILE"
+
+  set +e
+  zsh -c "$command_line" 2>&1 | _StripInstallLogAnsi >> "$MKEXP2_INSTALL_LOG_FILE"
+  local rc=${pipestatus[1]}
+  set -e
+
+  {
+    echo '```'
+    if (( rc != 0 )); then
+      echo
+      echo "- Exit code: $rc"
+    fi
+    echo
+  } >> "$MKEXP2_INSTALL_LOG_FILE"
+}
+
+_AppendInstallMachineInfo() {
+  {
+    echo "## Machine info"
+    echo
+    printf -- '- Hostname: `%s`\n' "$(_CleanInstallLogText "$(hostname 2>/dev/null || echo unknown)")"
+    printf -- '- Working directory: `%s`\n' "$PWD"
+    printf -- '- mkexp2 PID: `%s`\n' "$$"
+    echo
+  } >> "$MKEXP2_INSTALL_LOG_FILE"
+
+  _AppendInstallProbeCommand "uname -a"
+  _AppendInstallProbeCommand "lscpu"
+  _AppendInstallProbeCommand "lsmem"
+  _AppendInstallProbeCommand "free -h"
+  _AppendInstallProbeCommand "nproc"
+  _AppendInstallProbeCommand "sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize"
+  _AppendInstallProbeCommand "vm_stat"
 }
 
 _AppendInstallCommandHeader() {
