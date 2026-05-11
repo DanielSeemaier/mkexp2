@@ -61,7 +61,7 @@ There is no linting configuration or CI setup.
 
 5. **Expansion engine** (`bin/inc/expand.sh`): `ExpandCurrentExperiment` iterates the Cartesian product of `(topology × algorithm × seed × epsilon × k × graph)`, calling plugin hooks to produce commands. Results go into `EXPAND_CALL` / `EXPAND_JOB` maps.
 
-6. **Generate** (`bin/inc/generate.sh`): Writes `.cmds` files (one line per invocation) and job scripts, then builds a master `submit.sh`. Local job scripts live under `jobs/`; Slurm job scripts live under `slurm/`.
+6. **Generate** (`bin/inc/generate.sh`): Writes `.cmds` files (one line per invocation) and job scripts under `jobs/`, then builds a master `submit.sh`.
 
 7. **Parse** (`bin/inc/parse.sh`): Streams log files through awk parsers (`plugins/parsers/*.awk`) using a `__BEGIN_FILE__ <marker>` / `__END_FILE__` protocol. The shared `plugins/parsers/.csv.awk` provides helpers for CSV output. Bundled parsers include `KaMinPar`, `dKaMinPar`, and `MtKaHyPar`.
 
@@ -83,7 +83,7 @@ There is no linting configuration or CI setup.
 
 - **Generated `.gitignore`.** `mkexp2 init` ignores generated log contents with `logs/*` but explicitly unignores `logs/install.md`, so the single install log remains visible for debugging failed setup runs. It does not ignore `plots.pdf` by default.
 
-- **Slurm artifacts.** Slurm run/install/parse job scripts are generated under `slurm/`. Slurm scheduler stdout/stderr is directed to `slurm/slurm-%j.out` for regular jobs and `slurm/slurm-%A_%a.out` for array tasks, while mkexp2 command manifests remain under `jobs/*.cmds`.
+- **Slurm artifacts.** Slurm run/install/parse job scripts are generated under `jobs/`. Slurm scheduler stdout/stderr is directed to `slurm/slurm-%j.out` for regular jobs and `slurm/slurm-%A_%a.out` for array tasks, while mkexp2 command manifests also remain under `jobs/*.cmds`.
 
 - **Hidden plugins.** Dot-prefixed files (`.TestHarness.sh`, `.TestHarness.awk`) are internal test fixtures excluded from `--list-*` output.
 

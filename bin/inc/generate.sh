@@ -128,8 +128,8 @@ EnsureSlurmInstallJob() {
   timelimit=$(ResolveRunProperty "slurm.install.timelimit" "")
 
   install_job_name="mkexp2-install-$(SafeName "$(basename "$PWD")")"
-  mkdir -p "$PWD/slurm"
-  MKEXP2_SLURM_INSTALL_JOB_SCRIPT="$PWD/slurm/install__${MKEXP2_RUN_ID}.sh"
+  mkdir -p "$PWD/jobs" "$PWD/slurm"
+  MKEXP2_SLURM_INSTALL_JOB_SCRIPT="$PWD/jobs/install__${MKEXP2_RUN_ID}.sh"
   install_cmd="$(ShellQuote "$MKEXP2_HOME/bin/mkexp2") install"
   if [[ -n "$MKEXP2_BUILD_MAX_CORES" ]]; then
     install_cmd+=" --build-max-cores $(ShellQuote "$MKEXP2_BUILD_MAX_CORES")"
@@ -204,8 +204,8 @@ EnsureSlurmParseJob() {
   timelimit=$(ResolveRunProperty "parse.slurm.timelimit" "")
 
   parse_job_name="mkexp2-parse-$(SafeName "$(basename "$PWD")")"
-  mkdir -p "$PWD/slurm"
-  MKEXP2_SLURM_PARSE_JOB_SCRIPT="$PWD/slurm/parse__${MKEXP2_RUN_ID}.sh"
+  mkdir -p "$PWD/jobs" "$PWD/slurm"
+  MKEXP2_SLURM_PARSE_JOB_SCRIPT="$PWD/jobs/parse__${MKEXP2_RUN_ID}.sh"
   parse_cmd="$(ShellQuote "$MKEXP2_HOME/bin/mkexp2") parse"
 
   local parse_log_dir="$PWD/logs/parse/slurm/$MKEXP2_RUN_ID"
@@ -423,7 +423,6 @@ GenerateCurrentExperiment() {
     local job_script="$PWD/jobs/${job_name}.sh"
     if [[ "$_system" == "slurm" ]]; then
       mkdir -p "$PWD/slurm"
-      job_script="$PWD/slurm/${job_name}.sh"
     fi
     local dependency_key=""
     dependency_key=$(ResolveDependencyKey "$topology")

@@ -192,8 +192,8 @@ Example:
 - Slurm header controls:
   - `Property slurm.minimal_header true|false` (default: `false`)
   - when `true`, Slurm run jobs only emit `--job-name`, `--partition`, `--output`, and `--error` (plus `--array` if applicable)
-- Slurm run, install, and parse job scripts are generated under `slurm/`.
-- Slurm scheduler stdout/stderr files are also written under `slurm/` (`slurm-%j.out` for regular jobs, `slurm-%A_%a.out` for array tasks).
+- Slurm run, install, and parse job scripts are generated under `jobs/`.
+- Slurm scheduler stdout/stderr files are written under `slurm/` (`slurm-%j.out` for regular jobs, `slurm-%A_%a.out` for array tasks).
 - No timelimit is applied by default.
   - Set `Property timelimit <DD:HH:MM:SS|HH:MM:SS>` to add a Slurm job timelimit.
   - Set `Property timelimit.per_instance <DD:HH:MM:SS|HH:MM:SS>` to wrap each run with `timeout`.
