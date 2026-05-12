@@ -36,7 +36,7 @@ Options:
   --property A[.B]           With `probe`, print algorithm properties or one resolved property
   --performance-profile      With `plot`, include performance profile plot
   --speedup                  With `plot`, include speedup plot (first algorithm is baseline)
-  --running-time             With `plot`, include running time box plots
+  --running-time             With `plot`, include running time and graph-grid plots
 HELP
 }
 
