@@ -373,6 +373,33 @@ ParseThreads() {
   fi
 }
 
+IsValidTopology() {
+  local topology="$1"
+  local nodes="1"
+  local mpis="1"
+  local threads="$topology"
+
+  if [[ "$topology" == *x*x* ]]; then
+    nodes="${topology%%x*}"
+    local without_threads="${topology%x*}"
+    mpis="${without_threads#*x}"
+    threads="${topology##*x}"
+  fi
+
+  [[ "$nodes" == <-> && "$mpis" == <-> && "$threads" == <-> ]] || return 1
+  (( nodes > 0 && mpis > 0 && threads > 0 ))
+}
+
+NormalizeTopology() {
+  local topology="$1"
+
+  if [[ "$topology" == *x*x* ]]; then
+    echo "$topology"
+  else
+    echo "1x1x$topology"
+  fi
+}
+
 ParseTimelimitToSeconds() {
   local time="$1"
   local seconds="${time##*:}"

@@ -37,6 +37,7 @@ Options:
   --performance-profile      With `plot`, include performance profile plot
   --speedup                  With `plot`, include speedup plot (first algorithm is baseline)
   --running-time             With `plot`, include running time and graph-grid plots
+  --threads T|NxMxT          With `plot`, only include data for this Threads topology
 HELP
 }
 
@@ -199,7 +200,7 @@ ParseCli() {
         command_set=1
         shift
         ;;
-      plot)
+      plot|plots)
         if (( command_set )); then
           EchoFatal "multiple commands provided"
           PrintHelp
@@ -438,6 +439,19 @@ ParseCli() {
         MKEXP2_PLOT_EXPLICIT_SELECTION=1
         shift
         ;;
+      --threads)
+        shift
+        if [[ $# -eq 0 ]]; then
+          EchoFatal "missing value for --threads"
+          exit 1
+        fi
+        MKEXP2_PLOT_THREADS="$1"
+        shift
+        ;;
+      --threads=*)
+        MKEXP2_PLOT_THREADS="${1#*=}"
+        shift
+        ;;
       *)
         if [[ "$MKEXP2_MODE" == "describe" && "$1" != -* ]]; then
           if (( describe_target_set )); then
@@ -528,6 +542,17 @@ ParseCli() {
   if (( MKEXP2_PLOT_EXPLICIT_SELECTION )) && [[ "$MKEXP2_MODE" != "plot" ]]; then
     EchoFatal "--performance-profile/--speedup/--running-time can only be used with plot"
     exit 1
+  fi
+  if [[ -n "$MKEXP2_PLOT_THREADS" ]]; then
+    if [[ "$MKEXP2_MODE" != "plot" ]]; then
+      EchoFatal "--threads can only be used with plot"
+      exit 1
+    fi
+    if ! IsValidTopology "$MKEXP2_PLOT_THREADS"; then
+      EchoFatal "--threads must be a Threads entry (T or NxMxT with positive integers), got '$MKEXP2_PLOT_THREADS'"
+      exit 1
+    fi
+    MKEXP2_PLOT_THREADS=$(NormalizeTopology "$MKEXP2_PLOT_THREADS")
   fi
 
   if [[ -n "$MKEXP2_BUILD_MAX_CORES" ]]; then

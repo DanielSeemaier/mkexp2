@@ -30,6 +30,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 ./bin/mkexp2 plot KaMinPar-FM KaMinPar-LP  # explicit algorithm list
 ./bin/mkexp2 plot --performance-profile  # subset of plots
 ./bin/mkexp2 plot --speedup --running-time
+./bin/mkexp2 plot --threads 4            # plot only data for topology 1x1x4
 
 # Tests
 ./tests/run-all-tests.zsh       # run all tests
@@ -69,7 +70,7 @@ There is no linting configuration or CI setup.
 
 9. **Progress** (`bin/inc/progress.sh`): Runs expansion in probe mode across all experiment functions and compares expected log file paths against existing files on disk, printing a per-algorithm progress bar table.
 
-10. **Plot** (`bin/inc/plot.sh`): Reads the list of active algorithms from the `Experiment` file (or CLI args), writes a Docker Compose file to `.mkexp2/plots-compose.yml`, builds a Docker image tagged from the `plots/Dockerfile` content only when that tag is missing, installs R packages into `plots/.r-libs` on first run (cached), then runs `plots/mkplots.R` inside the container to produce `plots.pdf` in the experiment directory. The generated Docker build context lives under `.mkexp2/plots-image/` and contains only the Dockerfile, so cached package directories such as `plots/.r-libs` are not streamed to Docker during image builds. The running-time plot family writes the regular running-time box plot, a per-core running-time spread box plot grouped by unique `Cores` values, and two graph-grid pages for relative cut and relative running time. The per-core page follows the regular boxplot style with unfilled boxes and per-core/per-algorithm geometric-mean labels near the x axis. The graph-grid pages facet one subplot per graph, use core counts on the x axis with per-algorithm dodged bars normalized to the first algorithm, place the legend below the grid so the facets can use the page width, and keep sparse y-axis ticks with the 1.0 baseline tick included.
+10. **Plot** (`bin/inc/plot.sh`): Reads the list of active algorithms from the `Experiment` file (or CLI args), writes a Docker Compose file to `.mkexp2/plots-compose.yml`, builds a Docker image tagged from the `plots/Dockerfile` content only when that tag is missing, installs R packages into `plots/.r-libs` on first run (cached), then runs `plots/mkplots.R` inside the container to produce `plots.pdf` in the experiment directory. `mkexp2 plot --threads T|NxMxT` filters each CSV before aggregation; bare `T` is normalized to `1x1xT`. The generated Docker build context lives under `.mkexp2/plots-image/` and contains only the Dockerfile, so cached package directories such as `plots/.r-libs` are not streamed to Docker during image builds. The running-time plot family writes the regular running-time box plot, a per-core running-time spread box plot grouped by unique `Cores` values, and two graph-grid pages for relative cut and relative running time. The per-core page follows the regular boxplot style with unfilled boxes and per-core/per-algorithm geometric-mean labels near the x axis. The graph-grid pages facet one subplot per graph, use core counts on the x axis with per-algorithm dodged bars normalized to the first algorithm, place the legend below the grid so the facets can use the page width, and keep sparse y-axis ticks with the 1.0 baseline tick included.
 
 ### Key Conventions
 

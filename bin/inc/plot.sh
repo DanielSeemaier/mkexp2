@@ -92,6 +92,25 @@ _WritePlotsComposeFile() {
     > "$dest"
 }
 
+typeset -a PLOT_R_ARGS=()
+
+_BuildPlotRArgs() {
+  local do_pp="$1"
+  local do_speedup="$2"
+  local do_rt="$3"
+  shift 3
+
+  PLOT_R_ARGS=()
+  (( do_pp ))      && PLOT_R_ARGS+=("--performance-profile")
+  (( do_speedup )) && PLOT_R_ARGS+=("--speedup")
+  (( do_rt ))      && PLOT_R_ARGS+=("--running-time")
+  if [[ -n "$MKEXP2_PLOT_THREADS" ]]; then
+    PLOT_R_ARGS+=("--threads" "$MKEXP2_PLOT_THREADS")
+  fi
+  PLOT_R_ARGS+=("--output" "/output/plots.pdf")
+  PLOT_R_ARGS+=("$@")
+}
+
 GeneratePlots() {
   local plots_dir="$MKEXP2_HOME/plots"
   local results_dir="$PWD/results"
@@ -143,6 +162,9 @@ GeneratePlots() {
   fi
 
   EchoStep "Active algorithms: ${(j:, :)active_algos}"
+  if [[ -n "$MKEXP2_PLOT_THREADS" ]]; then
+    EchoStep "Plot thread filter: $MKEXP2_PLOT_THREADS"
+  fi
 
   # ── Warn about missing CSV files ────────────────────────────────────────────
 
@@ -202,18 +224,13 @@ GeneratePlots() {
 
   # ── Build Rscript argument list ─────────────────────────────────────────────
 
-  local -a r_args=()
-  (( do_pp ))      && r_args+=("--performance-profile")
-  (( do_speedup )) && r_args+=("--speedup")
-  (( do_rt ))      && r_args+=("--running-time")
-  r_args+=("--output" "/output/plots.pdf")
-  r_args+=("${active_algos[@]}")
+  _BuildPlotRArgs "$do_pp" "$do_speedup" "$do_rt" "${active_algos[@]}"
 
   # ── Run mkplots.R inside the container ─────────────────────────────────────
 
   EchoStep "Generating plots"
   if ! _DockerCompose -f "$compose_file" run --rm plot \
-      Rscript /work/mkplots.R "${r_args[@]}"; then
+      Rscript /work/mkplots.R "${PLOT_R_ARGS[@]}"; then
     EchoFatal "plot generation failed"
     return 1
   fi

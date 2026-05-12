@@ -33,3 +33,29 @@ EOF
 
   pass "plot compose image cache and build context"
 }
+
+test_plot_threads_filter_builds_r_args() {
+  MKEXP2_PLOT_THREADS="$(NormalizeTopology 4)"
+
+  _BuildPlotRArgs 0 0 1 KaMinPar-FM KaMinPar-LP
+
+  assert_eq "${(j: :)PLOT_R_ARGS}" "--running-time --threads 1x1x4 --output /output/plots.pdf KaMinPar-FM KaMinPar-LP" "plot passes normalized thread filter to R"
+
+  MKEXP2_PLOT_THREADS=""
+  pass "plot threads filter R arguments"
+}
+
+test_topology_validation_for_plot_threads() {
+  assert_eq "$(NormalizeTopology 4)" "1x1x4" "bare thread count normalizes to local topology"
+  assert_eq "$(NormalizeTopology 2x3x4)" "2x3x4" "full topology is preserved"
+
+  IsValidTopology 1x1x4 || fail "valid topology should pass"
+  if IsValidTopology 1x0x4; then
+    fail "zero topology should fail"
+  fi
+  if IsValidTopology 1x4; then
+    fail "partial topology should fail"
+  fi
+
+  pass "plot threads topology validation"
+}
