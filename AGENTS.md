@@ -69,7 +69,7 @@ There is no linting configuration or CI setup.
 
 9. **Progress** (`bin/inc/progress.sh`): Runs expansion in probe mode across all experiment functions and compares expected log file paths against existing files on disk, printing a per-algorithm progress bar table.
 
-10. **Plot** (`bin/inc/plot.sh`): Reads the list of active algorithms from the `Experiment` file (or CLI args), writes a Docker Compose file to `.mkexp2/plots-compose.yml`, builds a Docker image tagged from the `plots/Dockerfile` content only when that tag is missing, installs R packages into `plots/.r-libs` on first run (cached), then runs `plots/mkplots.R` inside the container to produce `plots.pdf` in the experiment directory. The generated Docker build context lives under `.mkexp2/plots-image/` and contains only the Dockerfile, so cached package directories such as `plots/.r-libs` are not streamed to Docker during image builds.
+10. **Plot** (`bin/inc/plot.sh`): Reads the list of active algorithms from the `Experiment` file (or CLI args), writes a Docker Compose file to `.mkexp2/plots-compose.yml`, builds a Docker image tagged from the `plots/Dockerfile` content only when that tag is missing, installs R packages into `plots/.r-libs` on first run (cached), then runs `plots/mkplots.R` inside the container to produce `plots.pdf` in the experiment directory. The generated Docker build context lives under `.mkexp2/plots-image/` and contains only the Dockerfile, so cached package directories such as `plots/.r-libs` are not streamed to Docker during image builds. The running-time plot family writes the regular running-time box plot and then a final per-core running-time spread box plot grouped by unique `Cores` values.
 
 ### Key Conventions
 
