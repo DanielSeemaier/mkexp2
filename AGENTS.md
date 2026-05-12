@@ -69,7 +69,7 @@ There is no linting configuration or CI setup.
 
 9. **Progress** (`bin/inc/progress.sh`): Runs expansion in probe mode across all experiment functions and compares expected log file paths against existing files on disk, printing a per-algorithm progress bar table.
 
-10. **Plot** (`bin/inc/plot.sh`): Reads the list of active algorithms from the `Experiment` file (or CLI args), writes a Docker Compose file to `.mkexp2/plots-compose.yml`, installs R packages into `plots/.r-libs` on first run (cached), then runs `plots/mkplots.R` inside the container to produce `plots.pdf` in the experiment directory.
+10. **Plot** (`bin/inc/plot.sh`): Reads the list of active algorithms from the `Experiment` file (or CLI args), writes a Docker Compose file to `.mkexp2/plots-compose.yml`, builds a Docker image tagged from the `plots/Dockerfile` content only when that tag is missing, installs R packages into `plots/.r-libs` on first run (cached), then runs `plots/mkplots.R` inside the container to produce `plots.pdf` in the experiment directory. The generated Docker build context lives under `.mkexp2/plots-image/` and contains only the Dockerfile, so cached package directories such as `plots/.r-libs` are not streamed to Docker during image builds.
 
 ### Key Conventions
 
@@ -95,7 +95,7 @@ There is no linting configuration or CI setup.
 
 - **Parser fixture tests.** Parser regression tests live in `tests/parser_plugins_test.zsh`. Fixtures are grouped under `tests/fixtures/parsers/<ParserName>/` as one or more `.log` files plus `expected.csv`; the helper copies those logs into a temporary experiment and runs `mkexp2 parse`. Current fixtures cover `KaMinPar` and `MtKaHyPar`.
 
-- **Plot submodule.** `plots/` is a git submodule. R plotting code lives there. The submodule's `.gitignore` excludes `.r-libs/` (cached packages) and `.cache/`. The generated `.mkexp2/` directory in experiment dirs is excluded by the main repo's `.gitignore`. The output `plots.pdf` is added to the experiment's `.gitignore` automatically by `mkexp2 plot`.
+- **Plot submodule.** `plots/` is a git submodule. R plotting code lives there and is mounted into the plot container at runtime rather than copied into the image. The submodule's `.gitignore` excludes `.r-libs/` (cached packages) and `.cache/`. The generated `.mkexp2/` directory in experiment dirs is excluded by the main repo's `.gitignore`. The output `plots.pdf` is added to the experiment's `.gitignore` automatically by `mkexp2 plot`.
 
 - **Docker for plots.** `mkexp2 plot` requires Docker (tested with Colima on macOS). If using Colima, set `DOCKER_HOST="unix://${HOME}/.colima/default/docker.sock"` in your shell profile.
 
