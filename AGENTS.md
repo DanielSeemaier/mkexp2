@@ -87,7 +87,7 @@ There is no linting configuration or CI setup.
 
 - **Hidden plugins.** Dot-prefixed files (`.TestHarness.sh`, `.TestHarness.awk`) are internal test fixtures excluded from `--list-*` output.
 
-- **`PartitionerProperty key [fallback]`** — inside plugin hooks, resolves a property for the currently active algorithm. Works consistently during install, generate, and probe phases.
+- **`PartitionerProperty key [fallback]`** — inside plugin hooks, resolves a property for the currently active algorithm. Works consistently during install, generate, and probe phases. `AlgorithmProperty` values inherit through the full `DefineAlgorithm` chain, so a child alias inherits parent alias properties such as `repo_ref` unless it overrides them.
 
 - **Unknown algorithm names.** An algorithm not created with `DefineAlgorithm` resolves to a partitioner plugin of the same name; if no such plugin exists, `mkexp2 install/generate` should fail with a clear `unknown partitioner plugin '<name>'` fatal message.
 

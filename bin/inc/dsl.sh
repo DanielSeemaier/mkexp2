@@ -100,6 +100,14 @@ GetAlgorithmBase() {
   fi
 }
 
+GetAlgorithmPropertyChain() {
+  local algorithm="$1"
+  if [[ -n "${ALG_DEF_BASE["$algorithm"]:-}" ]]; then
+    GetAlgorithmPropertyChain "${ALG_DEF_BASE["$algorithm"]}"
+  fi
+  echo "$algorithm"
+}
+
 GetAlgorithmArgs() {
   local algorithm="$1"
   if [[ -n "${ALG_DEF_BASE["$algorithm"]:-}" ]]; then

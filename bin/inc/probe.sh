@@ -102,9 +102,12 @@ ProbeCollectAlgorithmPropertyKeys() {
   local algorithm="$1"
   local base="$2"
   local -A seen=()
+  local -A chain_member=()
   local -a keys=()
+  local -a property_chain=()
   local key=""
   local full_key=""
+  local chain_algorithm=""
 
   for key in "${PROBE_CORE_ALGORITHM_KEYS[@]}"; do
     seen["$key"]=1
@@ -116,9 +119,14 @@ ProbeCollectAlgorithmPropertyKeys() {
       seen["$key"]=1
     fi
   done
+  property_chain=($(GetAlgorithmPropertyChain "$algorithm"))
+  for chain_algorithm in "${property_chain[@]}"; do
+    chain_member["$chain_algorithm"]=1
+  done
   for full_key in ${(k)PROP_ALGORITHM}; do
     full_key=$(ProbeCleanKey "$full_key")
-    if [[ "$full_key" == "${base}::"* || "$full_key" == "${algorithm}::"* ]]; then
+    chain_algorithm="${full_key%%::*}"
+    if [[ -n "${chain_member["$chain_algorithm"]:-}" ]]; then
       key="${full_key#*::}"
       seen["$key"]=1
     fi

@@ -61,3 +61,43 @@ EOF
 
   pass "resolved model and narrow flags"
 }
+
+test_probe_algorithm_property_inheritance_chain() {
+  local tmp=""
+  tmp=$(mktemp -d)
+  mkdir -p "$tmp/graphs"
+  : > "$tmp/graphs/demo.metis"
+  cat > "$tmp/Experiment" <<'EOF'
+System local
+DefineAlgorithm Baseline TestHarness
+
+DefineAlgorithm Opt-v1 TestHarness
+AlgorithmProperty Opt-v1 repo_ref origin/codex/optimize-label-propagation-hotpath
+AlgorithmProperty Opt-v1 mode custom
+
+DefineAlgorithm Opt-v1-Light Opt-v1 --c-lp-fast-mode light
+DefineAlgorithm Opt-v1-Aggressive Opt-v1 --c-lp-fast-mode aggressive
+AlgorithmProperty Opt-v1-Aggressive repo_ref origin/codex/aggressive-override
+
+ExperimentInheritedProperties() {
+  Algorithms Baseline Opt-v1-Light Opt-v1-Aggressive
+  Graph graphs/demo
+  Ks 2
+  Seeds 1
+  Epsilons 0.03
+  Threads 1
+}
+EOF
+
+  (
+    cd "$tmp"
+    "$MKEXP2" probe InheritedProperties > inherited.json
+    assert_eq "$(json_value inherited.json '.resolved.algorithms[] | select(.name=="Baseline") | .properties.repo_ref')" "" "baseline does not inherit sibling repo_ref"
+    assert_eq "$(json_value inherited.json '.resolved.algorithms[] | select(.name=="Opt-v1-Light") | .properties.repo_ref')" "origin/codex/optimize-label-propagation-hotpath" "child algorithm inherits parent repo_ref"
+    assert_eq "$(json_value inherited.json '.resolved.algorithms[] | select(.name=="Opt-v1-Light") | .properties.mode')" "custom" "child algorithm inherits parent non-core property"
+    assert_eq "$(json_value inherited.json '.resolved.algorithms[] | select(.name=="Opt-v1-Aggressive") | .properties.repo_ref')" "origin/codex/aggressive-override" "child algorithm property overrides parent repo_ref"
+    assert_eq "$("$MKEXP2" probe InheritedProperties --property Opt-v1-Light.repo_ref)" '"origin/codex/optimize-label-propagation-hotpath"' "property probe returns inherited parent repo_ref"
+  )
+
+  pass "algorithm property inheritance follows DefineAlgorithm chain"
+}

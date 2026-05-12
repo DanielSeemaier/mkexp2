@@ -46,14 +46,15 @@ ResolveAlgorithmProperty() {
   local value="$fallback"
   local base=""
   local base_key=""
-  local algo_key=""
+  local prop_algorithm=""
+  local prop_key=""
+  local -a property_chain=()
 
   base="${FLAT_ALGO_BASE["$algorithm"]:-}"
   if [[ -z "$base" ]]; then
     base=$(GetAlgorithmBase "$algorithm")
   fi
   base_key="$base::$key"
-  algo_key="$algorithm::$key"
 
   if [[ -n "${PARTITIONER_DEFAULTS["$base_key"]:-}" ]]; then
     value="${PARTITIONER_DEFAULTS["$base_key"]}"
@@ -67,12 +68,13 @@ ResolveAlgorithmProperty() {
   if [[ -n "${PROP_SYSTEM["$key"]:-}" ]]; then
     value="${PROP_SYSTEM["$key"]}"
   fi
-  if [[ -n "${PROP_ALGORITHM["$base_key"]:-}" ]]; then
-    value="${PROP_ALGORITHM["$base_key"]}"
-  fi
-  if [[ -n "${PROP_ALGORITHM["$algo_key"]:-}" ]]; then
-    value="${PROP_ALGORITHM["$algo_key"]}"
-  fi
+  property_chain=($(GetAlgorithmPropertyChain "$algorithm"))
+  for prop_algorithm in "${property_chain[@]}"; do
+    prop_key="$prop_algorithm::$key"
+    if [[ -n "${PROP_ALGORITHM["$prop_key"]:-}" ]]; then
+      value="${PROP_ALGORITHM["$prop_key"]}"
+    fi
+  done
 
   echo "$value"
 }

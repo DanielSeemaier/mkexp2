@@ -8,6 +8,7 @@ set -euo pipefail
 
 test_probe_listing_and_selectors
 test_probe_resolution_and_flags
+test_probe_algorithm_property_inheritance_chain
 test_probe_local_generation_parity
 test_probe_slurm_generation_parity
 
