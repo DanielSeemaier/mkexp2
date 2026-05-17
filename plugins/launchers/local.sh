@@ -58,15 +58,18 @@ LauncherWriteJob_local() {
   local _threads="$6"
   local _timelimit="$7"
   local _cmd_count="$8"
+  local _meta_file="${9:-}"
 
   cat > "$job_script" <<SCRIPT
 #!/usr/bin/env zsh
 set -euo pipefail
 
+cmd_file="\${MKEXP2_CMD_FILE:-${cmd_file}}"
+
 while IFS= read -r line; do
   [[ -z "\$line" ]] && continue
   echo "+ \$line"
   eval "\$line" < /dev/null || true
-done < "${cmd_file}"
+done < "\$cmd_file"
 SCRIPT
 }

@@ -49,6 +49,20 @@ if [[ "$MKEXP2_MODE" == "describe" ]]; then
   exit $?
 fi
 
+if [[ "$MKEXP2_MODE" == "web" ]]; then
+  exec python3 "$MKEXP2_HOME/bin/mkexp2_web.py" \
+    --mkexp2 "$MKEXP2_HOME/bin/mkexp2" \
+    --repo "$MKEXP2_WEB_REPO" \
+    --host "$MKEXP2_WEB_HOST" \
+    --port "$MKEXP2_WEB_PORT" \
+    --name-template "$MKEXP2_WEB_NAME_TEMPLATE"
+fi
+
+if [[ "$MKEXP2_MODE" == "probe" && "$MKEXP2_PROBE_PRESETS" -eq 1 ]]; then
+  ProbePrintPresetList
+  exit 0
+fi
+
 if [[ ! -f "$PWD/Experiment" ]]; then
   EchoFatal "no Experiment file in current directory"
   exit 1

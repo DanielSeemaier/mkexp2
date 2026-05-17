@@ -655,6 +655,29 @@ ProbePrintExperimentList() {
   printf ']}'
 }
 
+ProbePrintPresetList() {
+  local -a names=()
+  local file=""
+  local name=""
+  local sep=""
+
+  for file in "$MKEXP2_HOME/presets/"*(N); do
+    [[ -f "$file" ]] || continue
+    names+=("${file:t}")
+  done
+  names=("${(@on)names}")
+
+  printf '{"presets":['
+  for name in "${names[@]}"; do
+    printf '%s{"name":%s,"path":%s}' \
+      "$sep" \
+      "$(JsonString "$name")" \
+      "$(JsonString "$MKEXP2_HOME/presets/$name")"
+    sep=","
+  done
+  printf ']}\n'
+}
+
 ProbePrintPropertyValue() {
   local selector="$1"
   local algorithm="${selector%%.*}"

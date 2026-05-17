@@ -5,3 +5,4 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
 zsh "$ROOT/tests/run-probe-tests.zsh"
 zsh "$ROOT/tests/run-e2e-tests.zsh"
+zsh "$ROOT/tests/run-web-tests.zsh"

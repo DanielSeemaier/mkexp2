@@ -13,6 +13,7 @@ Commands:
   progress  Show run completion progress for each experiment / algorithm
   check     Validate Experiment configuration without generating jobs
   probe     Inspect Experiment definitions and print JSON
+  web       Serve the tunnel-only experiment management UI
   describe  Show plugin defaults/hooks (partitioners + systems)
   init      Create ./Experiment from a preset
   help      Show this help
@@ -33,11 +34,16 @@ Options:
   --run-properties           With `probe`, return resolved run properties only
   --jobs                     With `probe`, return detailed job metadata
   --calls                    With `probe`, return expanded call details
+  --presets                  With `probe`, return init presets as JSON
   --property A[.B]           With `probe`, print algorithm properties or one resolved property
   --performance-profile      With `plot`, include performance profile plot
   --speedup                  With `plot`, include speedup plot (first algorithm is baseline)
   --running-time             With `plot`, include running time and graph-grid plots
   --threads T|NxMxT          With `plot`, only include data for this Threads topology
+  --repo DIR                 With `web`, Git repository containing experiment dirs
+  --host HOST                With `web`, bind host (default: 127.0.0.1)
+  --port PORT                With `web`, bind port (default: 8765)
+  --name-template TEMPLATE   With `web`, new experiment directory template
 HELP
 }
 
@@ -257,6 +263,22 @@ ParseCli() {
         command_set=1
         shift
         ;;
+      web)
+        if (( command_set )); then
+          EchoFatal "multiple commands provided"
+          PrintHelp
+          exit 1
+        fi
+        MKEXP2_MODE="web"
+        MKEXP2_DO_INSTALL=0
+        MKEXP2_DO_GENERATE=0
+        MKEXP2_DO_PARSE=0
+        MKEXP2_DO_CHECK=0
+        MKEXP2_DO_PROBE=0
+        MKEXP2_DO_WEB=1
+        command_set=1
+        shift
+        ;;
       describe|describe-partitioner)
         if (( command_set )); then
           EchoFatal "multiple commands provided"
@@ -383,6 +405,10 @@ ParseCli() {
         MKEXP2_PROBE_CALLS=1
         shift
         ;;
+      --presets)
+        MKEXP2_PROBE_PRESETS=1
+        shift
+        ;;
       --property)
         shift
         if [[ $# -eq 0 ]]; then
@@ -452,6 +478,66 @@ ParseCli() {
         MKEXP2_PLOT_THREADS="${1#*=}"
         shift
         ;;
+      --repo)
+        shift
+        if [[ $# -eq 0 ]]; then
+          EchoFatal "missing value for --repo"
+          exit 1
+        fi
+        MKEXP2_WEB_REPO="$1"
+        MKEXP2_WEB_OPTION_SET=1
+        shift
+        ;;
+      --repo=*)
+        MKEXP2_WEB_REPO="${1#*=}"
+        MKEXP2_WEB_OPTION_SET=1
+        shift
+        ;;
+      --host)
+        shift
+        if [[ $# -eq 0 ]]; then
+          EchoFatal "missing value for --host"
+          exit 1
+        fi
+        MKEXP2_WEB_HOST="$1"
+        MKEXP2_WEB_OPTION_SET=1
+        shift
+        ;;
+      --host=*)
+        MKEXP2_WEB_HOST="${1#*=}"
+        MKEXP2_WEB_OPTION_SET=1
+        shift
+        ;;
+      --port)
+        shift
+        if [[ $# -eq 0 ]]; then
+          EchoFatal "missing value for --port"
+          exit 1
+        fi
+        MKEXP2_WEB_PORT="$1"
+        MKEXP2_WEB_OPTION_SET=1
+        shift
+        ;;
+      --port=*)
+        MKEXP2_WEB_PORT="${1#*=}"
+        MKEXP2_WEB_OPTION_SET=1
+        shift
+        ;;
+      --name-template)
+        shift
+        if [[ $# -eq 0 ]]; then
+          EchoFatal "missing value for --name-template"
+          exit 1
+        fi
+        MKEXP2_WEB_NAME_TEMPLATE="$1"
+        MKEXP2_WEB_OPTION_SET=1
+        shift
+        ;;
+      --name-template=*)
+        MKEXP2_WEB_NAME_TEMPLATE="${1#*=}"
+        MKEXP2_WEB_OPTION_SET=1
+        shift
+        ;;
       *)
         if [[ "$MKEXP2_MODE" == "describe" && "$1" != -* ]]; then
           if (( describe_target_set )); then
@@ -513,6 +599,16 @@ ParseCli() {
     local probe_aspect_count=0
     probe_aspect_count=$((MKEXP2_PROBE_ALGORITHMS + MKEXP2_PROBE_GRAPHS + MKEXP2_PROBE_TOPOLOGIES + MKEXP2_PROBE_RUN_PROPERTIES + MKEXP2_PROBE_JOBS + MKEXP2_PROBE_CALLS))
 
+    if (( MKEXP2_PROBE_PRESETS )); then
+      if [[ -n "$MKEXP2_PROBE_TARGET" ]]; then
+        EchoFatal "probe --presets cannot be combined with an experiment selector"
+        exit 1
+      fi
+      if (( probe_aspect_count > 0 )) || [[ -n "$MKEXP2_PROBE_PROPERTY" ]]; then
+        EchoFatal "probe --presets cannot be combined with experiment aspect flags"
+        exit 1
+      fi
+    fi
     if (( probe_aspect_count > 0 )) && [[ -z "$MKEXP2_PROBE_TARGET" ]]; then
       EchoFatal "probe aspect flags require an experiment selector"
       exit 1
@@ -534,6 +630,10 @@ ParseCli() {
     EchoFatal "probe aspect flags can only be used with probe"
     exit 1
   fi
+  if (( MKEXP2_PROBE_PRESETS )) && [[ "$MKEXP2_MODE" != "probe" ]]; then
+    EchoFatal "--presets can only be used with probe"
+    exit 1
+  fi
   if [[ -n "$MKEXP2_PROBE_PROPERTY" && "$MKEXP2_MODE" != "probe" ]]; then
     EchoFatal "--property can only be used with probe"
     exit 1
@@ -553,6 +653,28 @@ ParseCli() {
       exit 1
     fi
     MKEXP2_PLOT_THREADS=$(NormalizeTopology "$MKEXP2_PLOT_THREADS")
+  fi
+
+  if (( MKEXP2_WEB_OPTION_SET )); then
+    if [[ "$MKEXP2_MODE" != "web" ]]; then
+      EchoFatal "--repo/--host/--port/--name-template can only be used with web"
+      exit 1
+    fi
+  fi
+
+  if [[ "$MKEXP2_MODE" == "web" ]]; then
+    if [[ -z "$MKEXP2_WEB_REPO" ]]; then
+      EchoFatal "web requires --repo DIR"
+      exit 1
+    fi
+    if [[ "$MKEXP2_WEB_PORT" != <-> ]] || (( MKEXP2_WEB_PORT <= 0 || MKEXP2_WEB_PORT > 65535 )); then
+      EchoFatal "--port must be an integer in 1..65535, got '$MKEXP2_WEB_PORT'"
+      exit 1
+    fi
+    if [[ "$MKEXP2_WEB_NAME_TEMPLATE" != *"<name>"* ]]; then
+      EchoFatal "--name-template must contain <name>"
+      exit 1
+    fi
   fi
 
   if [[ -n "$MKEXP2_BUILD_MAX_CORES" ]]; then

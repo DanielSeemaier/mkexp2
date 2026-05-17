@@ -18,6 +18,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 # After generate, submit jobs:
 ./submit.sh
+./submit.sh KaMinPar-FM KaMinPar-LP  # submit only selected algorithms
 
 # Parse logs into CSV (run after jobs finish):
 ./bin/mkexp2 parse
@@ -31,14 +32,19 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 ./bin/mkexp2 plot --performance-profile  # subset of plots
 ./bin/mkexp2 plot --speedup --running-time
 ./bin/mkexp2 plot --threads 4            # plot only data for topology 1x1x4
+./bin/mkexp2 probe --presets             # JSON list of init presets
+
+# Tunnel-only web UI (run on cluster/login node, access via ssh -L):
+./bin/mkexp2 web --repo /path/to/experiment-repo
 
 # Tests
 ./tests/run-all-tests.zsh       # run all tests
 ./tests/run-probe-tests.zsh     # probe/inspection tests only
 ./tests/run-e2e-tests.zsh       # end-to-end pipeline tests only
+./tests/run-web-tests.zsh       # Python stdlib web backend tests
 ```
 
-Tests require `jq`. They use TAP-style output and call the actual `bin/mkexp2` binary against fixture `Experiment` files — they are integration tests, not unit tests.
+Shell tests require `jq`. They use TAP-style output and call the actual `bin/mkexp2` binary against fixture `Experiment` files — they are integration tests, not unit tests. Web backend tests use Python `unittest`.
 
 There is no linting configuration or CI setup.
 
@@ -62,15 +68,17 @@ There is no linting configuration or CI setup.
 
 5. **Expansion engine** (`bin/inc/expand.sh`): `ExpandCurrentExperiment` iterates the Cartesian product of `(topology × algorithm × seed × epsilon × k × graph)`, calling plugin hooks to produce commands. Results go into `EXPAND_CALL` / `EXPAND_JOB` maps.
 
-6. **Generate** (`bin/inc/generate.sh`): Writes `.cmds` files (one line per invocation) and job scripts under `jobs/`, then builds a master `submit.sh`.
+6. **Generate** (`bin/inc/generate.sh`): Writes `.cmds` files (one line per invocation), `.cmds.meta.tsv` sidecars, and job scripts under `jobs/`, then builds a master `submit.sh`. The sidecar rows are zero-based command index, algorithm, base partitioner, experiment function, topology, and log path.
 
 7. **Parse** (`bin/inc/parse.sh`): Streams log files through awk parsers (`plugins/parsers/*.awk`) using a `__BEGIN_FILE__ <marker>` / `__END_FILE__` protocol. The shared `plugins/parsers/.csv.awk` provides helpers for CSV output. Bundled parsers include `KaMinPar`, `dKaMinPar`, and `MtKaHyPar`.
 
-8. **Probe** (`bin/inc/probe.sh`): Runs expansion in probe mode (`MKEXP2_PROBE_MODE=1`) and serializes the model as JSON.
+8. **Probe** (`bin/inc/probe.sh`): Runs expansion in probe mode (`MKEXP2_PROBE_MODE=1`) and serializes the model as JSON. `mkexp2 probe --presets` is a metadata-only JSON command that lists bundled init presets without requiring an `Experiment` file.
 
 9. **Progress** (`bin/inc/progress.sh`): Runs expansion in probe mode across all experiment functions and compares expected log file paths against existing files on disk, printing a per-algorithm progress bar table.
 
 10. **Plot** (`bin/inc/plot.sh`): Reads the list of active algorithms from the `Experiment` file (or CLI args), writes a Docker Compose file to `.mkexp2/plots-compose.yml`, builds a Docker image tagged from the `plots/Dockerfile` content only when that tag is missing, installs R packages into `plots/.r-libs` on first run (cached), then runs `plots/mkplots.R` inside the container to produce `plots.pdf` in the experiment directory. `mkexp2 plot --threads T|NxMxT` filters each CSV before aggregation; bare `T` is normalized to `1x1xT`. The generated Docker build context lives under `.mkexp2/plots-image/` and contains only the Dockerfile, so cached package directories such as `plots/.r-libs` are not streamed to Docker during image builds. The running-time plot family writes the regular running-time box plot, a per-core running-time spread box plot grouped by unique `Cores` values, and two graph-grid pages for relative cut and relative running time. The per-core page follows the regular boxplot style with unfilled boxes and per-core/per-algorithm geometric-mean labels near the x axis. The graph-grid pages facet one subplot per graph, use core counts on the x axis with per-algorithm dodged bars normalized to the first algorithm, place the legend below the grid so the facets can use the page width, and keep sparse y-axis ticks with the 1.0 baseline tick included.
+
+11. **Web UI** (`bin/mkexp2_web.py`): `mkexp2 web --repo DIR` starts a Python stdlib HTTP server bound to `127.0.0.1:8765` by default for SSH-tunnel access. It lists repo-relative experiment directories containing an `Experiment` file, including nested year/group folders, creates new experiments from dynamically fetched `mkexp2 probe --presets` presets, edits raw `Experiment` files with a synchronized syntax-highlight overlay, runs `check`/`probe`/`generate`/`submit`/`parse`/`plot` through fixed argv arrays, commits submitted state to Git, serves CSV/`plots.pdf`, and collects Slurm node status from `sinfo -lN -p all` with live job/user data attached from `squeue`. The Check button saves the current editor content before running `mkexp2 check` and renders the command JSON as a pass/fail status panel instead of dumping raw console text; probe is used internally for algorithm/preset discovery rather than exposed as a toolbar button. The experiment sidebar renders nested folders collapsed by default. Results and CSV comparison are full-page tabs; CSV files are parsed into tables, column visibility is stored in browser local storage per experiment/header set, and two CSV files from the selected experiment can be compared side by side. The Results tab can trigger `mkexp2 parse` and reload CSVs after a successful parse. The Plots tab triggers `mkexp2 plot`, shows action progress/status in-place, and links to `plots.pdf`. Compare tables lock scroll positions, require matching row counts before row-wise comparison is offered, and let users click headers to cycle numeric coloring between lower-is-better, higher-is-better, and off. The submit UI checks all probed algorithms by default; all-selected submissions use the generated `submit.sh` default path, while deselecting variants sends an explicit algorithm subset. If `mkexp2 check` blocks submission, the UI asks for a one-time validation override instead of showing a permanent checkbox. The node sidebar renders compact name/CPU rows sorted by CPU count and colored by Slurm state (`allocated`, `idle~`, `idle`, `down`). When `sinfo` is not installed, the web status API returns a built-in i10 sample table for local macOS development. It requires a startup session token for API requests and rejects experiment ids that escape the configured repo root.
 
 ### Key Conventions
 
@@ -82,9 +90,11 @@ There is no linting configuration or CI setup.
 
 - **Log file naming.** `logs/<algorithm>/<experiment_label>/<graph>___k<K>_seed<S>_eps<E>_P<topology>.log` — the filename encodes all parameters needed by the parser.
 
+- **Algorithm-filtered submit.** Generated `submit.sh` accepts optional exact algorithm names. With no args it submits all commands. With args it validates against `jobs/*.cmds.meta.tsv`, filters local/non-array jobs via generated manifests under `.mkexp2/submit-filter-*`, and filters Slurm arrays by overriding `sbatch --array` with selected original command indices.
+
 - **Generated `.gitignore`.** `mkexp2 init` ignores generated log contents with `logs/*` but explicitly unignores `logs/install.md`, so the single install log remains visible for debugging failed setup runs. It does not ignore `plots.pdf` by default.
 
-- **Slurm artifacts.** Slurm run/install/parse job scripts are generated under `jobs/`. Slurm scheduler stdout/stderr is directed to `slurm/slurm-%j.out` for regular jobs and `slurm/slurm-%A_%a.out` for array tasks, while mkexp2 command manifests also remain under `jobs/*.cmds`.
+- **Slurm artifacts.** Slurm run/install/parse job scripts are generated under `jobs/`. Slurm scheduler stdout/stderr is directed to `slurm/slurm-%j.out` for regular jobs and `slurm/slurm-%A_%a.out` for array tasks, while mkexp2 command manifests also remain under `jobs/*.cmds` with matching `*.cmds.meta.tsv` files.
 
 - **Hidden plugins.** Dot-prefixed files (`.TestHarness.sh`, `.TestHarness.awk`) are internal test fixtures excluded from `--list-*` output.
 

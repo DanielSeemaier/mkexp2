@@ -25,9 +25,12 @@ EOF
     cd "$tmp"
     "$MKEXP2" probe LocalParity --calls > probe-calls.json
     jq -r '.calls[] | "\(.final_command) >> \"\(.log_file)\" 2>&1"' probe-calls.json > expected.cmds
+    jq -r '.calls | to_entries[] | "\(.key)\t\(.value.algorithm)\t\(.value.base)\tExperimentLocalParity\t\(.value.topology)\t\(.value.log_file)"' probe-calls.json > expected.cmds.meta.tsv
 
     "$MKEXP2" generate >/dev/null
     assert_file_eq jobs/ExperimentLocalParity__1x1x2.cmds expected.cmds "probe call expansion matches generated local command file"
+    assert_file_eq jobs/ExperimentLocalParity__1x1x2.cmds.meta.tsv expected.cmds.meta.tsv "generated local command metadata matches probe calls"
+    assert_line_count jobs/ExperimentLocalParity__1x1x2.cmds.meta.tsv "4" "local metadata has one row per command"
     assert_eq "$(json_value probe-calls.json '.calls | length')" "4" "probe reports all local calls"
     assert_eq "$(json_value probe-calls.json '.calls[0].final_command | startswith("timeout -v 7s ")')" "true" "per-instance timeout is reflected in probe output"
   )
@@ -76,6 +79,7 @@ EOF
     "$MKEXP2" probe Beta --jobs > probe-jobs.json
     "$MKEXP2" probe Beta --calls > probe-calls.json
     jq -r '.calls[] | "\(.final_command) >> \"\(.log_file)\" 2>&1"' probe-calls.json > expected.cmds
+    jq -r '.calls | to_entries[] | "\(.key)\t\(.value.algorithm)\t\(.value.base)\tExperimentBeta\t\(.value.topology)\t\(.value.log_file)"' probe-calls.json > expected.cmds.meta.tsv
 
     "$MKEXP2" generate >/dev/null
 
@@ -88,6 +92,8 @@ EOF
     assert_eq "$(json_value probe-jobs.json '.jobs.run_jobs[0].job_script | endswith("/jobs/ExperimentBeta__2x1x3.sh")')" "true" "probe reports slurm job script directory"
 
     assert_file_eq jobs/ExperimentBeta__2x1x3.cmds expected.cmds "probe call expansion matches generated slurm command file"
+    assert_file_eq jobs/ExperimentBeta__2x1x3.cmds.meta.tsv expected.cmds.meta.tsv "generated slurm command metadata matches probe calls"
+    assert_line_count jobs/ExperimentBeta__2x1x3.cmds.meta.tsv "2" "slurm metadata has one row per command"
     if ! grep -q '^#SBATCH --array=0-1%5$' jobs/ExperimentBeta__2x1x3.sh; then
       fail "generated slurm job script contains expected array setting"
     fi
