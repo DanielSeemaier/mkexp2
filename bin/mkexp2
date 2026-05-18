@@ -59,6 +59,12 @@ if [[ "$MKEXP2_MODE" == "web" ]]; then
     --name-template "$MKEXP2_WEB_NAME_TEMPLATE"
 fi
 
+if [[ "$MKEXP2_MODE" == "mcp" ]]; then
+  exec python3 "$MKEXP2_HOME/bin/mkexp2_mcp.py" \
+    --url "$MKEXP2_MCP_URL" \
+    --token "$MKEXP2_MCP_TOKEN"
+fi
+
 if [[ "$MKEXP2_MODE" == "probe" && "$MKEXP2_PROBE_PRESETS" -eq 1 ]]; then
   ProbePrintPresetList
   exit 0

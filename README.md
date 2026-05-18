@@ -139,6 +139,17 @@ ssh -L 8765:127.0.0.1:8765 user@cluster-login
 The web server binds to `127.0.0.1:8765` by default and prints a session token
 on startup. Paste that token into the UI before using the API-backed controls.
 
+Start the local MCP bridge for Codex after the SSH tunnel is up:
+
+```bash
+mkexp2 mcp --url http://127.0.0.1:8765 --token "$MKEXP2_WEB_TOKEN"
+```
+
+The MCP bridge talks only to the web API. It can guide Codex through writing an
+`Experiment` file, creating an experiment directory, saving/checking/probing it,
+submitting selected algorithms, polling submit/progress actions, parsing
+results, and reading `mkexp2 stats --json`.
+
 ## DSL essentials
 
 ```bash
@@ -337,8 +348,8 @@ The UI can:
 - commit submitted state to Git after submission
 - run `mkexp2 parse` from the Results tab and reload CSV results when parsing
   succeeds
-- view a Stats tab backed by `mkexp2 stats --json`, currently showing average
-  cut and average time per algorithm from parsed CSV files
+- view a Stats tab backed by `mkexp2 stats --json`, currently showing
+  geometric-mean cut and geometric-mean time per algorithm from parsed CSV files
 - refresh run progress from the Experiment page by running `mkexp2 progress
   --json`; after progress has been loaded, incomplete runs auto-refresh every 2
   seconds, while `.mkexp2/submit.lock` keeps the Submit button disabled
@@ -368,6 +379,36 @@ rather than shell command strings. It does not provide a general shell endpoint.
 When `sinfo` is not installed, the status API returns a built-in sample of the
 expected i10 node table so local development on macOS still renders the panel.
 
+## MCP bridge
+
+`mkexp2 mcp` starts a stdio MCP server for Codex or another MCP client. Unlike
+`mkexp2 web`, it does not run in the experiment repo and does not execute
+cluster commands directly. It is a client-side bridge to a running `mkexp2 web`
+server, usually reached through the same SSH tunnel as the browser UI:
+
+```bash
+mkexp2 mcp \
+  --url http://127.0.0.1:8765 \
+  --token "$MKEXP2_WEB_TOKEN"
+```
+
+The token is the session token printed by `mkexp2 web`; it may also be supplied
+with `MKEXP2_MCP_TOKEN`. `MKEXP2_MCP_URL` can set the default URL.
+
+The bridge exposes fixed MCP tools for:
+
+- experiment authoring guidance, including a minimal `Experiment` example
+- listing presets and existing experiments
+- creating, reading, and writing `Experiment` files through the web API
+- running `check --json` and `probe`
+- submitting all or selected algorithms, then polling the returned action id
+- polling `progress --json`
+- running `parse` and reading `stats --json` once jobs finish
+- fetching parsed CSV results and clearing a submit lock after a crash
+
+It intentionally does not expose arbitrary shell execution. All cluster-side
+work stays inside the existing web backend command wrappers.
+
 ## Tests
 
 Run the probe-focused regression suite with:
@@ -392,4 +433,10 @@ Run only the web backend tests with:
 
 ```bash
 ./tests/run-web-tests.zsh
+```
+
+Run only the MCP bridge tests with:
+
+```bash
+./tests/run-mcp-tests.zsh
 ```

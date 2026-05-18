@@ -15,6 +15,7 @@ Commands:
   check     Validate Experiment configuration without generating jobs
   probe     Inspect Experiment definitions and print JSON
   web       Serve the tunnel-only experiment management UI
+  mcp       Serve a stdio MCP bridge to a running mkexp2 web server
   describe  Show plugin defaults/hooks (partitioners + systems)
   init      Create ./Experiment from a preset
   help      Show this help
@@ -46,6 +47,8 @@ Options:
   --host HOST                With `web`, bind host (default: 127.0.0.1)
   --port PORT                With `web`, bind port (default: 8765)
   --name-template TEMPLATE   With `web`, new experiment directory template
+  --url URL                  With `mcp`, mkexp2 web URL (default: http://127.0.0.1:8765)
+  --token TOKEN              With `mcp`, mkexp2 web session token
 HELP
 }
 
@@ -292,6 +295,22 @@ ParseCli() {
         MKEXP2_DO_CHECK=0
         MKEXP2_DO_PROBE=0
         MKEXP2_DO_WEB=1
+        command_set=1
+        shift
+        ;;
+      mcp)
+        if (( command_set )); then
+          EchoFatal "multiple commands provided"
+          PrintHelp
+          exit 1
+        fi
+        MKEXP2_MODE="mcp"
+        MKEXP2_DO_INSTALL=0
+        MKEXP2_DO_GENERATE=0
+        MKEXP2_DO_PARSE=0
+        MKEXP2_DO_CHECK=0
+        MKEXP2_DO_PROBE=0
+        MKEXP2_DO_MCP=1
         command_set=1
         shift
         ;;
@@ -560,6 +579,36 @@ ParseCli() {
         MKEXP2_WEB_OPTION_SET=1
         shift
         ;;
+      --url)
+        shift
+        if [[ $# -eq 0 ]]; then
+          EchoFatal "missing value for --url"
+          exit 1
+        fi
+        MKEXP2_MCP_URL="$1"
+        MKEXP2_MCP_OPTION_SET=1
+        shift
+        ;;
+      --url=*)
+        MKEXP2_MCP_URL="${1#*=}"
+        MKEXP2_MCP_OPTION_SET=1
+        shift
+        ;;
+      --token)
+        shift
+        if [[ $# -eq 0 ]]; then
+          EchoFatal "missing value for --token"
+          exit 1
+        fi
+        MKEXP2_MCP_TOKEN="$1"
+        MKEXP2_MCP_OPTION_SET=1
+        shift
+        ;;
+      --token=*)
+        MKEXP2_MCP_TOKEN="${1#*=}"
+        MKEXP2_MCP_OPTION_SET=1
+        shift
+        ;;
       *)
         if [[ "$MKEXP2_MODE" == "describe" && "$1" != -* ]]; then
           if (( describe_target_set )); then
@@ -688,6 +737,13 @@ ParseCli() {
     fi
   fi
 
+  if (( MKEXP2_MCP_OPTION_SET )); then
+    if [[ "$MKEXP2_MODE" != "mcp" ]]; then
+      EchoFatal "--url/--token can only be used with mcp"
+      exit 1
+    fi
+  fi
+
   if [[ "$MKEXP2_MODE" == "web" ]]; then
     if [[ -z "$MKEXP2_WEB_REPO" ]]; then
       EchoFatal "web requires --repo DIR"
@@ -699,6 +755,15 @@ ParseCli() {
     fi
     if [[ "$MKEXP2_WEB_NAME_TEMPLATE" != *"<name>"* ]]; then
       EchoFatal "--name-template must contain <name>"
+      exit 1
+    fi
+  elif [[ "$MKEXP2_MODE" == "mcp" ]]; then
+    if [[ -z "$MKEXP2_MCP_URL" ]]; then
+      EchoFatal "mcp requires --url URL or MKEXP2_MCP_URL"
+      exit 1
+    fi
+    if [[ -z "$MKEXP2_MCP_TOKEN" ]]; then
+      EchoFatal "mcp requires --token TOKEN or MKEXP2_MCP_TOKEN"
       exit 1
     fi
   fi
