@@ -192,6 +192,8 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="console-log"', mkexp2_web.HTML)
         self.assertIn("function logApiCommands", mkexp2_web.HTML)
         self.assertIn("function collectCommandResults", mkexp2_web.HTML)
+        self.assertIn("const allowEmptyToken = __ALLOW_EMPTY_TOKEN__;", mkexp2_web.HTML)
+        self.assertIn("token() || allowEmptyToken", mkexp2_web.HTML)
         self.assertIn('id="refresh" class="icon-button" aria-label="Refresh experiments"', mkexp2_web.HTML)
         self.assertLess(mkexp2_web.HTML.index('id="refresh"'), mkexp2_web.HTML.index('id="git-open"'))
         self.assertLess(mkexp2_web.HTML.index('id="git-open"'), mkexp2_web.HTML.index('id="console-open"'))
@@ -214,6 +216,21 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("Submit is locked for this experiment", mkexp2_web.HTML)
         self.assertNotIn("Submit is unlocked", mkexp2_web.HTML)
         self.assertIn("mkexp2 check failed. Submit anyway?", mkexp2_web.HTML)
+
+    def test_empty_token_bypass_is_explicitly_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            default_app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+            default_handler = mkexp2_web.make_handler(default_app)
+            default_request = default_handler.__new__(default_handler)
+            default_request.headers = {"X-MKEXP2-Token": ""}
+            self.assertFalse(default_request.require_token())
+
+            dev_app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token", allow_empty_token=True)
+            dev_handler = mkexp2_web.make_handler(dev_app)
+            dev_request = dev_handler.__new__(dev_handler)
+            dev_request.headers = {"X-MKEXP2-Token": ""}
+            self.assertTrue(dev_request.require_token())
 
     def test_html_contains_csv_tabs_and_comparison_view(self):
         self.assertIn('data-view="results-view"', mkexp2_web.HTML)

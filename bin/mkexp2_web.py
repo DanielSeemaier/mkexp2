@@ -438,11 +438,12 @@ class ActionStore:
 
 
 class Mkexp2WebApp:
-    def __init__(self, repo, mkexp2, name_template, token):
+    def __init__(self, repo, mkexp2, name_template, token, allow_empty_token=False):
         self.repo = Path(repo).resolve()
         self.mkexp2 = Path(mkexp2).resolve()
         self.name_template = name_template
         self.token = token
+        self.allow_empty_token = allow_empty_token
         self.actions = ActionStore()
         self.slurm = SlurmStatus()
 
@@ -2538,6 +2539,7 @@ HTML = r"""<!doctype html>
       progressTimer: null,
       activeView: 'experiment-view'
     };
+    const allowEmptyToken = __ALLOW_EMPTY_TOKEN__;
     const tokenInput = document.getElementById('token');
     const editor = document.getElementById('experiment-editor');
     const editorHighlight = document.getElementById('experiment-highlight');
@@ -2545,7 +2547,7 @@ HTML = r"""<!doctype html>
     tokenInput.addEventListener('change', () => {
       localStorage.setItem('mkexp2-token', tokenInput.value);
       out('');
-      if (token()) {
+      if (token() || allowEmptyToken) {
         refreshPresets().catch(err => out(String(err)));
         refreshExperiments().catch(err => out(String(err)));
         refreshStatus().catch(err => out(String(err)));
@@ -4507,7 +4509,7 @@ HTML = r"""<!doctype html>
     document.querySelectorAll('.view-tab').forEach(button => {
       button.onclick = () => setView(button.dataset.view);
     });
-    if (token()) {
+    if (token() || allowEmptyToken) {
       refreshPresets().catch(err => out(String(err)));
       refreshExperiments().catch(err => out(String(err)));
       refreshStatus().catch(err => out(String(err)));
@@ -4529,6 +4531,8 @@ def make_handler(app):
 
         def require_token(self):
             supplied = self.headers.get("X-MKEXP2-Token", "")
+            if app.allow_empty_token and supplied == "":
+                return True
             return secrets.compare_digest(supplied, app.token)
 
         def do_GET(self):
@@ -4536,7 +4540,8 @@ def make_handler(app):
             path = parsed.path
             try:
                 if path == "/":
-                    text_response(self, 200, HTML, "text/html; charset=utf-8")
+                    html = HTML.replace("__ALLOW_EMPTY_TOKEN__", "true" if app.allow_empty_token else "false")
+                    text_response(self, 200, html, "text/html; charset=utf-8")
                     return
                 if path.startswith("/api/") and not self.require_token():
                     json_response(self, 401, {"error": "missing or invalid token"})
@@ -4746,6 +4751,7 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--name-template", default="%Y.%m.%d-<name>")
+    parser.add_argument("--allow-empty-token", action="store_true")
     args = parser.parse_args()
 
     repo = Path(args.repo).resolve()
@@ -4758,10 +4764,12 @@ def main():
         raise SystemExit(f"repo is not a Git repository: {repo}")
 
     token = secrets.token_urlsafe(24)
-    app = Mkexp2WebApp(repo, args.mkexp2, args.name_template, token)
+    app = Mkexp2WebApp(repo, args.mkexp2, args.name_template, token, allow_empty_token=args.allow_empty_token)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
     print(f"mkexp2 web: http://{args.host}:{args.port}", flush=True)
     print(f"session token: {token}", flush=True)
+    if args.allow_empty_token:
+        print("empty token bypass: enabled", flush=True)
     print(f"ssh tunnel: ssh -L {args.port}:{args.host}:{args.port} <user>@<cluster-login>", flush=True)
     server.serve_forever()
 

@@ -56,7 +56,8 @@ if [[ "$MKEXP2_MODE" == "web" ]]; then
     --repo "$MKEXP2_WEB_REPO" \
     --host "$MKEXP2_WEB_HOST" \
     --port "$MKEXP2_WEB_PORT" \
-    --name-template "$MKEXP2_WEB_NAME_TEMPLATE"
+    --name-template "$MKEXP2_WEB_NAME_TEMPLATE" \
+    ${${MKEXP2_WEB_ALLOW_EMPTY_TOKEN:#0}:+--allow-empty-token}
 fi
 
 if [[ "$MKEXP2_MODE" == "mcp" ]]; then

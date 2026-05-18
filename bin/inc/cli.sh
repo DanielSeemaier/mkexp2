@@ -47,6 +47,7 @@ Options:
   --host HOST                With `web`, bind host (default: 127.0.0.1)
   --port PORT                With `web`, bind port (default: 8765)
   --name-template TEMPLATE   With `web`, new experiment directory template
+  --allow-empty-token        With `web`, accept empty API token (local dev only)
   --url URL                  With `mcp`, mkexp2 web URL (default: http://127.0.0.1:8765)
   --token TOKEN              With `mcp`, mkexp2 web session token
 HELP
@@ -579,6 +580,11 @@ ParseCli() {
         MKEXP2_WEB_OPTION_SET=1
         shift
         ;;
+      --allow-empty-token)
+        MKEXP2_WEB_ALLOW_EMPTY_TOKEN=1
+        MKEXP2_WEB_OPTION_SET=1
+        shift
+        ;;
       --url)
         shift
         if [[ $# -eq 0 ]]; then
@@ -732,7 +738,7 @@ ParseCli() {
 
   if (( MKEXP2_WEB_OPTION_SET )); then
     if [[ "$MKEXP2_MODE" != "web" ]]; then
-      EchoFatal "--repo/--host/--port/--name-template can only be used with web"
+      EchoFatal "--repo/--host/--port/--name-template/--allow-empty-token can only be used with web"
       exit 1
     fi
   fi

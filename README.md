@@ -138,6 +138,9 @@ ssh -L 8765:127.0.0.1:8765 user@cluster-login
 
 The web server binds to `127.0.0.1:8765` by default and prints a session token
 on startup. Paste that token into the UI before using the API-backed controls.
+For local development on Daniel's MacBook, the server can be started with
+`--allow-empty-token` to skip the token prompt; do not use that flag for cluster
+runs.
 
 Start the local MCP bridge for Codex after the SSH tunnel is up:
 
@@ -378,6 +381,8 @@ that would escape the configured repo root and invokes commands with argv arrays
 rather than shell command strings. It does not provide a general shell endpoint.
 When `sinfo` is not installed, the status API returns a built-in sample of the
 expected i10 node table so local development on macOS still renders the panel.
+`--allow-empty-token` is an explicit local-development bypass that accepts an
+empty API token and makes the UI auto-load without a token prompt.
 
 ## MCP bridge
 
