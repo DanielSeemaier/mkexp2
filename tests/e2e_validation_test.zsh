@@ -90,6 +90,26 @@ EOF
 
   (
     cd "$tmp"
+    mkdir -p results
+    cat > results/Known.csv <<'EOF'
+Graph,Cut,Time,Failed
+a,10,1.0,false
+b,20,2.0,0
+c,30,3.0,true
+EOF
+    "$MKEXP2" stats --json > stats.json
+    assert_eq "$(jq -r '.ok' stats.json)" "true" "stats --json reports ok"
+    assert_eq "$(jq -r '.algorithms[0].algorithm' stats.json)" "Known" "stats --json reports algorithm name"
+    assert_eq "$(jq -r '.algorithms[0].rows' stats.json)" "3" "stats --json reports row count"
+    assert_eq "$(jq -r '.algorithms[0].failed' stats.json)" "1" "stats --json reports failed row count"
+    assert_eq "$(jq -r '.algorithms[0].avg_cut' stats.json)" "15" "stats --json averages successful cuts"
+    assert_eq "$(jq -r '.algorithms[0].avg_time' stats.json)" "1.5" "stats --json averages successful times"
+    "$MKEXP2" stats > stats.out
+    assert_file_contains stats.out "Avg Cut" "stats text output includes avg cut"
+  )
+
+  (
+    cd "$tmp"
     cat > broken-install.md <<'EOF'
 # mkexp2 install log
 

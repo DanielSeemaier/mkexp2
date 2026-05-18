@@ -82,6 +82,13 @@ Parse finished logs into CSV:
 mkexp2 parse
 ```
 
+Summarize parsed CSV results:
+
+```bash
+mkexp2 stats
+mkexp2 stats --json
+```
+
 Validate an `Experiment` without generating jobs:
 
 ```bash
@@ -306,6 +313,9 @@ The UI can:
 
 - list repo-relative experiment directories containing an `Experiment` file,
   including nested year/group folders collapsed by default in the sidebar
+- pin experiments to a flat top section in the sidebar; the pinned ids are
+  persisted server-side in `.mkexp2/web-pins.json` under the configured
+  experiment repo
 - inspect the configured experiment Git repo from the header Git button, review
   added/modified/deleted files, enter a commit message, and run `git add -A`,
   `git commit`, and `git push`
@@ -327,6 +337,8 @@ The UI can:
 - commit submitted state to Git after submission
 - run `mkexp2 parse` from the Results tab and reload CSV results when parsing
   succeeds
+- view a Stats tab backed by `mkexp2 stats --json`, currently showing average
+  cut and average time per algorithm from parsed CSV files
 - refresh run progress from the Experiment page by running `mkexp2 progress
   --json`; after progress has been loaded, incomplete runs auto-refresh every 2
   seconds, while `.mkexp2/submit.lock` keeps the Submit button disabled
@@ -334,8 +346,10 @@ The UI can:
   abandoned submissions
 - auto-load and render `logs/install.md` from the Install Log tab, with a
   reload action and an empty state when the log does not exist yet
-- browse `logs/` lazily from the Logs tab: directory listings load one level at
-  a time and file contents are read only after selecting a specific log file
+- browse run logs lazily from the Logs tab: the first two run-log directory
+  levels are collapsed into `Algorithm/Experiment` entries, `logs/install.md`
+  is hidden because it has its own tab, and file contents are read only after
+  selecting a specific log file
 - display CSV results in the Results tab with parsed tables, remembered column
   visibility, and an Add comparison control that dynamically adds a second CSV
   side by side; comparison tables lock scrolling, require matching row counts,

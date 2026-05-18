@@ -19,6 +19,8 @@ from pathlib import Path
 MAX_TEXT_RESPONSE = 1024 * 1024
 MAX_LOG_LIST_ENTRIES = 500
 SLURM_CACHE_SECONDS = 15
+WEB_STATE_DIR = ".mkexp2"
+WEB_PINS_FILE = "web-pins.json"
 EXPERIMENT_SKIP_DIRS = {".git", ".mkexp2", "jobs", "logs", "results", "slurm"}
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 SINFO_LONG_FALLBACK = """Sat May 16 15:57:01 2026
@@ -490,6 +492,48 @@ class Mkexp2WebApp:
         experiments.sort(key=lambda item: item["id"])
         return experiments
 
+    def pins_path(self):
+        return self.repo / WEB_STATE_DIR / WEB_PINS_FILE
+
+    def read_pins(self):
+        path = self.pins_path()
+        if not path.is_file():
+            return {"pinned": []}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8") or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid pins JSON: {exc}") from exc
+        pinned = payload.get("pinned") or []
+        if not isinstance(pinned, list):
+            raise ValueError("invalid pins JSON: pinned is not an array")
+        valid = {experiment["id"] for experiment in self.list_experiments()}
+        filtered = []
+        seen = set()
+        for experiment_id in pinned:
+            experiment_id = str(experiment_id)
+            if experiment_id in valid and experiment_id not in seen:
+                filtered.append(experiment_id)
+                seen.add(experiment_id)
+        return {"pinned": filtered, "path": str(path)}
+
+    def write_pins(self, pinned):
+        if not isinstance(pinned, list):
+            raise ValueError("pinned must be an array")
+        valid = {experiment["id"] for experiment in self.list_experiments()}
+        filtered = []
+        seen = set()
+        for experiment_id in pinned:
+            experiment_id = str(experiment_id)
+            if experiment_id in valid and experiment_id not in seen:
+                filtered.append(experiment_id)
+                seen.add(experiment_id)
+        path = self.pins_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps({"pinned": filtered}, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(path)
+        return {"pinned": filtered, "path": str(path), "saved": True}
+
     def list_presets(self):
         result = run_command([str(self.mkexp2), "probe", "--presets"], cwd=self.repo, timeout=30)
         if result["returncode"] != 0:
@@ -576,6 +620,22 @@ class Mkexp2WebApp:
             "progress": result,
             "progress_json": progress_json,
             "submit_lock": self.submit_lock(experiment_id),
+        }
+
+    def stats(self, experiment_id):
+        result = self.command(experiment_id, ["stats", "--json"], timeout=60)
+        result["stdout"] = strip_ansi(result.get("stdout", ""))
+        result["stderr"] = strip_ansi(result.get("stderr", ""))
+        stats_json = None
+        if result["returncode"] == 0 and result["stdout"].strip():
+            try:
+                stats_json = json.loads(result["stdout"])
+            except json.JSONDecodeError:
+                stats_json = None
+        return {
+            "ok": result["returncode"] == 0,
+            "stats": result,
+            "stats_json": stats_json,
         }
 
     def submit_action(self, experiment_id, payload):
@@ -787,21 +847,38 @@ class Mkexp2WebApp:
         if not directory.is_dir():
             raise ValueError("log path is not a directory")
 
-        entries = []
-        for child in directory.iterdir():
-            if child.name.startswith("."):
-                continue
+        def make_entry(child):
             stat = child.stat()
             rel = child.resolve().relative_to(logs_root.resolve()).as_posix()
-            entries.append(
-                {
-                    "name": child.name,
-                    "path": rel,
-                    "type": "dir" if child.is_dir() else "file",
-                    "size": stat.st_size if child.is_file() else None,
-                    "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
-                }
-            )
+            return {
+                "name": rel if not str(rel_dir or "") else child.name,
+                "path": rel,
+                "type": "dir" if child.is_dir() else "file",
+                "size": stat.st_size if child.is_file() else None,
+                "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+            }
+
+        entries = []
+        if not str(rel_dir or ""):
+            for child in directory.iterdir():
+                if child.name.startswith(".") or child.name == "install.md":
+                    continue
+                if not child.is_dir():
+                    entries.append(make_entry(child))
+                    continue
+                visible_children = sorted(
+                    (grandchild for grandchild in child.iterdir() if not grandchild.name.startswith(".")),
+                    key=lambda item: (not item.is_dir(), item.name),
+                )
+                if not visible_children:
+                    entries.append(make_entry(child))
+                    continue
+                entries.extend(make_entry(grandchild) for grandchild in visible_children)
+        else:
+            for child in directory.iterdir():
+                if child.name.startswith("."):
+                    continue
+                entries.append(make_entry(child))
         entries.sort(key=lambda item: (item["type"] != "dir", item["name"]))
         total = len(entries)
         offset = max(0, int(offset or 0))
@@ -1000,6 +1077,20 @@ HTML = r"""<!doctype html>
       gap: 6px;
       margin-top: 12px;
     }
+    .pinned-experiments {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .pinned-title {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
     .experiment-folder {
       min-width: 0;
     }
@@ -1047,16 +1138,40 @@ HTML = r"""<!doctype html>
       padding-left: 12px;
       border-left: 1px solid var(--border);
     }
+    .experiment-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 34px;
+      gap: 6px;
+      align-items: stretch;
+      min-width: 0;
+    }
     .experiment-row {
       width: 100%;
       text-align: left;
       height: auto;
       min-height: 38px;
       padding: 8px 10px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .experiment-row.active {
       border-color: var(--accent);
       background: #e8f5f3;
+    }
+    .pin-button {
+      min-height: 38px;
+      height: auto;
+      padding: 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1;
+    }
+    .pin-button.active {
+      color: #a16207;
+      border-color: #facc15;
+      background: #fef9c3;
     }
     .sidebar-nodes {
       margin-top: 18px;
@@ -1448,6 +1563,16 @@ HTML = r"""<!doctype html>
       font-size: 12px;
       font-variant-numeric: tabular-nums;
       text-align: right;
+    }
+    .stats-table td:nth-child(n+2),
+    .stats-table th:nth-child(n+2) {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .stats-files {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
     }
     .check-json pre {
       max-height: 180px;
@@ -2206,6 +2331,7 @@ HTML = r"""<!doctype html>
         <button class="view-tab icon-tab" data-view="install-log-view" aria-label="Install Log" title="Install Log">?</button>
         <button class="view-tab active" data-view="experiment-view">Experiment</button>
         <button class="view-tab" data-view="results-view">Results</button>
+        <button class="view-tab" data-view="stats-view">Stats</button>
         <button class="view-tab" data-view="logs-view">Logs</button>
         <button class="view-tab" data-view="plots-view">Plots</button>
       </div>
@@ -2308,6 +2434,22 @@ HTML = r"""<!doctype html>
           </div>
         </section>
       </section>
+      <section id="stats-view" class="view-panel">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Stats</div>
+              <div id="stats-summary" class="csv-summary">No stats loaded.</div>
+            </div>
+            <button id="load-stats" class="icon-button" aria-label="Reload stats" title="Reload stats">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+            </button>
+          </div>
+          <div class="panel-body">
+            <div id="stats-output" class="csv-empty">Open the Stats tab to summarize parsed CSV results.</div>
+          </div>
+        </section>
+      </section>
       <section id="install-log-view" class="view-panel">
         <section class="panel">
           <div class="panel-header">
@@ -2371,11 +2513,14 @@ HTML = r"""<!doctype html>
     const state = {
       experiments: [],
       selected: null,
+      pinnedExperiments: new Set(),
       algorithms: [],
       presets: [],
       openDirs: new Set(),
       results: [],
       resultsFor: null,
+      stats: null,
+      statsFor: null,
       activeResult: '',
       compareRight: '',
       compareEnabled: false,
@@ -3503,6 +3648,72 @@ HTML = r"""<!doctype html>
       renderCsvTable(rightFile, rightBox, headers, { compare: true, peer: file });
       syncCompareScroll(leftBox, rightBox);
     }
+    function formatStatNumber(value) {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return 'n/a';
+      if (Math.abs(parsed) >= 1000) return parsed.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      return parsed.toLocaleString(undefined, { maximumSignificantDigits: 6 });
+    }
+    function renderStatsWorkspace() {
+      const summary = document.getElementById('stats-summary');
+      const box = document.getElementById('stats-output');
+      if (!state.selected) {
+        summary.textContent = 'No experiment selected.';
+        box.className = 'csv-empty';
+        box.textContent = 'Select an experiment first.';
+        return;
+      }
+      if (state.statsFor !== state.selected || !state.stats) {
+        summary.textContent = 'No stats loaded.';
+        box.className = 'csv-empty';
+        box.textContent = 'Open the Stats tab to summarize parsed CSV results.';
+        return;
+      }
+      const stats = state.stats.stats_json || null;
+      const algorithms = stats?.algorithms || [];
+      if (!stats || !algorithms.length) {
+        summary.textContent = 'No stats available.';
+        box.className = 'csv-empty';
+        box.textContent = 'No parsed CSV results found. Run Parse Logs first.';
+        return;
+      }
+      summary.textContent = `${algorithms.length} algorithm(s), ${algorithms.reduce((sum, item) => sum + Number(item.rows || 0), 0)} row(s)`;
+      box.className = 'csv-table-wrap';
+      box.innerHTML = '';
+      const table = document.createElement('table');
+      table.className = 'stats-table';
+      const thead = document.createElement('thead');
+      const head = document.createElement('tr');
+      for (const label of ['Algorithm', 'Rows', 'Failed', 'Avg Cut', 'Avg Time', 'Files']) {
+        const th = document.createElement('th');
+        th.textContent = label;
+        head.appendChild(th);
+      }
+      thead.appendChild(head);
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      for (const item of algorithms) {
+        const tr = document.createElement('tr');
+        const cells = [
+          item.algorithm || '',
+          String(item.rows ?? 0),
+          String(item.failed ?? 0),
+          formatStatNumber(item.avg_cut),
+          formatStatNumber(item.avg_time),
+          (item.files || []).map(csvLabel).join(', ')
+        ];
+        for (const [index, value] of cells.entries()) {
+          const td = document.createElement('td');
+          td.textContent = value;
+          td.title = value;
+          if (index === 5) td.className = 'stats-files';
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      box.appendChild(table);
+    }
     function renderInstallLogWorkspace() {
       const summary = document.getElementById('install-log-summary');
       const box = document.getElementById('install-log');
@@ -3538,6 +3749,7 @@ HTML = r"""<!doctype html>
     }
     function parentLogDir(dir) {
       const parts = String(dir || '').split('/').filter(Boolean);
+      if (parts.length <= 2) return '';
       parts.pop();
       return parts.join('/');
     }
@@ -3647,6 +3859,10 @@ HTML = r"""<!doctype html>
       if (!state.selected) return;
       if (state.resultsFor !== state.selected) await loadResults();
     }
+    async function ensureStatsLoaded() {
+      if (!state.selected) return;
+      if (state.statsFor !== state.selected || !state.stats) await loadStats();
+    }
     async function ensureInstallLogLoaded() {
       if (!state.selected) return;
       if (state.installLogFor !== state.selected) await loadInstallLog();
@@ -3665,6 +3881,9 @@ HTML = r"""<!doctype html>
       });
       if (viewId === 'results-view') {
         activateCsvView(viewId).catch(err => out(String(err)));
+      }
+      if (viewId === 'stats-view') {
+        ensureStatsLoaded().catch(err => out(String(err)));
       }
       if (viewId === 'install-log-view') {
         ensureInstallLogLoaded().catch(err => out(String(err)));
@@ -3735,21 +3954,75 @@ HTML = r"""<!doctype html>
       }
       const experiments = Array.from(node.experiments).sort((left, right) => left.label.localeCompare(right.label));
       for (const exp of experiments) {
-        const button = document.createElement('button');
-        button.className = 'experiment-row' + (state.selected === exp.id ? ' active' : '');
-        button.textContent = exp.label;
-        button.title = exp.id;
-        button.onclick = () => selectExperiment(exp.id);
-        container.appendChild(button);
+        renderExperimentItem(container, exp, exp.label);
+      }
+    }
+    function renderExperimentItem(container, exp, label) {
+      const pinned = state.pinnedExperiments.has(exp.id);
+      const item = document.createElement('div');
+      item.className = 'experiment-item';
+      const button = document.createElement('button');
+      button.className = 'experiment-row' + (state.selected === exp.id ? ' active' : '');
+      button.textContent = label;
+      button.title = exp.id;
+      button.onclick = () => selectExperiment(exp.id);
+      const pin = document.createElement('button');
+      pin.className = 'pin-button' + (pinned ? ' active' : '');
+      pin.type = 'button';
+      pin.textContent = pinned ? '★' : '☆';
+      pin.title = pinned ? 'Unpin experiment' : 'Pin experiment';
+      pin.setAttribute('aria-label', `${pinned ? 'Unpin' : 'Pin'} ${exp.id}`);
+      pin.onclick = () => togglePinnedExperiment(exp.id);
+      item.appendChild(button);
+      item.appendChild(pin);
+      container.appendChild(item);
+    }
+    function renderPinnedExperiments(container) {
+      const order = Array.from(state.pinnedExperiments);
+      const byId = new Map(state.experiments.map(exp => [exp.id, exp]));
+      const pinned = order.map(id => byId.get(id)).filter(Boolean);
+      if (!pinned.length) return;
+      const section = document.createElement('section');
+      section.className = 'pinned-experiments';
+      const title = document.createElement('div');
+      title.className = 'pinned-title';
+      title.textContent = 'Pinned';
+      section.appendChild(title);
+      for (const exp of pinned) {
+        renderExperimentItem(section, exp, exp.id);
+      }
+      container.appendChild(section);
+    }
+    function renderExperimentsList() {
+      const list = document.getElementById('experiments');
+      list.innerHTML = '';
+      renderPinnedExperiments(list);
+      const unpinned = state.experiments.filter(exp => !state.pinnedExperiments.has(exp.id));
+      renderExperimentTree(list, experimentTree(unpinned));
+    }
+    async function togglePinnedExperiment(id) {
+      if (state.pinnedExperiments.has(id)) state.pinnedExperiments.delete(id);
+      else state.pinnedExperiments.add(id);
+      renderExperimentsList();
+      try {
+        const result = await api('/api/pins', {
+          method: 'PUT',
+          body: JSON.stringify({ pinned: Array.from(state.pinnedExperiments) })
+        });
+        state.pinnedExperiments = new Set(result.pinned || []);
+      } finally {
+        renderExperimentsList();
       }
     }
     async function refreshExperiments() {
-      const data = await api('/api/experiments');
+      const [data, pins] = await Promise.all([
+        api('/api/experiments'),
+        api('/api/pins')
+      ]);
       clearTransientOutput();
       state.experiments = data.experiments;
-      const list = document.getElementById('experiments');
-      list.innerHTML = '';
-      renderExperimentTree(list, experimentTree(state.experiments));
+      state.pinnedExperiments = new Set(pins.pinned || []);
+      renderExperimentsList();
     }
     async function refreshPresets() {
       const data = await api('/api/presets');
@@ -3912,6 +4185,8 @@ HTML = r"""<!doctype html>
       state.selected = id;
       state.results = [];
       state.resultsFor = null;
+      state.stats = null;
+      state.statsFor = null;
       state.activeResult = '';
       state.compareRight = '';
       state.compareEnabled = false;
@@ -3926,6 +4201,7 @@ HTML = r"""<!doctype html>
       state.submitLock = null;
       setView('experiment-view');
       renderResultsWorkspace();
+      renderStatsWorkspace();
       renderInstallLogWorkspace();
       renderLogsWorkspace();
       renderSubmitLock({ locked: false });
@@ -4079,6 +4355,7 @@ HTML = r"""<!doctype html>
         const completed = await watchAction(action.id);
         if (completed?.status === 'completed' && completed.result?.parsed) {
           await loadResults();
+          await loadStats();
         }
       } finally {
         setActionButtons(['parse-results'], false);
@@ -4143,6 +4420,14 @@ HTML = r"""<!doctype html>
       state.compareEnabled = false;
       state.compareColumnModes = {};
       renderResultsWorkspace();
+    }
+    async function loadStats() {
+      if (!state.selected) return;
+      const data = await api(`/api/experiments/${encodeURIComponent(state.selected)}/stats`);
+      clearTransientOutput();
+      state.stats = data;
+      state.statsFor = state.selected;
+      renderStatsWorkspace();
     }
     async function loadInstallLog() {
       if (!state.selected) return;
@@ -4216,6 +4501,7 @@ HTML = r"""<!doctype html>
     document.getElementById('parse-results').onclick = parseExperiment;
     document.getElementById('plot-results').onclick = plotExperiment;
     document.getElementById('load-results').onclick = loadResults;
+    document.getElementById('load-stats').onclick = loadStats;
     document.getElementById('load-install-log').onclick = loadInstallLog;
     document.getElementById('reload-logs').onclick = () => loadLogs(state.logsDir || '');
     document.querySelectorAll('.view-tab').forEach(button => {
@@ -4264,6 +4550,9 @@ def make_handler(app):
                 if path == "/api/git/status":
                     json_response(self, 200, app.git_status())
                     return
+                if path == "/api/pins":
+                    json_response(self, 200, app.read_pins())
+                    return
                 if path == "/api/experiments":
                     json_response(self, 200, {"experiments": app.list_experiments()})
                     return
@@ -4294,6 +4583,10 @@ def make_handler(app):
                         json_response(self, 200, app.submit_lock(experiment_id))
                     else:
                         json_response(self, 200, app.progress(experiment_id))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/stats$", path)
+                if match:
+                    json_response(self, 200, app.stats(urllib.parse.unquote(match.group(1))))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/install-log$", path)
                 if match:
@@ -4353,6 +4646,9 @@ def make_handler(app):
                 if path == "/api/git/push":
                     json_response(self, 200, app.git_commit_push(payload.get("message", "")))
                     return
+                if path == "/api/pins":
+                    json_response(self, 200, app.write_pins(payload.get("pinned") or []))
+                    return
                 match = re.match(r"^/api/experiments/([^/]+)/(check|probe|submit|parse|plot)$", path)
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
@@ -4410,6 +4706,9 @@ def make_handler(app):
                     json_response(self, 401, {"error": "missing or invalid token"})
                     return
                 payload = read_json(self)
+                if path == "/api/pins":
+                    json_response(self, 200, app.write_pins(payload.get("pinned") or []))
+                    return
                 match = re.match(r"^/api/experiments/([^/]+)/experiment$", path)
                 if not match:
                     json_response(self, 404, {"error": "not found"})

@@ -25,6 +25,7 @@ MKEXP2_HOME=$(cd "$script_dir/.." && pwd)
 . "$MKEXP2_HOME/bin/inc/check.sh"
 . "$MKEXP2_HOME/bin/inc/probe.sh"
 . "$MKEXP2_HOME/bin/inc/progress.sh"
+. "$MKEXP2_HOME/bin/inc/stats.sh"
 . "$MKEXP2_HOME/bin/inc/cli.sh"
 
 ParseCli "$@"
@@ -86,6 +87,11 @@ fi
 
 if [[ "$MKEXP2_MODE" == "progress" ]]; then
   ProgressCommand "$PWD/Experiment" "${experiment_functions[@]}"
+  exit $?
+fi
+
+if [[ "$MKEXP2_MODE" == "stats" ]]; then
+  StatsCommand
   exit $?
 fi
 

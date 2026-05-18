@@ -152,6 +152,12 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="parse-results"', mkexp2_web.HTML)
         self.assertIn('id="plot-results"', mkexp2_web.HTML)
         self.assertIn('data-view="plots-view"', mkexp2_web.HTML)
+        self.assertIn('data-view="stats-view"', mkexp2_web.HTML)
+        self.assertIn('id="stats-output"', mkexp2_web.HTML)
+        self.assertIn('aria-label="Reload stats"', mkexp2_web.HTML)
+        self.assertIn("function renderStatsWorkspace", mkexp2_web.HTML)
+        self.assertIn("async function loadStats", mkexp2_web.HTML)
+        self.assertIn("/stats", mkexp2_web.HTML)
         self.assertIn('data-view="logs-view"', mkexp2_web.HTML)
         self.assertIn('id="logs-list"', mkexp2_web.HTML)
         self.assertIn('id="log-content"', mkexp2_web.HTML)
@@ -189,6 +195,10 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="refresh" class="icon-button" aria-label="Refresh experiments"', mkexp2_web.HTML)
         self.assertLess(mkexp2_web.HTML.index('id="refresh"'), mkexp2_web.HTML.index('id="git-open"'))
         self.assertLess(mkexp2_web.HTML.index('id="git-open"'), mkexp2_web.HTML.index('id="console-open"'))
+        self.assertIn("pinnedExperiments", mkexp2_web.HTML)
+        self.assertIn("function togglePinnedExperiment", mkexp2_web.HTML)
+        self.assertIn("function renderPinnedExperiments", mkexp2_web.HTML)
+        self.assertIn("/api/pins", mkexp2_web.HTML)
         self.assertNotIn('<button id="refresh">Refresh</button>', mkexp2_web.HTML)
         self.assertNotIn('id="output"', mkexp2_web.HTML)
         self.assertNotIn('<div class="panel-title">Output</div>', mkexp2_web.HTML)
@@ -266,6 +276,7 @@ class WebBackendTest(unittest.TestCase):
             log_dir = exp / "logs" / "Algo" / "Run"
             log_dir.mkdir(parents=True)
             (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            (exp / "logs" / "install.md").write_text("# install log\n")
             (log_dir / "a.log").write_text("first log\n")
             (log_dir / "b.log").write_text("second log\n")
             app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
@@ -273,7 +284,9 @@ class WebBackendTest(unittest.TestCase):
             root = app.list_logs("exp")
             self.assertTrue(root["exists"])
             self.assertEqual(root["entries"][0]["type"], "dir")
-            self.assertEqual(root["entries"][0]["path"], "Algo")
+            self.assertEqual(root["entries"][0]["name"], "Algo/Run")
+            self.assertEqual(root["entries"][0]["path"], "Algo/Run")
+            self.assertNotIn("install.md", [entry["path"] for entry in root["entries"]])
             self.assertNotIn("content", root["entries"][0])
 
             nested = app.list_logs("exp", "Algo/Run")
@@ -286,6 +299,22 @@ class WebBackendTest(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 app.log_file("exp", "../Experiment")
+
+    def test_pinned_experiments_are_stored_server_side(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "a").mkdir()
+            (repo / "b").mkdir()
+            (repo / "a" / "Experiment").write_text("ExperimentA() { :; }\n")
+            (repo / "b" / "Experiment").write_text("ExperimentB() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            saved = app.write_pins(["b", "missing", "a", "b"])
+            self.assertEqual(saved["pinned"], ["b", "a"])
+            self.assertTrue((repo / ".mkexp2" / "web-pins.json").is_file())
+
+            loaded = app.read_pins()
+            self.assertEqual(loaded["pinned"], ["b", "a"])
 
     def test_submit_lock_helpers(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -336,6 +365,35 @@ class WebBackendTest(unittest.TestCase):
         self.assertEqual(result["progress_json"]["done"], 1)
         self.assertFalse(result["progress_json"]["complete"])
         self.assertEqual(calls, [(["/fake/mkexp2", "progress", "--json"], str((repo / "exp").resolve()), 60)])
+
+    def test_stats_uses_json_argv_array_and_parses_payload(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            self.assertIsInstance(argv, list)
+            calls.append((list(argv), str(cwd) if cwd else None, timeout))
+            return {
+                "returncode": 0,
+                "stdout": '{"ok":true,"algorithms":[{"algorithm":"A","rows":2,"failed":0,"avg_cut":10,"avg_time":1.5}]}\n',
+                "stderr": "",
+                "elapsed_seconds": 0.1,
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "exp").mkdir()
+            (repo / "exp" / "Experiment").write_text("ExperimentX() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+            mkexp2_web.run_command = fake_run_command
+            try:
+                result = app.stats("exp")
+            finally:
+                mkexp2_web.run_command = original_run_command
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["stats_json"]["algorithms"][0]["algorithm"], "A")
+        self.assertEqual(calls, [(["/fake/mkexp2", "stats", "--json"], str((repo / "exp").resolve()), 60)])
 
     def test_git_status_parser_groups_files(self):
         parsed = mkexp2_web.parse_git_status("?? new.txt\n M edited.txt\nD  gone.txt\nR  old.txt -> moved.txt\n")

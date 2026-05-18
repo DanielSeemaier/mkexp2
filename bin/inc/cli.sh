@@ -9,6 +9,7 @@ Commands:
   install   Only fetch/build configured partitioners
   generate  Only generate job files and submit script
   parse     Parse logs into CSV files under ./results
+  stats     Summarize parsed CSV results
   plot      Generate plots from parsed CSV results (requires Docker)
   progress  Show run completion progress for each experiment / algorithm
   check     Validate Experiment configuration without generating jobs
@@ -35,7 +36,7 @@ Options:
   --jobs                     With `probe`, return detailed job metadata
   --calls                    With `probe`, return expanded call details
   --presets                  With `probe`, return init presets as JSON
-  --json                     With `check` or `progress`, return structured JSON
+  --json                     With `check`, `progress`, or `stats`, return structured JSON
   --property A[.B]           With `probe`, print algorithm properties or one resolved property
   --performance-profile      With `plot`, include performance profile plot
   --speedup                  With `plot`, include speedup plot (first algorithm is baseline)
@@ -204,6 +205,20 @@ ParseCli() {
         MKEXP2_DO_INSTALL=0
         MKEXP2_DO_GENERATE=0
         MKEXP2_DO_PARSE=1
+        command_set=1
+        shift
+        ;;
+      stats)
+        if (( command_set )); then
+          EchoFatal "multiple commands provided"
+          PrintHelp
+          exit 1
+        fi
+        MKEXP2_MODE="stats"
+        MKEXP2_DO_INSTALL=0
+        MKEXP2_DO_GENERATE=0
+        MKEXP2_DO_PARSE=0
+        MKEXP2_DO_STATS=1
         command_set=1
         shift
         ;;
@@ -413,6 +428,7 @@ ParseCli() {
       --json)
         MKEXP2_CHECK_JSON=1
         MKEXP2_PROGRESS_JSON=1
+        MKEXP2_STATS_JSON=1
         shift
         ;;
       --property)
@@ -644,8 +660,8 @@ ParseCli() {
     EchoFatal "--property can only be used with probe"
     exit 1
   fi
-  if (( MKEXP2_CHECK_JSON || MKEXP2_PROGRESS_JSON )) && [[ "$MKEXP2_MODE" != "check" && "$MKEXP2_MODE" != "progress" ]]; then
-    EchoFatal "--json can only be used with check or progress"
+  if (( MKEXP2_CHECK_JSON || MKEXP2_PROGRESS_JSON || MKEXP2_STATS_JSON )) && [[ "$MKEXP2_MODE" != "check" && "$MKEXP2_MODE" != "progress" && "$MKEXP2_MODE" != "stats" ]]; then
+    EchoFatal "--json can only be used with check, progress, or stats"
     exit 1
   fi
 
