@@ -13,7 +13,8 @@ Connection model:
 - This MCP server is a local stdio bridge to the mkexp2 web backend.
 - The backend must already be running on the cluster/login node with `mkexp2 web --repo ...`.
 - Reach it through SSH port forwarding, for example `ssh -L 8765:127.0.0.1:8765 user@cluster-login`.
-- Use the session token printed by `mkexp2 web` when starting this MCP bridge.
+- Use the session token printed by `mkexp2 web` when starting this MCP bridge,
+  unless the web server was explicitly started with `--allow-empty-token`.
 
 Typical workflow:
 1. Call `mkexp2_list_presets`, then `mkexp2_create_experiment` with a short name and optional preset.
@@ -480,7 +481,7 @@ def serve_stdio(server):
 def main():
     parser = argparse.ArgumentParser(description="Serve a stdio MCP bridge to mkexp2 web.")
     parser.add_argument("--url", default="http://127.0.0.1:8765")
-    parser.add_argument("--token", required=True)
+    parser.add_argument("--token", default="")
     args = parser.parse_args()
 
     client = Mkexp2WebClient(args.url, args.token)

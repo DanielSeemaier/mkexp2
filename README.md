@@ -146,6 +146,8 @@ Start the local MCP bridge for Codex after the SSH tunnel is up:
 
 ```bash
 mkexp2 mcp --url http://127.0.0.1:8765 --token "$MKEXP2_WEB_TOKEN"
+# If the web server was started with --allow-empty-token:
+mkexp2 mcp --url http://127.0.0.1:8765
 ```
 
 The MCP bridge talks only to the web API. It can guide Codex through writing an
@@ -398,7 +400,9 @@ mkexp2 mcp \
 ```
 
 The token is the session token printed by `mkexp2 web`; it may also be supplied
-with `MKEXP2_MCP_TOKEN`. `MKEXP2_MCP_URL` can set the default URL.
+with `MKEXP2_MCP_TOKEN`. If the web server was started with
+`--allow-empty-token`, omit `--token` or leave `MKEXP2_MCP_TOKEN` empty.
+`MKEXP2_MCP_URL` can set the default URL.
 
 The bridge exposes fixed MCP tools for:
 

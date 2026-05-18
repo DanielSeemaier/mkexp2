@@ -49,7 +49,7 @@ Options:
   --name-template TEMPLATE   With `web`, new experiment directory template
   --allow-empty-token        With `web`, accept empty API token (local dev only)
   --url URL                  With `mcp`, mkexp2 web URL (default: http://127.0.0.1:8765)
-  --token TOKEN              With `mcp`, mkexp2 web session token
+  --token TOKEN              With `mcp`, mkexp2 web session token (may be empty)
 HELP
 }
 
@@ -766,10 +766,6 @@ ParseCli() {
   elif [[ "$MKEXP2_MODE" == "mcp" ]]; then
     if [[ -z "$MKEXP2_MCP_URL" ]]; then
       EchoFatal "mcp requires --url URL or MKEXP2_MCP_URL"
-      exit 1
-    fi
-    if [[ -z "$MKEXP2_MCP_TOKEN" ]]; then
-      EchoFatal "mcp requires --token TOKEN or MKEXP2_MCP_TOKEN"
       exit 1
     fi
   fi
