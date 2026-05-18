@@ -89,6 +89,13 @@ mkexp2 check
 mkexp2 check --json
 ```
 
+Check run completion progress:
+
+```bash
+mkexp2 progress
+mkexp2 progress --json
+```
+
 Inspect experiments as JSON:
 
 ```bash
@@ -299,6 +306,12 @@ The UI can:
 
 - list repo-relative experiment directories containing an `Experiment` file,
   including nested year/group folders collapsed by default in the sidebar
+- inspect the configured experiment Git repo from the header Git button, review
+  added/modified/deleted files, enter a commit message, and run `git add -A`,
+  `git commit`, and `git push`
+- open the header console-log button to inspect the full browser-session
+  command log, including argv/cwd/stdout/stderr payloads returned by web API
+  actions
 - create a new directory from the name template
 - edit the raw `Experiment` file with lightweight syntax highlighting
 - save the current editor contents before running `mkexp2 check --json`, then
@@ -314,9 +327,9 @@ The UI can:
 - commit submitted state to Git after submission
 - run `mkexp2 parse` from the Results tab and reload CSV results when parsing
   succeeds
-- refresh run progress from the Experiment page by running `mkexp2 progress`;
-  while `.mkexp2/submit.lock` exists, progress refreshes periodically and the
-  Submit button stays disabled
+- refresh run progress from the Experiment page by running `mkexp2 progress
+  --json`; after progress has been loaded, incomplete runs auto-refresh every 2
+  seconds, while `.mkexp2/submit.lock` keeps the Submit button disabled
 - clear `.mkexp2/submit.lock` from the Submit panel to recover from crashed or
   abandoned submissions
 - auto-load and render `logs/install.md` from the Install Log tab, with a

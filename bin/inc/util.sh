@@ -101,6 +101,7 @@ PrepareInstallLogFile() {
   fi
 
   if [[ -f "$MKEXP2_INSTALL_LOG_FILE" ]]; then
+    _RepairInstallLogFence "$MKEXP2_INSTALL_LOG_FILE"
     {
       echo
       echo "---"
@@ -123,6 +124,29 @@ PrepareInstallLogFile() {
   _AppendInstallMachineInfo
 
   MKEXP2_INSTALL_LOG_INITIALIZED="$MKEXP2_INSTALL_LOG_FILE"
+}
+
+_InstallLogFenceOpen() {
+  local log_file="$1"
+  awk '
+    /^```/ { open = !open }
+    END { exit(open ? 0 : 1) }
+  ' "$log_file"
+}
+
+_RepairInstallLogFence() {
+  local log_file="$1"
+  [[ -f "$log_file" ]] || return 0
+  if ! _InstallLogFenceOpen "$log_file"; then
+    return 0
+  fi
+
+  {
+    echo
+    echo '```'
+    echo
+    echo "> Previous install log entry was interrupted before mkexp2 could write its footer."
+  } >> "$log_file"
 }
 
 _AppendInstallProbeCommand() {

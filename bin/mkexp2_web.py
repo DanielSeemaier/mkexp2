@@ -136,6 +136,30 @@ def parse_key_value_block(block):
     return data
 
 
+def parse_git_status(text):
+    groups = {"added": [], "modified": [], "deleted": []}
+    files = []
+    for raw_line in str(text or "").splitlines():
+        if len(raw_line) < 3:
+            continue
+        code = raw_line[:2]
+        path = raw_line[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+
+        if "D" in code:
+            category = "deleted"
+        elif "A" in code or "?" in code:
+            category = "added"
+        else:
+            category = "modified"
+
+        item = {"path": path, "status": code, "category": category}
+        groups[category].append(item)
+        files.append(item)
+    return {"files": files, "groups": groups, "dirty": bool(files)}
+
+
 def parse_scontrol_nodes(text):
     nodes = {}
     blocks = re.split(r"\n\s*\n", text.strip())
@@ -538,12 +562,19 @@ class Mkexp2WebApp:
         return {"cleared": existed, "submit_lock": self.submit_lock(experiment_id)}
 
     def progress(self, experiment_id):
-        result = self.command(experiment_id, ["progress"], timeout=60)
+        result = self.command(experiment_id, ["progress", "--json"], timeout=60)
         result["stdout"] = strip_ansi(result.get("stdout", ""))
         result["stderr"] = strip_ansi(result.get("stderr", ""))
+        progress_json = None
+        if result["returncode"] == 0 and result["stdout"].strip():
+            try:
+                progress_json = json.loads(result["stdout"])
+            except json.JSONDecodeError:
+                progress_json = None
         return {
             "ok": result["returncode"] == 0,
             "progress": result,
+            "progress_json": progress_json,
             "submit_lock": self.submit_lock(experiment_id),
         }
 
@@ -635,6 +666,58 @@ class Mkexp2WebApp:
         message = f"chore: submit {experiment_id} ({algo_text}){suffix}"
         commit = run_command(["git", "commit", "-m", message, "--", rel], cwd=self.repo, timeout=60)
         return {"committed": commit["returncode"] == 0, "add": add, "commit": commit, "message": message}
+
+    def git_status(self):
+        status = run_command(["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=self.repo, timeout=30)
+        branch = run_command(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=self.repo, timeout=30)
+        parsed = parse_git_status(status["stdout"] if status["returncode"] == 0 else "")
+        return {
+            "ok": status["returncode"] == 0,
+            "repo": str(self.repo),
+            "branch": branch["stdout"].strip() if branch["returncode"] == 0 else "",
+            "status": status,
+            "branch_command": branch,
+            **parsed,
+        }
+
+    def git_commit_push(self, message):
+        message = str(message or "").strip()
+        if not message:
+            raise ValueError("commit message is required")
+
+        before = self.git_status()
+        add = run_command(["git", "add", "-A"], cwd=self.repo, timeout=60)
+        if add["returncode"] != 0:
+            return {"ok": False, "repo": str(self.repo), "before": before, "add": add, "message": message}
+
+        diff = run_command(["git", "diff", "--cached", "--quiet"], cwd=self.repo, timeout=60)
+        commit = {"committed": False, "message": "nothing to commit"}
+        if diff["returncode"] != 0:
+            commit = run_command(["git", "commit", "-m", message], cwd=self.repo, timeout=120)
+            if commit["returncode"] != 0:
+                return {
+                    "ok": False,
+                    "repo": str(self.repo),
+                    "before": before,
+                    "add": add,
+                    "diff": diff,
+                    "commit": commit,
+                    "message": message,
+                }
+
+        push = run_command(["git", "push"], cwd=self.repo, timeout=180)
+        after = self.git_status()
+        return {
+            "ok": push["returncode"] == 0,
+            "repo": str(self.repo),
+            "before": before,
+            "after": after,
+            "add": add,
+            "diff": diff,
+            "commit": commit,
+            "push": push,
+            "message": message,
+        }
 
     def results(self, experiment_id):
         path = self.experiment_path(experiment_id)
@@ -897,7 +980,14 @@ HTML = r"""<!doctype html>
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 8px;
       margin-bottom: 16px;
+    }
+    .brand-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
     }
     .brand h1 {
       margin: 0;
@@ -1306,15 +1396,58 @@ HTML = r"""<!doctype html>
       white-space: nowrap;
     }
     .progress-output {
-      white-space: pre-wrap;
       overflow: auto;
-      overflow-wrap: anywhere;
       max-height: 260px;
       border-radius: 6px;
-      background: #101820;
-      color: #e7eef2;
+      display: grid;
+      gap: 10px;
+    }
+    .progress-experiment {
+      display: grid;
+      gap: 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fbfcfd;
       padding: 10px;
+    }
+    .progress-experiment-header,
+    .progress-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(140px, 34%) 58px;
+      align-items: center;
+      gap: 10px;
+    }
+    .progress-experiment-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 750;
+    }
+    .progress-row-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .progress-bar {
+      height: 9px;
+      border-radius: 999px;
+      background: #dbe3e8;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: var(--accent);
+    }
+    .progress-count {
+      white-space: nowrap;
+      color: var(--muted);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
     }
     .check-json pre {
       max-height: 180px;
@@ -1726,6 +1859,131 @@ HTML = r"""<!doctype html>
       border-radius: 6px;
       background: #fbfcfd;
     }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: rgba(15, 23, 42, 0.42);
+    }
+    .modal {
+      width: min(760px, 100%);
+      max-height: calc(100vh - 40px);
+      overflow: auto;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 20px 50px rgba(15, 23, 42, 0.24);
+    }
+    .modal-header,
+    .modal-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: #fbfcfd;
+    }
+    .modal-footer {
+      border-top: 1px solid var(--border);
+      border-bottom: 0;
+    }
+    .modal-title {
+      font-weight: 750;
+    }
+    .modal-body {
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+    }
+    .git-status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+    }
+    .git-status-column {
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fbfcfd;
+      padding: 10px;
+    }
+    .git-status-title {
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      text-transform: uppercase;
+    }
+    .git-file-list {
+      display: grid;
+      gap: 5px;
+      max-height: 190px;
+      overflow: auto;
+    }
+    .git-file {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .git-message {
+      display: grid;
+      gap: 6px;
+    }
+    .git-message textarea {
+      min-height: 82px;
+    }
+    .console-modal {
+      width: min(1040px, 100%);
+    }
+    .console-log {
+      display: grid;
+      gap: 10px;
+      max-height: calc(100vh - 190px);
+      overflow: auto;
+    }
+    .console-entry {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fbfcfd;
+    }
+    .console-entry-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .console-entry-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text);
+      font-weight: 750;
+    }
+    .console-entry pre {
+      margin: 0;
+      max-height: 320px;
+      overflow: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border-radius: 6px;
+      background: #101820;
+      color: #e7eef2;
+      padding: 10px;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
     .logs-browser {
       display: grid;
       grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
@@ -1872,7 +2130,17 @@ HTML = r"""<!doctype html>
     <aside class="sidebar">
       <div class="brand">
         <h1>mkexp2</h1>
-        <button id="refresh">Refresh</button>
+        <div class="brand-actions">
+          <button id="refresh" class="icon-button" aria-label="Refresh experiments" title="Refresh experiments">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+          </button>
+          <button id="git-open" class="icon-button" aria-label="Git status" title="Git status">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M8.5 7.5 16 15"/></svg>
+          </button>
+          <button id="console-open" class="icon-button" aria-label="Console log" title="Console log">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg>
+          </button>
+        </div>
       </div>
       <div class="stack">
         <input id="token" type="password" placeholder="Session token">
@@ -1893,6 +2161,46 @@ HTML = r"""<!doctype html>
         <div id="slurm-status" class="node-list muted">No status loaded.</div>
       </section>
     </aside>
+    <div id="git-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="git-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="git-modal-title" class="modal-title">Experiment Repo Git</div>
+            <div id="git-repo-summary" class="csv-summary">No status loaded.</div>
+          </div>
+          <button id="git-close" class="icon-button" aria-label="Close Git dialog" title="Close">x</button>
+        </div>
+        <div class="modal-body">
+          <div id="git-status" class="git-status-grid"></div>
+          <label class="git-message">
+            <span class="csv-summary">Commit message</span>
+            <textarea id="git-message" placeholder="chore: update experiment results"></textarea>
+          </label>
+          <div id="git-output" class="csv-empty">Open the dialog to load repository status.</div>
+        </div>
+        <div class="modal-footer">
+          <button id="git-refresh">Refresh</button>
+          <button id="git-push" class="primary">Push</button>
+        </div>
+      </div>
+    </div>
+    <div id="console-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="console-modal-title">
+      <div class="modal console-modal">
+        <div class="modal-header">
+          <div>
+            <div id="console-modal-title" class="modal-title">Console Log</div>
+            <div id="console-summary" class="csv-summary">No commands logged yet.</div>
+          </div>
+          <button id="console-close" class="icon-button" aria-label="Close console log" title="Close">x</button>
+        </div>
+        <div class="modal-body">
+          <div id="console-log" class="console-log"></div>
+        </div>
+        <div class="modal-footer">
+          <button id="console-clear">Clear</button>
+        </div>
+      </div>
+    </div>
     <main class="main">
       <div class="view-tabs">
         <button class="view-tab icon-tab" data-view="install-log-view" aria-label="Install Log" title="Install Log">?</button>
@@ -1944,14 +2252,6 @@ HTML = r"""<!doctype html>
               </div>
               <div class="panel-body">
                 <div id="progress-output" class="csv-empty">Run progress to count finished log files against expected runs.</div>
-              </div>
-            </section>
-            <section class="panel">
-              <div class="panel-header">
-                <div class="panel-title">Output</div>
-              </div>
-              <div class="panel-body">
-                <div id="output" class="output"></div>
               </div>
             </section>
           </div>
@@ -2088,6 +2388,8 @@ HTML = r"""<!doctype html>
       selectedLog: '',
       logContent: null,
       submitLock: null,
+      consoleEntries: [],
+      consoleOpen: false,
       progressTimer: null,
       activeView: 'experiment-view'
     };
@@ -2106,16 +2408,59 @@ HTML = r"""<!doctype html>
     });
 
     function token() { return tokenInput.value; }
+    function consoleText(value) {
+      return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    }
+    function appendConsoleLog(title, value) {
+      state.consoleEntries.push({
+        time: new Date().toLocaleTimeString(),
+        title,
+        text: consoleText(value)
+      });
+      if (state.consoleEntries.length > 300) state.consoleEntries.splice(0, state.consoleEntries.length - 300);
+      renderConsoleLog();
+    }
     function out(value) {
-      const box = document.getElementById('output');
-      box.className = 'output';
-      box.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+      appendConsoleLog('Message', value);
+    }
+    function renderConsoleLog() {
+      const summary = document.getElementById('console-summary');
+      const box = document.getElementById('console-log');
+      if (!summary || !box) return;
+      summary.textContent = state.consoleEntries.length
+        ? `${state.consoleEntries.length} log entr${state.consoleEntries.length === 1 ? 'y' : 'ies'} in this browser session.`
+        : 'No commands logged yet.';
+      box.innerHTML = '';
+      if (!state.consoleEntries.length) {
+        const empty = document.createElement('div');
+        empty.className = 'csv-empty';
+        empty.textContent = 'Commands and their output will appear here after actions run.';
+        box.appendChild(empty);
+        return;
+      }
+      for (const entry of state.consoleEntries) {
+        const item = document.createElement('section');
+        item.className = 'console-entry';
+        const header = document.createElement('div');
+        header.className = 'console-entry-header';
+        const title = document.createElement('div');
+        title.className = 'console-entry-title';
+        title.textContent = entry.title;
+        const time = document.createElement('div');
+        time.textContent = entry.time;
+        header.appendChild(title);
+        header.appendChild(time);
+        const pre = document.createElement('pre');
+        pre.textContent = entry.text;
+        item.appendChild(header);
+        item.appendChild(pre);
+        box.appendChild(item);
+      }
+      box.scrollTop = box.scrollHeight;
     }
     function clearTransientOutput() {
-      const box = document.getElementById('output');
-      if (/session token|missing or invalid token/i.test(box.textContent)) {
-        box.textContent = '';
-      }
+      state.consoleEntries = state.consoleEntries.filter(entry => !/session token|missing or invalid token/i.test(entry.text));
+      renderConsoleLog();
     }
     function stripAnsi(text) {
       return String(text || '').replace(/\x1b\[[0-9;]*m/g, '');
@@ -2199,110 +2544,28 @@ HTML = r"""<!doctype html>
       target.appendChild(card);
     }
     function renderCheckResult(result, saveResult) {
-      const box = document.getElementById('output');
-      box.className = 'output rendered-output';
-      box.innerHTML = '';
-
       const payload = parseCheckJson(result);
       const ok = payload ? Boolean(payload.ok) : Number(result.returncode) === 0;
       const warningOnly = ok && Number(payload?.warnings || 0) > 0;
       const combined = `${result.stdout || ''}\n${result.stderr || ''}`;
       const cleanOutput = stripAnsi(combined);
-      const card = document.createElement('div');
-      card.className = `check-card ${ok ? (warningOnly ? 'warn' : 'ok') : 'fail'}`;
-
-      const title = document.createElement('h3');
-      title.className = ok ? 'status-ok' : 'status-bad';
-      title.textContent = ok ? (warningOnly ? 'Check passed with warnings' : 'Check passed') : 'Check failed';
-      card.appendChild(title);
-
-      const message = document.createElement('div');
-      message.className = 'check-message';
-      message.textContent = ok
-        ? 'Saved the Experiment file and validated the experiment configuration.'
-        : 'Saved the Experiment file, but mkexp2 check reported problems.';
-      card.appendChild(message);
-
-      const facts = document.createElement('div');
-      facts.className = 'check-facts';
-      appendCheckFact(facts, 'Return code', String(result.returncode));
-      appendCheckFact(facts, 'Errors', String(payload?.errors ?? checkCount(cleanOutput, 'errors') ?? (ok ? '0' : 'unknown')));
-      appendCheckFact(facts, 'Warnings', String(payload?.warnings ?? checkCount(cleanOutput, 'warnings') ?? '0'));
-      appendCheckFact(facts, 'Elapsed', `${result.elapsed_seconds ?? '?'}s`);
-      if (saveResult?.path) appendCheckFact(facts, 'Saved', saveResult.path);
-      card.appendChild(facts);
-
-      if (payload?.experiments?.length) {
-        const experiments = document.createElement('div');
-        experiments.className = 'check-experiments';
-        for (const experiment of payload.experiments) {
-          const item = document.createElement('section');
-          item.className = 'check-experiment';
-
-          const header = document.createElement('div');
-          header.className = 'check-experiment-title';
-          const name = document.createElement('span');
-          name.textContent = experiment.name || 'Experiment';
-          const status = document.createElement('span');
-          status.className = 'check-experiment-status';
-          status.textContent = experiment.status || 'UNKNOWN';
-          header.appendChild(name);
-          header.appendChild(status);
-          item.appendChild(header);
-
-          const experimentFacts = document.createElement('div');
-          experimentFacts.className = 'check-facts';
-          appendCheckFact(experimentFacts, 'System', experiment.system || '');
-          appendCheckFact(experimentFacts, 'Algorithms', String(experiment.algorithms ?? 0));
-          appendCheckFact(experimentFacts, 'Graphs', String(experiment.graphs ?? 0));
-          appendCheckFact(experimentFacts, 'Topologies', String(experiment.topologies ?? 0));
-          appendCheckFact(experimentFacts, 'Errors', String(experiment.errors ?? 0));
-          appendCheckFact(experimentFacts, 'Warnings', String(experiment.warnings ?? 0));
-          item.appendChild(experimentFacts);
-
-          if (experiment.messages?.length) {
-            const lines = document.createElement('div');
-            lines.className = 'check-lines';
-            for (const messageItem of experiment.messages) {
-              const line = document.createElement('div');
-              const severity = messageItem.severity === 'error' ? 'fail' : 'warn';
-              line.className = `check-line ${severity}`;
-              line.textContent = messageItem.message || '';
-              lines.appendChild(line);
-            }
-            item.appendChild(lines);
-          }
-          experiments.appendChild(item);
-        }
-        card.appendChild(experiments);
-      } else {
-        const importantLines = cleanOutput
-          .split(/\r?\n/)
-          .map(line => line.trim())
-          .filter(line => /\[(fail|warn)\]/i.test(line));
-        if (importantLines.length) {
-          const lines = document.createElement('div');
-          lines.className = 'check-lines';
-          for (const line of importantLines) {
-            const item = document.createElement('div');
-            item.className = 'check-line ' + (/\[fail\]/i.test(line) ? 'fail' : 'warn');
-            item.textContent = line;
-            lines.appendChild(item);
-          }
-          card.appendChild(lines);
-        }
-      }
-
-      const details = document.createElement('details');
-      details.className = 'check-json';
-      const summary = document.createElement('summary');
-      summary.textContent = 'Command JSON';
-      const pre = document.createElement('pre');
-      pre.textContent = JSON.stringify(result, null, 2);
-      details.appendChild(summary);
-      details.appendChild(pre);
-      card.appendChild(details);
-      box.appendChild(card);
+      const importantLines = cleanOutput
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(line => /\[(fail|warn)\]/i.test(line));
+      appendConsoleLog(ok ? (warningOnly ? 'Check passed with warnings' : 'Check passed') : 'Check failed', {
+        message: ok
+          ? 'Saved the Experiment file and validated the experiment configuration.'
+          : 'Saved the Experiment file, but mkexp2 check reported problems.',
+        saved: saveResult?.path || null,
+        returncode: result.returncode,
+        elapsed_seconds: result.elapsed_seconds,
+        errors: payload?.errors ?? checkCount(cleanOutput, 'errors') ?? (ok ? '0' : 'unknown'),
+        warnings: payload?.warnings ?? checkCount(cleanOutput, 'warnings') ?? '0',
+        important_lines: importantLines,
+        check: result,
+        parsed: payload
+      });
     }
     function algorithmDefinitionMap(declared) {
       const map = new Map();
@@ -2488,19 +2751,155 @@ HTML = r"""<!doctype html>
       root.appendChild(raw);
       box.appendChild(root);
     }
+    function isCommandResult(value) {
+      return value && typeof value === 'object'
+        && (Array.isArray(value.argv) || typeof value.cmd === 'string')
+        && ('returncode' in value || 'stdout' in value || 'stderr' in value);
+    }
+    function collectCommandResults(value, prefix = '', out = []) {
+      if (!value || typeof value !== 'object') return out;
+      if (isCommandResult(value)) {
+        out.push({ label: prefix || 'command', command: value });
+        return out;
+      }
+      if (Array.isArray(value)) {
+        value.forEach((item, index) => collectCommandResults(item, `${prefix}[${index}]`, out));
+        return out;
+      }
+      for (const [key, child] of Object.entries(value)) {
+        const label = prefix ? `${prefix}.${key}` : key;
+        collectCommandResults(child, label, out);
+      }
+      return out;
+    }
+    function logApiCommands(method, path, payload) {
+      const commands = collectCommandResults(payload);
+      for (const item of commands) {
+        appendConsoleLog(`${method} ${path} :: ${item.label}`, item.command);
+      }
+    }
     async function api(path, options = {}) {
+      const method = options.method || 'GET';
       const headers = Object.assign({ 'X-MKEXP2-Token': token() }, options.headers || {});
       if (options.body && !(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
       const response = await fetch(path, Object.assign({}, options, { headers }));
-      if (!response.ok) throw new Error(await response.text());
-      return response.headers.get('content-type')?.includes('application/json')
+      if (!response.ok) {
+        const text = await response.text();
+        appendConsoleLog(`${method} ${path} failed`, text);
+        throw new Error(text);
+      }
+      const payload = response.headers.get('content-type')?.includes('application/json')
         ? response.json()
         : response.text();
+      const data = await payload;
+      logApiCommands(method, path, data);
+      return data;
     }
     function esc(value) {
       return String(value ?? '').replace(/[&<>"']/g, char => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
       }[char]));
+    }
+    function renderGitStatus(status) {
+      const repoSummary = document.getElementById('git-repo-summary');
+      const grid = document.getElementById('git-status');
+      const output = document.getElementById('git-output');
+      repoSummary.textContent = `${status.repo || 'experiment repo'}${status.branch ? ` on ${status.branch}` : ''}`;
+      grid.innerHTML = '';
+      const groups = status.groups || {};
+      for (const [key, label] of [['added', 'Added'], ['modified', 'Modified'], ['deleted', 'Deleted']]) {
+        const column = document.createElement('section');
+        column.className = 'git-status-column';
+        const title = document.createElement('div');
+        title.className = 'git-status-title';
+        const files = groups[key] || [];
+        title.textContent = `${label} (${files.length})`;
+        const list = document.createElement('div');
+        list.className = 'git-file-list';
+        if (!files.length) {
+          const empty = document.createElement('div');
+          empty.className = 'csv-summary';
+          empty.textContent = 'None';
+          list.appendChild(empty);
+        }
+        for (const file of files) {
+          const item = document.createElement('div');
+          item.className = 'git-file';
+          item.textContent = file.path;
+          item.title = `${file.status} ${file.path}`;
+          list.appendChild(item);
+        }
+        column.appendChild(title);
+        column.appendChild(list);
+        grid.appendChild(column);
+      }
+      output.className = status.dirty ? 'csv-empty' : 'csv-empty status-ok';
+      output.textContent = status.dirty
+        ? 'Enter a commit message, then push to commit and push the experiment repo.'
+        : 'No local experiment repo changes. Push will still run git push.';
+    }
+    async function loadGitStatus() {
+      const output = document.getElementById('git-output');
+      output.className = 'csv-empty';
+      output.textContent = 'Loading experiment repo status...';
+      const status = await api('/api/git/status');
+      renderGitStatus(status);
+      return status;
+    }
+    async function openGitDialog() {
+      document.getElementById('git-modal').classList.remove('hidden');
+      await loadGitStatus().catch(err => {
+        const output = document.getElementById('git-output');
+        output.className = 'csv-empty status-bad';
+        output.textContent = String(err);
+      });
+    }
+    function closeGitDialog() {
+      document.getElementById('git-modal').classList.add('hidden');
+    }
+    function openConsoleDialog() {
+      state.consoleOpen = true;
+      document.getElementById('console-modal').classList.remove('hidden');
+      renderConsoleLog();
+    }
+    function closeConsoleDialog() {
+      state.consoleOpen = false;
+      document.getElementById('console-modal').classList.add('hidden');
+    }
+    function clearConsoleLog() {
+      state.consoleEntries = [];
+      renderConsoleLog();
+    }
+    async function pushGitChanges() {
+      const message = document.getElementById('git-message').value.trim();
+      const output = document.getElementById('git-output');
+      const button = document.getElementById('git-push');
+      if (!message) {
+        output.className = 'csv-empty status-bad';
+        output.textContent = 'Commit message is required.';
+        return;
+      }
+      button.disabled = true;
+      output.className = 'csv-empty';
+      output.textContent = 'Committing and pushing experiment repo...';
+      try {
+        const result = await api('/api/git/push', {
+          method: 'POST',
+          body: JSON.stringify({ message })
+        });
+        if (result.ok) {
+          closeGitDialog();
+          out('Experiment repo pushed.');
+        } else {
+          output.className = 'output rendered-output';
+          output.textContent = JSON.stringify(result, null, 2);
+        }
+      } catch (err) {
+        output.className = 'csv-empty status-bad';
+        output.textContent = String(err);
+      } finally {
+        button.disabled = false;
+      }
     }
     function appendInlineMarkdown(parent, text) {
       const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g;
@@ -3394,8 +3793,6 @@ HTML = r"""<!doctype html>
         text.textContent = '';
         text.title = '';
       }
-      if (locked) startProgressPolling();
-      else stopProgressPolling();
     }
     async function refreshSubmitLock() {
       if (!state.selected) {
@@ -3414,7 +3811,7 @@ HTML = r"""<!doctype html>
       if (state.progressTimer) return;
       state.progressTimer = setInterval(() => {
         if (state.selected) loadProgress({ quiet: true }).catch(err => out(String(err)));
-      }, 30000);
+      }, 2000);
     }
     function stopProgressPolling() {
       if (!state.progressTimer) return;
@@ -3425,18 +3822,77 @@ HTML = r"""<!doctype html>
       const summary = document.getElementById('progress-summary');
       const box = document.getElementById('progress-output');
       const command = result?.progress || result;
+      const progress = result?.progress_json || null;
       if (!state.selected) {
+        stopProgressPolling();
         summary.textContent = 'No experiment selected.';
         box.className = 'csv-empty';
         box.textContent = 'Select an experiment first.';
         return;
       }
       if (!result) {
+        stopProgressPolling();
         summary.textContent = 'No progress loaded.';
         box.className = 'csv-empty';
         box.textContent = 'Run progress to count finished log files against expected runs.';
         return;
       }
+      if (progress) {
+        const done = Number(progress.done || 0);
+        const total = Number(progress.total || 0);
+        const percent = Number(progress.percent || 0);
+        summary.textContent = `${done} / ${total} finished (${percent}%). Refreshed in ${command?.elapsed_seconds ?? '?'}s.`;
+        box.className = 'progress-output';
+        box.innerHTML = '';
+        for (const experiment of progress.experiments || []) {
+          const card = document.createElement('section');
+          card.className = 'progress-experiment';
+          const header = document.createElement('div');
+          header.className = 'progress-experiment-header';
+          const name = document.createElement('div');
+          name.className = 'progress-experiment-name';
+          name.textContent = experiment.name || experiment.function || 'Experiment';
+          const bar = document.createElement('div');
+          bar.className = 'progress-bar';
+          const fill = document.createElement('div');
+          fill.className = 'progress-bar-fill';
+          fill.style.width = `${Math.max(0, Math.min(100, Number(experiment.percent || 0)))}%`;
+          bar.appendChild(fill);
+          const count = document.createElement('div');
+          count.className = 'progress-count';
+          count.textContent = `${experiment.done || 0} / ${experiment.total || 0}`;
+          header.appendChild(name);
+          header.appendChild(bar);
+          header.appendChild(count);
+          card.appendChild(header);
+
+          for (const algorithm of experiment.algorithms || []) {
+            const row = document.createElement('div');
+            row.className = 'progress-row';
+            const rowName = document.createElement('div');
+            rowName.className = 'progress-row-name';
+            rowName.textContent = algorithm.name || '';
+            const rowBar = document.createElement('div');
+            rowBar.className = 'progress-bar';
+            const rowFill = document.createElement('div');
+            rowFill.className = 'progress-bar-fill';
+            rowFill.style.width = `${Math.max(0, Math.min(100, Number(algorithm.percent || 0)))}%`;
+            rowBar.appendChild(rowFill);
+            const rowCount = document.createElement('div');
+            rowCount.className = 'progress-count';
+            rowCount.textContent = `${algorithm.done || 0} / ${algorithm.total || 0}`;
+            row.appendChild(rowName);
+            row.appendChild(rowBar);
+            row.appendChild(rowCount);
+            card.appendChild(row);
+          }
+          box.appendChild(card);
+        }
+        if (progress.complete) stopProgressPolling();
+        else startProgressPolling();
+        return;
+      }
+      stopProgressPolling();
       const text = stripAnsi(`${command?.stdout || ''}${command?.stderr ? `\n${command.stderr}` : ''}`).trim();
       summary.textContent = command?.returncode === 0
         ? `Progress refreshed in ${command.elapsed_seconds ?? '?'}s.`
@@ -3516,11 +3972,7 @@ HTML = r"""<!doctype html>
         try {
           await loadAlgorithms();
         } catch (err) {
-          const box = document.getElementById('output');
-          const note = document.createElement('div');
-          note.className = 'check-line warn';
-          note.textContent = `Algorithm refresh failed after check: ${String(err)}`;
-          box.querySelector('.check-card')?.appendChild(note);
+          out(`Algorithm refresh failed after check: ${String(err)}`);
         }
       } finally {
         button.disabled = false;
@@ -3748,6 +4200,13 @@ HTML = r"""<!doctype html>
       refreshExperiments().catch(err => out(String(err)));
     };
     document.getElementById('refresh-status').onclick = refreshStatus;
+    document.getElementById('git-open').onclick = openGitDialog;
+    document.getElementById('git-close').onclick = closeGitDialog;
+    document.getElementById('git-refresh').onclick = () => loadGitStatus().catch(err => out(String(err)));
+    document.getElementById('git-push').onclick = pushGitChanges;
+    document.getElementById('console-open').onclick = openConsoleDialog;
+    document.getElementById('console-close').onclick = closeConsoleDialog;
+    document.getElementById('console-clear').onclick = clearConsoleLog;
     document.getElementById('create').onclick = createExperiment;
     document.getElementById('check').onclick = checkExperiment;
     document.getElementById('probe-run').onclick = probeExperiment;
@@ -3801,6 +4260,9 @@ def make_handler(app):
                     return
                 if path == "/api/presets":
                     json_response(self, 200, {"presets": app.list_presets()})
+                    return
+                if path == "/api/git/status":
+                    json_response(self, 200, app.git_status())
                     return
                 if path == "/api/experiments":
                     json_response(self, 200, {"experiments": app.list_experiments()})
@@ -3887,6 +4349,9 @@ def make_handler(app):
                 payload = read_json(self)
                 if path == "/api/experiments":
                     json_response(self, 201, app.create_experiment(payload))
+                    return
+                if path == "/api/git/push":
+                    json_response(self, 200, app.git_commit_push(payload.get("message", "")))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/(check|probe|submit|parse|plot)$", path)
                 if match:

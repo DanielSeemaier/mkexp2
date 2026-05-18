@@ -148,7 +148,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("Saving and checking...", mkexp2_web.HTML)
         self.assertIn("Check passed with warnings", mkexp2_web.HTML)
         self.assertIn("check-experiments", mkexp2_web.HTML)
-        self.assertIn("Command JSON", mkexp2_web.HTML)
+        self.assertIn("Action JSON", mkexp2_web.HTML)
         self.assertIn('id="parse-results"', mkexp2_web.HTML)
         self.assertIn('id="plot-results"', mkexp2_web.HTML)
         self.assertIn('data-view="plots-view"', mkexp2_web.HTML)
@@ -173,8 +173,32 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="progress-output"', mkexp2_web.HTML)
         self.assertIn("async function parseExperiment", mkexp2_web.HTML)
         self.assertIn("async function loadProgress", mkexp2_web.HTML)
+        self.assertIn("progress_json", mkexp2_web.HTML)
+        self.assertIn("progress-experiment", mkexp2_web.HTML)
+        self.assertIn("}, 2000)", mkexp2_web.HTML)
         self.assertIn("async function clearSubmitLock", mkexp2_web.HTML)
         self.assertIn("function renderPlotPanel", mkexp2_web.HTML)
+        self.assertIn('id="git-open"', mkexp2_web.HTML)
+        self.assertIn('aria-label="Git status"', mkexp2_web.HTML)
+        self.assertIn('id="console-open"', mkexp2_web.HTML)
+        self.assertIn('aria-label="Console log"', mkexp2_web.HTML)
+        self.assertIn('id="console-modal"', mkexp2_web.HTML)
+        self.assertIn('id="console-log"', mkexp2_web.HTML)
+        self.assertIn("function logApiCommands", mkexp2_web.HTML)
+        self.assertIn("function collectCommandResults", mkexp2_web.HTML)
+        self.assertIn('id="refresh" class="icon-button" aria-label="Refresh experiments"', mkexp2_web.HTML)
+        self.assertLess(mkexp2_web.HTML.index('id="refresh"'), mkexp2_web.HTML.index('id="git-open"'))
+        self.assertLess(mkexp2_web.HTML.index('id="git-open"'), mkexp2_web.HTML.index('id="console-open"'))
+        self.assertNotIn('<button id="refresh">Refresh</button>', mkexp2_web.HTML)
+        self.assertNotIn('id="output"', mkexp2_web.HTML)
+        self.assertNotIn('<div class="panel-title">Output</div>', mkexp2_web.HTML)
+        self.assertIn('id="git-modal"', mkexp2_web.HTML)
+        self.assertIn('id="git-message"', mkexp2_web.HTML)
+        self.assertIn('id="git-push"', mkexp2_web.HTML)
+        self.assertIn("async function openGitDialog", mkexp2_web.HTML)
+        self.assertIn("async function pushGitChanges", mkexp2_web.HTML)
+        self.assertIn("/api/git/status", mkexp2_web.HTML)
+        self.assertIn("/api/git/push", mkexp2_web.HTML)
         self.assertNotIn('id="plot"', mkexp2_web.HTML)
         self.assertIn("Select at least one algorithm.", mkexp2_web.HTML)
         self.assertIn("Submit is locked for this experiment", mkexp2_web.HTML)
@@ -283,14 +307,19 @@ class WebBackendTest(unittest.TestCase):
             self.assertTrue(cleared["cleared"])
             self.assertFalse(cleared["submit_lock"]["locked"])
 
-    def test_progress_uses_argv_array_and_strips_ansi(self):
+    def test_progress_uses_json_argv_array_and_strips_ansi(self):
         calls = []
         original_run_command = mkexp2_web.run_command
 
         def fake_run_command(argv, cwd=None, timeout=60):
             self.assertIsInstance(argv, list)
             calls.append((list(argv), str(cwd) if cwd else None, timeout))
-            return {"returncode": 0, "stdout": "\x1b[32mExperiment\x1b[0m  1 / 2\n", "stderr": "", "elapsed_seconds": 0.1}
+            return {
+                "returncode": 0,
+                "stdout": '\x1b[32m{"ok":true,"done":1,"total":2,"percent":50,"complete":false,"experiments":[]}\x1b[0m\n',
+                "stderr": "",
+                "elapsed_seconds": 0.1,
+            }
 
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -304,8 +333,47 @@ class WebBackendTest(unittest.TestCase):
                 mkexp2_web.run_command = original_run_command
 
         self.assertTrue(result["ok"])
-        self.assertEqual(result["progress"]["stdout"], "Experiment  1 / 2\n")
-        self.assertEqual(calls, [(["/fake/mkexp2", "progress"], str((repo / "exp").resolve()), 60)])
+        self.assertEqual(result["progress_json"]["done"], 1)
+        self.assertFalse(result["progress_json"]["complete"])
+        self.assertEqual(calls, [(["/fake/mkexp2", "progress", "--json"], str((repo / "exp").resolve()), 60)])
+
+    def test_git_status_parser_groups_files(self):
+        parsed = mkexp2_web.parse_git_status("?? new.txt\n M edited.txt\nD  gone.txt\nR  old.txt -> moved.txt\n")
+        self.assertTrue(parsed["dirty"])
+        self.assertEqual([item["path"] for item in parsed["groups"]["added"]], ["new.txt"])
+        self.assertEqual([item["path"] for item in parsed["groups"]["modified"]], ["edited.txt", "moved.txt"])
+        self.assertEqual([item["path"] for item in parsed["groups"]["deleted"]], ["gone.txt"])
+
+    def test_git_commit_push_uses_experiment_repo_argv_arrays(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            self.assertIsInstance(argv, list)
+            calls.append((list(argv), str(cwd) if cwd else None, timeout))
+            if argv[:2] == ["git", "status"]:
+                return {"returncode": 0, "stdout": " M exp/Experiment\n?? exp/results/out.csv\n", "stderr": ""}
+            if argv[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+                return {"returncode": 0, "stdout": "main\n", "stderr": ""}
+            if argv[:3] == ["git", "diff", "--cached"]:
+                return {"returncode": 1, "stdout": "", "stderr": ""}
+            return {"returncode": 0, "stdout": "", "stderr": ""}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+            mkexp2_web.run_command = fake_run_command
+            try:
+                result = app.git_commit_push("chore: save experiment")
+            finally:
+                mkexp2_web.run_command = original_run_command
+
+        repo_cwd = str(repo.resolve())
+        self.assertTrue(result["ok"])
+        self.assertIn((["git", "add", "-A"], repo_cwd, 60), calls)
+        self.assertIn((["git", "diff", "--cached", "--quiet"], repo_cwd, 60), calls)
+        self.assertIn((["git", "commit", "-m", "chore: save experiment"], repo_cwd, 120), calls)
+        self.assertIn((["git", "push"], repo_cwd, 180), calls)
 
     def test_submit_action_uses_argv_arrays(self):
         calls = []
