@@ -3684,7 +3684,7 @@ HTML = r"""<!doctype html>
       table.className = 'stats-table';
       const thead = document.createElement('thead');
       const head = document.createElement('tr');
-      for (const label of ['Algorithm', 'Rows', 'Failed', 'Avg Cut', 'Avg Time', 'Files']) {
+      for (const label of ['Algorithm', 'Rows', 'Failed', 'GMean Cut', 'GMean Time', 'Files']) {
         const th = document.createElement('th');
         th.textContent = label;
         head.appendChild(th);

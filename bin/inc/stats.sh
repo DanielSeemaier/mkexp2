@@ -37,6 +37,19 @@ StatsCommand() {
       value = trim(value)
       return value != "" && value ~ /^[-+]?[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$/
     }
+    function add_gmean(prefix, algo, value, numeric_value) {
+      numeric_value = value + 0
+      if (numeric_value < 0) return
+      if (prefix == "cut") {
+        cut_count[algo] += 1
+        if (numeric_value == 0) cut_zero[algo] = 1
+        else cut_log_sum[algo] += log(numeric_value)
+      } else if (prefix == "time") {
+        time_count[algo] += 1
+        if (numeric_value == 0) time_zero[algo] = 1
+        else time_log_sum[algo] += log(numeric_value)
+      }
+    }
     function failed_value(value) {
       value = tolower(trim(value))
       return value == "1" || value == "true" || value == "yes" || value == "failed"
@@ -74,18 +87,16 @@ StatsCommand() {
       failed = failed_col && failed_value($failed_col)
       if (failed) failed_rows[algo] += 1
       if (!failed && cut_col && numeric($cut_col)) {
-        cut_sum[algo] += $cut_col + 0
-        cut_count[algo] += 1
+        add_gmean("cut", algo, $cut_col)
       }
       if (!failed && time_col && numeric($time_col)) {
-        time_sum[algo] += $time_col + 0
-        time_count[algo] += 1
+        add_gmean("time", algo, $time_col)
       }
     }
     END {
       for (algo in rows) {
-        avg_cut = cut_count[algo] ? cut_sum[algo] / cut_count[algo] : ""
-        avg_time = time_count[algo] ? time_sum[algo] / time_count[algo] : ""
+        avg_cut = cut_count[algo] ? (cut_zero[algo] ? 0 : exp(cut_log_sum[algo] / cut_count[algo])) : ""
+        avg_time = time_count[algo] ? (time_zero[algo] ? 0 : exp(time_log_sum[algo] / time_count[algo])) : ""
         printf "%s\t%d\t%d\t%d\t%s\t%d\t%s\t%s\n", algo, rows[algo], failed_rows[algo] + 0, cut_count[algo] + 0, avg_cut, time_count[algo] + 0, avg_time, files[algo]
       }
     }
@@ -133,7 +144,7 @@ StatsCommand() {
     return 0
   fi
 
-  printf '%-32s %8s %8s %14s %14s\n' "Algorithm" "Rows" "Failed" "Avg Cut" "Avg Time"
+  printf '%-32s %8s %8s %14s %14s\n' "Algorithm" "Rows" "Failed" "GMean Cut" "GMean Time"
   local line=""
   while IFS=$'\t' read -r algorithm rows failed cut_count avg_cut time_count avg_time files; do
     [[ -n "$algorithm" ]] || continue
