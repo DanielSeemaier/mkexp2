@@ -1,27 +1,97 @@
 #!/usr/bin/env zsh
 
 _CheckDivider() {
+  if (( MKEXP2_CHECK_JSON )); then
+    return 0
+  fi
   InitUi
   printf "  %s%s%s\n" "$MKEXP2_UI_DIM" "------------------------------------------------------------" "$MKEXP2_UI_RESET"
 }
 
 _CheckInfoKV() {
+  if (( MKEXP2_CHECK_JSON )); then
+    return 0
+  fi
   local key="$1"
   local value="$2"
   _UiTag info
   printf "  %s %-14s %s\n" "$MKEXP2_UI_TAG" "${key}:" "$value"
 }
 
+_CheckRecordMessage() {
+  local severity="$1"
+  local message="$2"
+  if (( MKEXP2_CHECK_JSON )); then
+    MKEXP2_CHECK_CURRENT_MESSAGES+=("$severity"$'\t'"$message")
+  fi
+}
+
 CheckError() {
-  _UiTag fail
-  echo "  $MKEXP2_UI_TAG $*"
+  if (( ! MKEXP2_CHECK_JSON )); then
+    _UiTag fail
+    echo "  $MKEXP2_UI_TAG $*"
+  fi
+  _CheckRecordMessage "error" "$*"
   MKEXP2_CHECK_ERROR_COUNT=$((MKEXP2_CHECK_ERROR_COUNT + 1))
 }
 
 CheckWarn() {
-  _UiTag warn
-  echo "  $MKEXP2_UI_TAG $*"
+  if (( ! MKEXP2_CHECK_JSON )); then
+    _UiTag warn
+    echo "  $MKEXP2_UI_TAG $*"
+  fi
+  _CheckRecordMessage "warning" "$*"
   MKEXP2_CHECK_WARN_COUNT=$((MKEXP2_CHECK_WARN_COUNT + 1))
+}
+
+_CheckPrintJsonMessages() {
+  local sep=""
+  local item=""
+  local severity=""
+  local message=""
+
+  printf '['
+  for item in "${MKEXP2_CHECK_CURRENT_MESSAGES[@]}"; do
+    severity="${item%%$'\t'*}"
+    message="${item#*$'\t'}"
+    printf '%s{' "$sep"
+    printf '"severity":%s,' "$(JsonString "$severity")"
+    printf '"message":%s' "$(JsonString "$message")"
+    printf '}'
+    sep=","
+  done
+  printf ']'
+}
+
+_CheckRecordExperimentJson() {
+  local experiment_display="$1"
+  local check_status="$2"
+  local experiment_errors="$3"
+  local experiment_warns="$4"
+  local json=""
+
+  json+='{'
+  json+='"name":'
+  json+="$(JsonString "$experiment_display")"
+  json+=',"system":'
+  json+="$(JsonString "$_system")"
+  json+=',"status":'
+  json+="$(JsonString "$check_status")"
+  json+=',"algorithms":'
+  json+="${#_algorithms[@]}"
+  json+=',"graphs":'
+  json+="${#_graphs[@]}"
+  json+=',"topologies":'
+  json+="${#_threads[@]}"
+  json+=',"errors":'
+  json+="$experiment_errors"
+  json+=',"warnings":'
+  json+="$experiment_warns"
+  json+=',"messages":'
+  json+="$(_CheckPrintJsonMessages)"
+  json+='}'
+
+  MKEXP2_CHECK_EXPERIMENT_JSON+=("$json")
 }
 
 _CheckGraphExists() {
@@ -185,8 +255,11 @@ CheckCurrentExperiment() {
   local experiment_display="$1"
   local errors_before="$MKEXP2_CHECK_ERROR_COUNT"
   local warns_before="$MKEXP2_CHECK_WARN_COUNT"
+  MKEXP2_CHECK_CURRENT_MESSAGES=()
 
-  EchoExperiment "Check: $experiment_display"
+  if (( ! MKEXP2_CHECK_JSON )); then
+    EchoExperiment "Check: $experiment_display"
+  fi
   _CheckDivider
 
   local launcher_file="$MKEXP2_HOME/plugins/launchers/${_system}.sh"
@@ -344,6 +417,11 @@ CheckCurrentExperiment() {
     status_tag="warn"
   fi
 
+  if (( MKEXP2_CHECK_JSON )); then
+    _CheckRecordExperimentJson "$experiment_display" "$summary_status" "$experiment_errors" "$experiment_warns"
+    return 0
+  fi
+
   _UiTag "$status_tag"
   printf "  %s %s\n" "$MKEXP2_UI_TAG" "Summary ($experiment_display): $summary_status"
   _CheckInfoKV "launcher" "$_system"
@@ -365,6 +443,30 @@ FinalizeChecks() {
   elif (( MKEXP2_CHECK_WARN_COUNT > 0 )); then
     final_status="WARN"
     status_tag="warn"
+  fi
+
+  if (( MKEXP2_CHECK_JSON )); then
+    local sep=""
+    local item=""
+    printf '{"ok":'
+    if (( MKEXP2_CHECK_ERROR_COUNT > 0 )); then
+      printf 'false'
+    else
+      printf 'true'
+    fi
+    printf ',"status":%s' "$(JsonString "$final_status")"
+    printf ',"errors":%s' "$MKEXP2_CHECK_ERROR_COUNT"
+    printf ',"warnings":%s' "$MKEXP2_CHECK_WARN_COUNT"
+    printf ',"experiments":['
+    for item in "${MKEXP2_CHECK_EXPERIMENT_JSON[@]}"; do
+      printf '%s%s' "$sep" "$item"
+      sep=","
+    done
+    printf ']}\n'
+    if (( MKEXP2_CHECK_ERROR_COUNT > 0 )); then
+      return 1
+    fi
+    return 0
   fi
 
   _UiTag "$status_tag"

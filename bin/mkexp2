@@ -98,7 +98,9 @@ local_fn=""
 for local_fn in "${experiment_functions[@]}"; do
   local display_name=""
   display_name=$(DisplayExperimentName "$local_fn")
-  EchoStep "Processing experiment $display_name"
+  if (( ! (MKEXP2_DO_CHECK && MKEXP2_CHECK_JSON) )); then
+    EchoStep "Processing experiment $display_name"
+  fi
 
   LoadExperimentFunctionState "$PWD/Experiment" "$local_fn"
 

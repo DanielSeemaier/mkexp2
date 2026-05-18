@@ -86,6 +86,7 @@ Validate an `Experiment` without generating jobs:
 
 ```bash
 mkexp2 check
+mkexp2 check --json
 ```
 
 Inspect experiments as JSON:
@@ -229,6 +230,11 @@ Example:
   submits the generated install job and makes run jobs depend on it. Slurm array
   jobs are submitted with filtered array indices; local and non-array Slurm jobs
   use filtered temporary manifests under `.mkexp2/`.
+- Generated `submit.sh` creates `.mkexp2/submit.lock` before submission. Local
+  submissions remove it when the script exits. Slurm submissions keep it until a
+  final scheduler cleanup job, submitted with `afterany` dependencies on the
+  generated jobs, removes it. Delete the lock manually only after confirming the
+  submitted jobs are gone.
 - No timelimit is applied by default.
   - Set `Property timelimit <DD:HH:MM:SS|HH:MM:SS>` to add a Slurm job timelimit.
   - Set `Property timelimit.per_instance <DD:HH:MM:SS|HH:MM:SS>` to wrap each run with `timeout`.
@@ -295,8 +301,9 @@ The UI can:
   including nested year/group folders collapsed by default in the sidebar
 - create a new directory from the name template
 - edit the raw `Experiment` file with lightweight syntax highlighting
-- save the current editor contents before running `mkexp2 check`, then render
-  the command JSON with clear pass/fail messages
+- save the current editor contents before running `mkexp2 check --json`, then
+  render per-experiment errors, warnings, and summary counts with clear
+  pass/fail messages
 - run `mkexp2 probe` from the Experiment page to render enabled algorithms
   below the editor as compact rows that emphasize branch/ref settings and CLI
   arguments, with resolved settings and raw algorithm JSON collapsed by default
@@ -307,8 +314,15 @@ The UI can:
 - commit submitted state to Git after submission
 - run `mkexp2 parse` from the Results tab and reload CSV results when parsing
   succeeds
+- refresh run progress from the Experiment page by running `mkexp2 progress`;
+  while `.mkexp2/submit.lock` exists, progress refreshes periodically and the
+  Submit button stays disabled
+- clear `.mkexp2/submit.lock` from the Submit panel to recover from crashed or
+  abandoned submissions
 - auto-load and render `logs/install.md` from the Install Log tab, with a
   reload action and an empty state when the log does not exist yet
+- browse `logs/` lazily from the Logs tab: directory listings load one level at
+  a time and file contents are read only after selecting a specific log file
 - display CSV results in the Results tab with parsed tables, remembered column
   visibility, and an Add comparison control that dynamically adds a second CSV
   side by side; comparison tables lock scrolling, require matching row counts,

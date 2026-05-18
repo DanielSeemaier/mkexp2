@@ -19,9 +19,13 @@ typeset -a SELECTED_ALGORITHMS=()
 typeset -a REGISTERED_META_FILES=()
 SUBMIT_INSTALL=0
 INSTALL_JOB_ID=""
+PARSE_JOB_ID=""
 SUBMIT_DIR="${0:A:h}"
 FILTER_DIR=""
 SELECTED_FILTER_FILE=""
+SUBMIT_LOCK_FILE=""
+SUBMIT_LOCK_ACQUIRED=0
+SUBMIT_LOCK_KEEP=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -46,6 +50,47 @@ while [[ $# -gt 0 ]]; do
 done
 
 cd "$SUBMIT_DIR"
+SUBMIT_LOCK_FILE="$SUBMIT_DIR/.mkexp2/submit.lock"
+
+clear_submit_lock() {
+  if [[ -n "$SUBMIT_LOCK_FILE" ]]; then
+    rm -f "$SUBMIT_LOCK_FILE"
+  fi
+}
+
+submit_lock_exit_cleanup() {
+  if (( SUBMIT_LOCK_ACQUIRED && ! SUBMIT_LOCK_KEEP )); then
+    clear_submit_lock
+  fi
+}
+
+trap submit_lock_exit_cleanup EXIT
+
+acquire_submit_lock() {
+  mkdir -p "${SUBMIT_LOCK_FILE:h}"
+  if [[ -e "$SUBMIT_LOCK_FILE" ]]; then
+    echo "error: submit lock exists: $SUBMIT_LOCK_FILE" >&2
+    echo "another submission may still be running; remove the lock only if that run is gone" >&2
+    exit 1
+  fi
+  if ! (
+    set -o noclobber
+    {
+      printf 'started_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      printf 'pid=%s\n' "$$"
+      printf 'cwd=%s\n' "$SUBMIT_DIR"
+      if (( ${#SELECTED_ALGORITHMS[@]} > 0 )); then
+        printf 'algorithms=%s\n' "${(j:, :)SELECTED_ALGORITHMS}"
+      else
+        printf 'algorithms=all\n'
+      fi
+    } > "$SUBMIT_LOCK_FILE"
+  ) 2>/dev/null; then
+    echo "error: failed to create submit lock: $SUBMIT_LOCK_FILE" >&2
+    exit 1
+  fi
+  SUBMIT_LOCK_ACQUIRED=1
+}
 
 for algorithm in "${SELECTED_ALGORITHMS[@]}"; do
   SELECTED_ALGORITHM_SET["$algorithm"]=1
@@ -387,6 +432,46 @@ submit_parse_slurm() {
   fi
 
   echo "$out"
+  PARSE_JOB_ID=$(echo "$out" | awk '{print $NF}')
+}
+
+submit_cleanup_slurm() {
+  local -a dep_ids=()
+  local id=""
+  local dep_arg=""
+  local cleanup_script=""
+  local out=""
+
+  if [[ -n "$PARSE_JOB_ID" ]]; then
+    dep_ids+=("$PARSE_JOB_ID")
+  else
+    if [[ -n "$INSTALL_JOB_ID" ]]; then
+      dep_ids+=("$INSTALL_JOB_ID")
+    fi
+    for id in "${(@v)JOB_IDS}"; do
+      [[ -n "$id" ]] || continue
+      dep_ids+=("$id")
+    done
+  fi
+
+  if (( ${#dep_ids[@]} == 0 )); then
+    clear_submit_lock
+    return 0
+  fi
+
+  mkdir -p "$SUBMIT_DIR/.mkexp2" "$SUBMIT_DIR/slurm"
+  cleanup_script="$SUBMIT_DIR/.mkexp2/submit-lock-cleanup-$(date +%Y%m%d-%H%M%S)-$$.sh"
+  cat > "$cleanup_script" <<CLEANUP
+#!/usr/bin/env zsh
+set -euo pipefail
+rm -f ${(qqq)SUBMIT_LOCK_FILE}
+CLEANUP
+  chmod +x "$cleanup_script"
+
+  dep_arg="--dependency=afterany:${(j/:/)dep_ids}"
+  out=$(sbatch "$dep_arg" "$cleanup_script")
+  echo "$out"
+  SUBMIT_LOCK_KEEP=1
 }
 
 run_install_local() {
@@ -884,6 +969,7 @@ FinalizeGenerateOutputs() {
   done
 
   echo "validate_selected_algorithms" >> "$PWD/submit.sh"
+  echo "acquire_submit_lock" >> "$PWD/submit.sh"
 
   if (( MKEXP2_LOCAL_HAS_RUN_JOBS )); then
     {
@@ -944,6 +1030,10 @@ FinalizeGenerateOutputs() {
       } >> "$PWD/submit.sh"
       EchoStep "Enabled auto-parse in submit script"
     fi
+  fi
+
+  if (( MKEXP2_SLURM_HAS_RUN_JOBS )); then
+    echo "submit_cleanup_slurm" >> "$PWD/submit.sh"
   fi
 
   EchoStep "Generated submit script: $PWD/submit.sh"

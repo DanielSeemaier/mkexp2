@@ -144,16 +144,41 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("Probe JSON", mkexp2_web.HTML)
         self.assertIn("async function persistExperiment", mkexp2_web.HTML)
         self.assertIn("function renderCheckResult", mkexp2_web.HTML)
+        self.assertIn("function parseCheckJson", mkexp2_web.HTML)
         self.assertIn("Saving and checking...", mkexp2_web.HTML)
+        self.assertIn("Check passed with warnings", mkexp2_web.HTML)
+        self.assertIn("check-experiments", mkexp2_web.HTML)
         self.assertIn("Command JSON", mkexp2_web.HTML)
         self.assertIn('id="parse-results"', mkexp2_web.HTML)
         self.assertIn('id="plot-results"', mkexp2_web.HTML)
         self.assertIn('data-view="plots-view"', mkexp2_web.HTML)
+        self.assertIn('data-view="logs-view"', mkexp2_web.HTML)
+        self.assertIn('id="logs-list"', mkexp2_web.HTML)
+        self.assertIn('id="log-content"', mkexp2_web.HTML)
+        self.assertIn('aria-label="Reload logs"', mkexp2_web.HTML)
+        self.assertIn("async function loadLogs", mkexp2_web.HTML)
+        self.assertIn("async function loadLogFile", mkexp2_web.HTML)
+        self.assertIn("ensureLogsLoaded", mkexp2_web.HTML)
+        self.assertLess(
+            mkexp2_web.HTML.index('data-view="install-log-view"'),
+            mkexp2_web.HTML.index('data-view="experiment-view"'),
+        )
+        self.assertIn('aria-label="Install Log"', mkexp2_web.HTML)
+        self.assertNotIn('data-view="install-log-view">Install Log</button>', mkexp2_web.HTML)
+        self.assertIn("setView('experiment-view');", mkexp2_web.HTML)
         self.assertIn('id="plot-action-output"', mkexp2_web.HTML)
+        self.assertIn('id="submit-lock-status"', mkexp2_web.HTML)
+        self.assertIn('id="clear-submit-lock"', mkexp2_web.HTML)
+        self.assertIn('id="refresh-progress"', mkexp2_web.HTML)
+        self.assertIn('id="progress-output"', mkexp2_web.HTML)
         self.assertIn("async function parseExperiment", mkexp2_web.HTML)
+        self.assertIn("async function loadProgress", mkexp2_web.HTML)
+        self.assertIn("async function clearSubmitLock", mkexp2_web.HTML)
         self.assertIn("function renderPlotPanel", mkexp2_web.HTML)
         self.assertNotIn('id="plot"', mkexp2_web.HTML)
         self.assertIn("Select at least one algorithm.", mkexp2_web.HTML)
+        self.assertIn("Submit is locked for this experiment", mkexp2_web.HTML)
+        self.assertNotIn("Submit is unlocked", mkexp2_web.HTML)
         self.assertIn("mkexp2 check failed. Submit anyway?", mkexp2_web.HTML)
 
     def test_html_contains_csv_tabs_and_comparison_view(self):
@@ -185,7 +210,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("function renderMarkdown", mkexp2_web.HTML)
         self.assertIn("async function loadInstallLog", mkexp2_web.HTML)
         self.assertIn("ensureInstallLogLoaded", mkexp2_web.HTML)
-        self.assertIn("state.activeView === 'install-log-view'", mkexp2_web.HTML)
+        self.assertIn("viewId === 'install-log-view'", mkexp2_web.HTML)
         self.assertIn("/install-log", mkexp2_web.HTML)
         self.assertIn("logs/install.md does not exist.", mkexp2_web.HTML)
         self.assertIn("markdown-doc", mkexp2_web.HTML)
@@ -209,6 +234,78 @@ class WebBackendTest(unittest.TestCase):
             self.assertTrue(existing["exists"])
             self.assertIn("# mkexp2 install log", existing["content"])
             self.assertFalse(existing["truncated"])
+
+    def test_logs_are_listed_and_loaded_on_demand(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            log_dir = exp / "logs" / "Algo" / "Run"
+            log_dir.mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            (log_dir / "a.log").write_text("first log\n")
+            (log_dir / "b.log").write_text("second log\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            root = app.list_logs("exp")
+            self.assertTrue(root["exists"])
+            self.assertEqual(root["entries"][0]["type"], "dir")
+            self.assertEqual(root["entries"][0]["path"], "Algo")
+            self.assertNotIn("content", root["entries"][0])
+
+            nested = app.list_logs("exp", "Algo/Run")
+            self.assertEqual([entry["name"] for entry in nested["entries"]], ["a.log", "b.log"])
+            self.assertNotIn("content", nested["entries"][0])
+
+            loaded = app.log_file("exp", "Algo/Run/a.log")
+            self.assertIn("first log", loaded["content"])
+            self.assertEqual(loaded["relative_path"], "Algo/Run/a.log")
+
+            with self.assertRaises(ValueError):
+                app.log_file("exp", "../Experiment")
+
+    def test_submit_lock_helpers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            (exp / ".mkexp2").mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            unlocked = app.submit_lock("exp")
+            self.assertFalse(unlocked["locked"])
+
+            (exp / ".mkexp2" / "submit.lock").write_text("started_at=2026-05-18T10:00:00Z\nalgorithms=Mock\n")
+            locked = app.submit_lock("exp")
+            self.assertTrue(locked["locked"])
+            self.assertEqual(locked["fields"]["algorithms"], "Mock")
+
+            cleared = app.clear_submit_lock("exp")
+            self.assertTrue(cleared["cleared"])
+            self.assertFalse(cleared["submit_lock"]["locked"])
+
+    def test_progress_uses_argv_array_and_strips_ansi(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            self.assertIsInstance(argv, list)
+            calls.append((list(argv), str(cwd) if cwd else None, timeout))
+            return {"returncode": 0, "stdout": "\x1b[32mExperiment\x1b[0m  1 / 2\n", "stderr": "", "elapsed_seconds": 0.1}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "exp").mkdir()
+            (repo / "exp" / "Experiment").write_text("ExperimentX() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+            mkexp2_web.run_command = fake_run_command
+            try:
+                result = app.progress("exp")
+            finally:
+                mkexp2_web.run_command = original_run_command
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["progress"]["stdout"], "Experiment  1 / 2\n")
+        self.assertEqual(calls, [(["/fake/mkexp2", "progress"], str((repo / "exp").resolve()), 60)])
 
     def test_submit_action_uses_argv_arrays(self):
         calls = []
@@ -239,7 +336,7 @@ class WebBackendTest(unittest.TestCase):
                 mkexp2_web.run_command = original_run_command
 
         exp_cwd = str((repo / "exp").resolve())
-        self.assertIn((["/fake/mkexp2", "check"], exp_cwd), calls)
+        self.assertIn((["/fake/mkexp2", "check", "--json"], exp_cwd), calls)
         self.assertIn((["/fake/mkexp2", "generate"], exp_cwd), calls)
         self.assertIn((["zsh", "./submit.sh", "--install", "MockA"], exp_cwd), calls)
         self.assertTrue(any(call[0][:3] == ["git", "commit", "-m"] for call in calls))

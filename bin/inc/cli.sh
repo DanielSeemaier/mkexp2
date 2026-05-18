@@ -35,6 +35,7 @@ Options:
   --jobs                     With `probe`, return detailed job metadata
   --calls                    With `probe`, return expanded call details
   --presets                  With `probe`, return init presets as JSON
+  --json                     With `check`, return structured JSON
   --property A[.B]           With `probe`, print algorithm properties or one resolved property
   --performance-profile      With `plot`, include performance profile plot
   --speedup                  With `plot`, include speedup plot (first algorithm is baseline)
@@ -409,6 +410,10 @@ ParseCli() {
         MKEXP2_PROBE_PRESETS=1
         shift
         ;;
+      --json)
+        MKEXP2_CHECK_JSON=1
+        shift
+        ;;
       --property)
         shift
         if [[ $# -eq 0 ]]; then
@@ -636,6 +641,10 @@ ParseCli() {
   fi
   if [[ -n "$MKEXP2_PROBE_PROPERTY" && "$MKEXP2_MODE" != "probe" ]]; then
     EchoFatal "--property can only be used with probe"
+    exit 1
+  fi
+  if (( MKEXP2_CHECK_JSON )) && [[ "$MKEXP2_MODE" != "check" ]]; then
+    EchoFatal "--json can only be used with check"
     exit 1
   fi
 

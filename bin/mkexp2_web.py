@@ -17,8 +17,10 @@ from pathlib import Path
 
 
 MAX_TEXT_RESPONSE = 1024 * 1024
+MAX_LOG_LIST_ENTRIES = 500
 SLURM_CACHE_SECONDS = 15
 EXPERIMENT_SKIP_DIRS = {".git", ".mkexp2", "jobs", "logs", "results", "slurm"}
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 SINFO_LONG_FALLBACK = """Sat May 16 15:57:01 2026
 NODELIST    NODES PARTITION       STATE CPUS    S:C:T MEMORY TMP_DISK WEIGHT AVAIL_FE REASON
 backus          1      all*   allocated 128    1:64:2 101939        0      1   (null) none
@@ -77,6 +79,10 @@ def read_json(handler):
         return {}
     body = handler.rfile.read(length)
     return json.loads(body.decode("utf-8"))
+
+
+def strip_ansi(value):
+    return ANSI_RE.sub("", str(value or ""))
 
 
 def run_command(argv, cwd=None, timeout=60):
@@ -503,6 +509,44 @@ class Mkexp2WebApp:
     def command(self, experiment_id, argv, timeout=60):
         return run_command([str(self.mkexp2), *argv], cwd=self.experiment_path(experiment_id), timeout=timeout)
 
+    def submit_lock_path(self, experiment_id):
+        return self.experiment_path(experiment_id) / ".mkexp2" / "submit.lock"
+
+    def submit_lock(self, experiment_id):
+        path = self.submit_lock_path(experiment_id)
+        if not path.is_file():
+            return {"locked": False, "path": str(path), "content": "", "fields": {}}
+        content = path.read_text(encoding="utf-8", errors="replace")
+        fields = {}
+        for line in content.splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                fields[key] = value
+        stat = path.stat()
+        return {
+            "locked": True,
+            "path": str(path),
+            "content": content,
+            "fields": fields,
+            "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+        }
+
+    def clear_submit_lock(self, experiment_id):
+        path = self.submit_lock_path(experiment_id)
+        existed = path.exists()
+        path.unlink(missing_ok=True)
+        return {"cleared": existed, "submit_lock": self.submit_lock(experiment_id)}
+
+    def progress(self, experiment_id):
+        result = self.command(experiment_id, ["progress"], timeout=60)
+        result["stdout"] = strip_ansi(result.get("stdout", ""))
+        result["stderr"] = strip_ansi(result.get("stderr", ""))
+        return {
+            "ok": result["returncode"] == 0,
+            "progress": result,
+            "submit_lock": self.submit_lock(experiment_id),
+        }
+
     def submit_action(self, experiment_id, payload):
         algorithms = payload.get("algorithms") or []
         force = bool(payload.get("force"))
@@ -510,7 +554,7 @@ class Mkexp2WebApp:
             raise ValueError("algorithms must be an array of strings")
 
         def action():
-            check = self.command(experiment_id, ["check"], timeout=60)
+            check = self.command(experiment_id, ["check", "--json"], timeout=60)
             probe = self.command(experiment_id, ["probe"], timeout=60)
             if check["returncode"] != 0 and not force:
                 return {
@@ -548,6 +592,7 @@ class Mkexp2WebApp:
                 "generate": generate,
                 "submit": submit,
                 "git": commit,
+                "submit_lock": self.submit_lock(experiment_id),
             }
 
         return self.actions.start(f"submit {experiment_id}", action)
@@ -620,6 +665,85 @@ class Mkexp2WebApp:
         return {
             "exists": True,
             "path": str(log_file),
+            "size": stat.st_size,
+            "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+            "content": content[:MAX_TEXT_RESPONSE],
+            "truncated": len(content) > MAX_TEXT_RESPONSE,
+        }
+
+    def logs_root(self, experiment_id):
+        return self.experiment_path(experiment_id) / "logs"
+
+    def log_path(self, experiment_id, rel_path):
+        logs_root = self.logs_root(experiment_id).resolve()
+        rel_text = str(rel_path or "").strip("/")
+        if not rel_text:
+            return logs_root
+        parts = rel_text.split("/")
+        if any(part in ("", ".", "..") for part in parts):
+            raise ValueError("invalid log path")
+        path = (logs_root / Path(*parts)).resolve()
+        if path != logs_root and logs_root not in path.parents:
+            raise ValueError("log path escapes logs directory")
+        return path
+
+    def list_logs(self, experiment_id, rel_dir="", limit=MAX_LOG_LIST_ENTRIES, offset=0):
+        logs_root = self.logs_root(experiment_id)
+        directory = self.log_path(experiment_id, rel_dir)
+        if not logs_root.is_dir():
+            return {
+                "exists": False,
+                "dir": str(rel_dir or ""),
+                "path": str(logs_root),
+                "entries": [],
+                "total": 0,
+                "offset": 0,
+                "limit": limit,
+                "has_more": False,
+            }
+        if not directory.is_dir():
+            raise ValueError("log path is not a directory")
+
+        entries = []
+        for child in directory.iterdir():
+            if child.name.startswith("."):
+                continue
+            stat = child.stat()
+            rel = child.resolve().relative_to(logs_root.resolve()).as_posix()
+            entries.append(
+                {
+                    "name": child.name,
+                    "path": rel,
+                    "type": "dir" if child.is_dir() else "file",
+                    "size": stat.st_size if child.is_file() else None,
+                    "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+                }
+            )
+        entries.sort(key=lambda item: (item["type"] != "dir", item["name"]))
+        total = len(entries)
+        offset = max(0, int(offset or 0))
+        limit = max(1, min(MAX_LOG_LIST_ENTRIES, int(limit or MAX_LOG_LIST_ENTRIES)))
+        return {
+            "exists": True,
+            "dir": str(rel_dir or ""),
+            "path": str(directory),
+            "entries": entries[offset : offset + limit],
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+            "has_more": offset + limit < total,
+        }
+
+    def log_file(self, experiment_id, rel_path):
+        path = self.log_path(experiment_id, rel_path)
+        if not path.is_file():
+            raise ValueError("log path is not a file")
+        stat = path.stat()
+        content = path.read_text(encoding="utf-8", errors="replace")
+        return {
+            "exists": True,
+            "path": str(path),
+            "relative_path": str(rel_path or ""),
             "size": stat.st_size,
             "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
             "content": content[:MAX_TEXT_RESPONSE],
@@ -1021,6 +1145,12 @@ HTML = r"""<!doctype html>
       min-width: 92px;
       background: transparent;
     }
+    .view-tab.icon-tab {
+      min-width: 38px;
+      width: 38px;
+      padding: 0;
+      font-weight: 800;
+    }
     .view-tab.active {
       background: var(--text);
       border-color: var(--text);
@@ -1074,6 +1204,10 @@ HTML = r"""<!doctype html>
       border-left: 4px solid var(--danger);
       padding-left: 10px;
     }
+    .check-card.warn {
+      border-left: 4px solid #f59e0b;
+      padding-left: 10px;
+    }
     .check-card h3 {
       margin: 0;
       font-size: 14px;
@@ -1124,6 +1258,63 @@ HTML = r"""<!doctype html>
       background: #fffbeb;
       border-color: #fde68a;
       color: #92400e;
+    }
+    .check-experiments {
+      display: grid;
+      gap: 8px;
+    }
+    .check-experiment {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fbfcfd;
+      padding: 10px;
+    }
+    .check-experiment-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .check-experiment-status {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .submit-lock {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: #fbfcfd;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .submit-lock.locked {
+      background: #fff7ed;
+      border-color: #fed7aa;
+      color: #9a3412;
+    }
+    .submit-lock-text {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .progress-output {
+      white-space: pre-wrap;
+      overflow: auto;
+      overflow-wrap: anywhere;
+      max-height: 260px;
+      border-radius: 6px;
+      background: #101820;
+      color: #e7eef2;
+      padding: 10px;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     .check-json pre {
       max-height: 180px;
@@ -1535,6 +1726,76 @@ HTML = r"""<!doctype html>
       border-radius: 6px;
       background: #fbfcfd;
     }
+    .logs-browser {
+      display: grid;
+      grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
+      gap: 12px;
+      min-height: calc(100vh - 210px);
+    }
+    .logs-sidebar {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 8px;
+      min-width: 0;
+    }
+    .logs-path {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--muted);
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .logs-list {
+      display: grid;
+      align-content: start;
+      gap: 6px;
+      min-height: 0;
+      overflow: auto;
+      padding-right: 4px;
+    }
+    .log-entry {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      height: auto;
+      min-height: 34px;
+      padding: 7px 9px;
+      text-align: left;
+    }
+    .log-entry.active {
+      border-color: var(--accent);
+      background: #e8f5f3;
+    }
+    .log-entry-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .log-entry-meta {
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .log-content {
+      min-width: 0;
+      min-height: 0;
+    }
+    .log-content pre {
+      margin: 0;
+      max-height: calc(100vh - 230px);
+      overflow: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border-radius: 6px;
+      background: #101820;
+      color: #e7eef2;
+      padding: 12px;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
     .markdown-doc {
       color: var(--text);
       max-height: calc(100vh - 210px);
@@ -1601,6 +1862,7 @@ HTML = r"""<!doctype html>
       .sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
       .grid { grid-template-columns: 1fr; }
       .compare-grid { grid-template-columns: 1fr; }
+      .logs-browser { grid-template-columns: 1fr; }
       .chips { grid-template-columns: 1fr; }
     }
   </style>
@@ -1633,9 +1895,10 @@ HTML = r"""<!doctype html>
     </aside>
     <main class="main">
       <div class="view-tabs">
+        <button class="view-tab icon-tab" data-view="install-log-view" aria-label="Install Log" title="Install Log">?</button>
         <button class="view-tab active" data-view="experiment-view">Experiment</button>
         <button class="view-tab" data-view="results-view">Results</button>
-        <button class="view-tab" data-view="install-log-view">Install Log</button>
+        <button class="view-tab" data-view="logs-view">Logs</button>
         <button class="view-tab" data-view="plots-view">Plots</button>
       </div>
       <section id="experiment-view" class="view-panel active">
@@ -1664,7 +1927,23 @@ HTML = r"""<!doctype html>
               </div>
               <div class="panel-body stack">
                 <div id="algorithm-list" class="chips"></div>
+                <div id="submit-lock-status" class="submit-lock hidden">
+                  <span class="submit-lock-text"></span>
+                  <button id="clear-submit-lock" class="hidden">Unlock</button>
+                </div>
                 <button class="primary" id="submit">Submit Selected</button>
+              </div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <div class="panel-title">Progress</div>
+                  <div id="progress-summary" class="csv-summary">No progress loaded.</div>
+                </div>
+                <button id="refresh-progress">Refresh</button>
+              </div>
+              <div class="panel-body">
+                <div id="progress-output" class="csv-empty">Run progress to count finished log files against expected runs.</div>
               </div>
             </section>
             <section class="panel">
@@ -1745,6 +2024,32 @@ HTML = r"""<!doctype html>
           </div>
         </section>
       </section>
+      <section id="logs-view" class="view-panel">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Logs</div>
+              <div id="logs-summary" class="csv-summary">No log directory loaded.</div>
+            </div>
+            <button id="reload-logs" class="icon-button" aria-label="Reload logs" title="Reload logs">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+            </button>
+          </div>
+          <div class="panel-body">
+            <div class="logs-browser">
+              <div class="logs-sidebar">
+                <div id="logs-path" class="logs-path">logs/</div>
+                <div id="logs-list" class="logs-list">
+                  <div class="csv-empty">Open the Logs tab to load the log directory.</div>
+                </div>
+              </div>
+              <div id="log-content" class="log-content">
+                <div class="csv-empty">Select a log file to load its content.</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
       <section id="plots-view" class="view-panel">
         <section class="panel">
           <div class="panel-header">
@@ -1777,6 +2082,13 @@ HTML = r"""<!doctype html>
       compareColumnModes: {},
       installLog: null,
       installLogFor: null,
+      logsDir: '',
+      logsListing: null,
+      logsFor: null,
+      selectedLog: '',
+      logContent: null,
+      submitLock: null,
+      progressTimer: null,
       activeView: 'experiment-view'
     };
     const tokenInput = document.getElementById('token');
@@ -1825,6 +2137,16 @@ HTML = r"""<!doctype html>
       item.appendChild(itemLabel);
       item.appendChild(itemValue);
       container.appendChild(item);
+    }
+    function parseCheckJson(result) {
+      const text = stripAnsi(result?.stdout || '').trim();
+      if (!text) return null;
+      try {
+        const parsed = JSON.parse(text);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+      } catch {
+        return null;
+      }
     }
     function actionSucceeded(action, kind) {
       if (action?.status !== 'completed') return false;
@@ -1881,47 +2203,94 @@ HTML = r"""<!doctype html>
       box.className = 'output rendered-output';
       box.innerHTML = '';
 
-      const ok = Number(result.returncode) === 0;
+      const payload = parseCheckJson(result);
+      const ok = payload ? Boolean(payload.ok) : Number(result.returncode) === 0;
+      const warningOnly = ok && Number(payload?.warnings || 0) > 0;
       const combined = `${result.stdout || ''}\n${result.stderr || ''}`;
       const cleanOutput = stripAnsi(combined);
       const card = document.createElement('div');
-      card.className = `check-card ${ok ? 'ok' : 'fail'}`;
+      card.className = `check-card ${ok ? (warningOnly ? 'warn' : 'ok') : 'fail'}`;
 
       const title = document.createElement('h3');
       title.className = ok ? 'status-ok' : 'status-bad';
-      title.textContent = ok ? 'Check passed' : 'Check failed';
+      title.textContent = ok ? (warningOnly ? 'Check passed with warnings' : 'Check passed') : 'Check failed';
       card.appendChild(title);
 
       const message = document.createElement('div');
       message.className = 'check-message';
       message.textContent = ok
-        ? 'Saved the Experiment file and mkexp2 check completed successfully.'
+        ? 'Saved the Experiment file and validated the experiment configuration.'
         : 'Saved the Experiment file, but mkexp2 check reported problems.';
       card.appendChild(message);
 
       const facts = document.createElement('div');
       facts.className = 'check-facts';
       appendCheckFact(facts, 'Return code', String(result.returncode));
-      appendCheckFact(facts, 'Errors', checkCount(cleanOutput, 'errors') ?? (ok ? '0' : 'unknown'));
-      appendCheckFact(facts, 'Warnings', checkCount(cleanOutput, 'warnings') ?? '0');
+      appendCheckFact(facts, 'Errors', String(payload?.errors ?? checkCount(cleanOutput, 'errors') ?? (ok ? '0' : 'unknown')));
+      appendCheckFact(facts, 'Warnings', String(payload?.warnings ?? checkCount(cleanOutput, 'warnings') ?? '0'));
       appendCheckFact(facts, 'Elapsed', `${result.elapsed_seconds ?? '?'}s`);
       if (saveResult?.path) appendCheckFact(facts, 'Saved', saveResult.path);
       card.appendChild(facts);
 
-      const importantLines = cleanOutput
-        .split(/\r?\n/)
-        .map(line => line.trim())
-        .filter(line => /\[(fail|warn)\]/i.test(line));
-      if (importantLines.length) {
-        const lines = document.createElement('div');
-        lines.className = 'check-lines';
-        for (const line of importantLines) {
-          const item = document.createElement('div');
-          item.className = 'check-line ' + (/\[fail\]/i.test(line) ? 'fail' : 'warn');
-          item.textContent = line;
-          lines.appendChild(item);
+      if (payload?.experiments?.length) {
+        const experiments = document.createElement('div');
+        experiments.className = 'check-experiments';
+        for (const experiment of payload.experiments) {
+          const item = document.createElement('section');
+          item.className = 'check-experiment';
+
+          const header = document.createElement('div');
+          header.className = 'check-experiment-title';
+          const name = document.createElement('span');
+          name.textContent = experiment.name || 'Experiment';
+          const status = document.createElement('span');
+          status.className = 'check-experiment-status';
+          status.textContent = experiment.status || 'UNKNOWN';
+          header.appendChild(name);
+          header.appendChild(status);
+          item.appendChild(header);
+
+          const experimentFacts = document.createElement('div');
+          experimentFacts.className = 'check-facts';
+          appendCheckFact(experimentFacts, 'System', experiment.system || '');
+          appendCheckFact(experimentFacts, 'Algorithms', String(experiment.algorithms ?? 0));
+          appendCheckFact(experimentFacts, 'Graphs', String(experiment.graphs ?? 0));
+          appendCheckFact(experimentFacts, 'Topologies', String(experiment.topologies ?? 0));
+          appendCheckFact(experimentFacts, 'Errors', String(experiment.errors ?? 0));
+          appendCheckFact(experimentFacts, 'Warnings', String(experiment.warnings ?? 0));
+          item.appendChild(experimentFacts);
+
+          if (experiment.messages?.length) {
+            const lines = document.createElement('div');
+            lines.className = 'check-lines';
+            for (const messageItem of experiment.messages) {
+              const line = document.createElement('div');
+              const severity = messageItem.severity === 'error' ? 'fail' : 'warn';
+              line.className = `check-line ${severity}`;
+              line.textContent = messageItem.message || '';
+              lines.appendChild(line);
+            }
+            item.appendChild(lines);
+          }
+          experiments.appendChild(item);
         }
-        card.appendChild(lines);
+        card.appendChild(experiments);
+      } else {
+        const importantLines = cleanOutput
+          .split(/\r?\n/)
+          .map(line => line.trim())
+          .filter(line => /\[(fail|warn)\]/i.test(line));
+        if (importantLines.length) {
+          const lines = document.createElement('div');
+          lines.className = 'check-lines';
+          for (const line of importantLines) {
+            const item = document.createElement('div');
+            item.className = 'check-line ' + (/\[fail\]/i.test(line) ? 'fail' : 'warn');
+            item.textContent = line;
+            lines.appendChild(item);
+          }
+          card.appendChild(lines);
+        }
       }
 
       const details = document.createElement('details');
@@ -2760,6 +3129,121 @@ HTML = r"""<!doctype html>
       summary.textContent = `logs/install.md, ${state.installLog.size || 0} bytes, modified ${state.installLog.modified_at || 'unknown'}${suffix}`;
       renderMarkdown(state.installLog.content || '', box);
     }
+    function formatBytes(value) {
+      const size = Number(value);
+      if (!Number.isFinite(size)) return '';
+      if (size < 1024) return `${size} B`;
+      if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KiB`;
+      if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MiB`;
+      return `${(size / 1024 / 1024 / 1024).toFixed(1)} GiB`;
+    }
+    function parentLogDir(dir) {
+      const parts = String(dir || '').split('/').filter(Boolean);
+      parts.pop();
+      return parts.join('/');
+    }
+    function renderLogsWorkspace() {
+      const summary = document.getElementById('logs-summary');
+      const pathLabel = document.getElementById('logs-path');
+      const list = document.getElementById('logs-list');
+      const content = document.getElementById('log-content');
+      if (!state.selected) {
+        summary.textContent = 'No experiment selected.';
+        pathLabel.textContent = 'logs/';
+        list.innerHTML = '<div class="csv-empty">Select an experiment first.</div>';
+        content.innerHTML = '<div class="csv-empty">Select an experiment first.</div>';
+        return;
+      }
+      if (state.logsFor !== state.selected || !state.logsListing) {
+        summary.textContent = 'No log directory loaded.';
+        pathLabel.textContent = 'logs/';
+        list.innerHTML = '<div class="csv-empty">Open the Logs tab to load the log directory.</div>';
+        content.innerHTML = '<div class="csv-empty">Select a log file to load its content.</div>';
+        return;
+      }
+      const listing = state.logsListing;
+      const dir = listing.dir || '';
+      pathLabel.textContent = `logs/${dir}${dir ? '/' : ''}`;
+      if (!listing.exists) {
+        summary.textContent = 'logs/ does not exist.';
+        list.innerHTML = '<div class="csv-empty">No logs directory exists for this experiment yet.</div>';
+        content.innerHTML = '<div class="csv-empty">Run experiments first, then reload logs.</div>';
+        return;
+      }
+      const countText = listing.has_more
+        ? `${listing.entries.length} of ${listing.total} entries shown`
+        : `${listing.total} entries`;
+      summary.textContent = `${pathLabel.textContent}, ${countText}`;
+      list.innerHTML = '';
+      if (dir) {
+        const up = document.createElement('button');
+        up.className = 'log-entry';
+        up.innerHTML = '<span>..</span><span class="log-entry-name">Parent directory</span><span class="log-entry-meta"></span>';
+        up.onclick = () => loadLogs(parentLogDir(dir));
+        list.appendChild(up);
+      }
+      if (!listing.entries.length && !dir) {
+        list.innerHTML = '<div class="csv-empty">No log files found.</div>';
+      } else if (!listing.entries.length) {
+        const empty = document.createElement('div');
+        empty.className = 'csv-empty';
+        empty.textContent = 'This log directory is empty.';
+        list.appendChild(empty);
+      }
+      for (const entry of listing.entries) {
+        const button = document.createElement('button');
+        button.className = 'log-entry' + (entry.type === 'file' && state.selectedLog === entry.path ? ' active' : '');
+        const icon = document.createElement('span');
+        icon.textContent = entry.type === 'dir' ? '>' : '';
+        const name = document.createElement('span');
+        name.className = 'log-entry-name';
+        name.textContent = entry.name;
+        name.title = entry.path;
+        const meta = document.createElement('span');
+        meta.className = 'log-entry-meta';
+        meta.textContent = entry.type === 'dir' ? 'dir' : formatBytes(entry.size);
+        button.appendChild(icon);
+        button.appendChild(name);
+        button.appendChild(meta);
+        button.onclick = () => {
+          if (entry.type === 'dir') loadLogs(entry.path);
+          else loadLogFile(entry.path);
+        };
+        list.appendChild(button);
+      }
+      if (listing.has_more) {
+        const more = document.createElement('div');
+        more.className = 'csv-empty';
+        more.textContent = `Showing the first ${listing.entries.length} entries. Open a subdirectory to narrow the list.`;
+        list.appendChild(more);
+      }
+      if (state.logContent && state.logContent.relative_path === state.selectedLog) {
+        const suffix = state.logContent.truncated ? ' (truncated)' : '';
+        content.innerHTML = `<pre>${esc(state.logContent.content || '')}</pre>`;
+        summary.textContent = `${state.logContent.relative_path}, ${formatBytes(state.logContent.size)}${suffix}`;
+      } else {
+        content.innerHTML = '<div class="csv-empty">Select a log file to load its content.</div>';
+      }
+    }
+    async function loadLogs(dir = state.logsDir || '') {
+      if (!state.selected) return;
+      state.logsDir = dir || '';
+      const query = new URLSearchParams({ dir: state.logsDir, limit: '500' });
+      state.logsListing = await api(`/api/experiments/${encodeURIComponent(state.selected)}/logs?${query.toString()}`);
+      state.logsFor = state.selected;
+      renderLogsWorkspace();
+    }
+    async function loadLogFile(path) {
+      if (!state.selected) return;
+      state.selectedLog = path;
+      const query = new URLSearchParams({ path });
+      state.logContent = await api(`/api/experiments/${encodeURIComponent(state.selected)}/log?${query.toString()}`);
+      renderLogsWorkspace();
+    }
+    async function ensureLogsLoaded() {
+      if (!state.selected) return;
+      if (state.logsFor !== state.selected || !state.logsListing) await loadLogs('');
+    }
     async function ensureResultsLoaded() {
       if (!state.selected) return;
       if (state.resultsFor !== state.selected) await loadResults();
@@ -2785,6 +3269,9 @@ HTML = r"""<!doctype html>
       }
       if (viewId === 'install-log-view') {
         ensureInstallLogLoaded().catch(err => out(String(err)));
+      }
+      if (viewId === 'logs-view') {
+        ensureLogsLoaded().catch(err => out(String(err)));
       }
       if (viewId === 'plots-view') {
         renderPlotPanel();
@@ -2886,6 +3373,85 @@ HTML = r"""<!doctype html>
         select.appendChild(option);
       }
     }
+    function renderSubmitLock(lock) {
+      state.submitLock = lock || { locked: false };
+      const status = document.getElementById('submit-lock-status');
+      const text = status.querySelector('.submit-lock-text');
+      const clearButton = document.getElementById('clear-submit-lock');
+      const submitButton = document.getElementById('submit');
+      const locked = Boolean(state.submitLock.locked);
+      status.classList.toggle('hidden', !locked);
+      status.classList.toggle('locked', locked);
+      clearButton.classList.toggle('hidden', !locked);
+      submitButton.disabled = locked;
+      if (locked) {
+        const fields = state.submitLock.fields || {};
+        const started = fields.started_at ? ` since ${fields.started_at}` : '';
+        const algorithms = fields.algorithms ? ` (${fields.algorithms})` : '';
+        text.textContent = `Submit locked${started}${algorithms}`;
+        text.title = state.submitLock.content || state.submitLock.path || '';
+      } else {
+        text.textContent = '';
+        text.title = '';
+      }
+      if (locked) startProgressPolling();
+      else stopProgressPolling();
+    }
+    async function refreshSubmitLock() {
+      if (!state.selected) {
+        renderSubmitLock({ locked: false });
+        return;
+      }
+      const lock = await api(`/api/experiments/${encodeURIComponent(state.selected)}/submit-lock`);
+      renderSubmitLock(lock);
+    }
+    async function clearSubmitLock() {
+      if (!state.selected) return;
+      const result = await api(`/api/experiments/${encodeURIComponent(state.selected)}/submit-lock`, { method: 'DELETE' });
+      renderSubmitLock(result.submit_lock);
+    }
+    function startProgressPolling() {
+      if (state.progressTimer) return;
+      state.progressTimer = setInterval(() => {
+        if (state.selected) loadProgress({ quiet: true }).catch(err => out(String(err)));
+      }, 30000);
+    }
+    function stopProgressPolling() {
+      if (!state.progressTimer) return;
+      clearInterval(state.progressTimer);
+      state.progressTimer = null;
+    }
+    function renderProgress(result) {
+      const summary = document.getElementById('progress-summary');
+      const box = document.getElementById('progress-output');
+      const command = result?.progress || result;
+      if (!state.selected) {
+        summary.textContent = 'No experiment selected.';
+        box.className = 'csv-empty';
+        box.textContent = 'Select an experiment first.';
+        return;
+      }
+      if (!result) {
+        summary.textContent = 'No progress loaded.';
+        box.className = 'csv-empty';
+        box.textContent = 'Run progress to count finished log files against expected runs.';
+        return;
+      }
+      const text = stripAnsi(`${command?.stdout || ''}${command?.stderr ? `\n${command.stderr}` : ''}`).trim();
+      summary.textContent = command?.returncode === 0
+        ? `Progress refreshed in ${command.elapsed_seconds ?? '?'}s.`
+        : `Progress failed with return code ${command?.returncode ?? 'unknown'}.`;
+      box.className = text ? 'progress-output' : 'csv-empty';
+      box.textContent = text || 'No progress output.';
+    }
+    async function loadProgress(options = {}) {
+      if (!state.selected) return;
+      const summary = document.getElementById('progress-summary');
+      if (!options.quiet) summary.textContent = 'Refreshing progress...';
+      const result = await api(`/api/experiments/${encodeURIComponent(state.selected)}/progress`);
+      renderSubmitLock(result.submit_lock);
+      renderProgress(result);
+    }
     async function selectExperiment(id) {
       state.selected = id;
       state.results = [];
@@ -2896,8 +3462,18 @@ HTML = r"""<!doctype html>
       state.compareColumnModes = {};
       state.installLog = null;
       state.installLogFor = null;
+      state.logsDir = '';
+      state.logsListing = null;
+      state.logsFor = null;
+      state.selectedLog = '';
+      state.logContent = null;
+      state.submitLock = null;
+      setView('experiment-view');
       renderResultsWorkspace();
       renderInstallLogWorkspace();
+      renderLogsWorkspace();
+      renderSubmitLock({ locked: false });
+      renderProgress(null);
       document.getElementById('probe-summary').textContent = 'No probe loaded.';
       document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
       openExperimentAncestors(id);
@@ -2907,10 +3483,8 @@ HTML = r"""<!doctype html>
       document.getElementById('selected-title').textContent = id;
       document.getElementById('selected-path').textContent = data.path;
       setEditorValue(data.experiment);
+      renderSubmitLock(data.submit_lock);
       await loadAlgorithms();
-      if (state.activeView === 'install-log-view') {
-        await loadInstallLog();
-      }
     }
     async function persistExperiment() {
       if (!state.selected) return;
@@ -3013,6 +3587,10 @@ HTML = r"""<!doctype html>
     }
     async function submitExperiment(force = false) {
       if (!state.selected) return;
+      if (state.submitLock?.locked) {
+        out('Submit is locked for this experiment. Clear the lock only if the previous run is gone.');
+        return;
+      }
       const selectedAlgorithms = Array.from(document.querySelectorAll('#algorithm-list input:checked')).map(item => item.value);
       if (state.algorithms.length && selectedAlgorithms.length === 0) {
         out('Select at least one algorithm.');
@@ -3029,6 +3607,8 @@ HTML = r"""<!doctype html>
           await submitExperiment(true);
         }
       }
+      await refreshSubmitLock();
+      await loadProgress({ quiet: true }).catch(() => {});
     }
     function setActionButtons(ids, disabled) {
       for (const id of ids) {
@@ -3172,10 +3752,13 @@ HTML = r"""<!doctype html>
     document.getElementById('check').onclick = checkExperiment;
     document.getElementById('probe-run').onclick = probeExperiment;
     document.getElementById('submit').onclick = submitExperiment;
+    document.getElementById('clear-submit-lock').onclick = clearSubmitLock;
+    document.getElementById('refresh-progress').onclick = () => loadProgress();
     document.getElementById('parse-results').onclick = parseExperiment;
     document.getElementById('plot-results').onclick = plotExperiment;
     document.getElementById('load-results').onclick = loadResults;
     document.getElementById('load-install-log').onclick = loadInstallLog;
+    document.getElementById('reload-logs').onclick = () => loadLogs(state.logsDir || '');
     document.querySelectorAll('.view-tab').forEach(button => {
       button.onclick = () => setView(button.dataset.view);
     });
@@ -3233,6 +3816,7 @@ def make_handler(app):
                             "id": experiment_id,
                             "path": str(exp_path),
                             "experiment": (exp_path / "Experiment").read_text(encoding="utf-8"),
+                            "submit_lock": app.submit_lock(experiment_id),
                         },
                     )
                     return
@@ -3240,9 +3824,32 @@ def make_handler(app):
                 if match:
                     json_response(self, 200, app.results(urllib.parse.unquote(match.group(1))))
                     return
+                match = re.match(r"^/api/experiments/([^/]+)/(submit-lock|progress)$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    action = match.group(2)
+                    if action == "submit-lock":
+                        json_response(self, 200, app.submit_lock(experiment_id))
+                    else:
+                        json_response(self, 200, app.progress(experiment_id))
+                    return
                 match = re.match(r"^/api/experiments/([^/]+)/install-log$", path)
                 if match:
                     json_response(self, 200, app.install_log(urllib.parse.unquote(match.group(1))))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/(logs|log)$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    action = match.group(2)
+                    query = urllib.parse.parse_qs(parsed.query)
+                    if action == "logs":
+                        limit = int((query.get("limit") or [MAX_LOG_LIST_ENTRIES])[0])
+                        offset = int((query.get("offset") or [0])[0])
+                        rel_dir = (query.get("dir") or [""])[0]
+                        json_response(self, 200, app.list_logs(experiment_id, rel_dir, limit=limit, offset=offset))
+                    else:
+                        rel_path = (query.get("path") or [""])[0]
+                        json_response(self, 200, app.log_file(experiment_id, rel_path))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/plots\.pdf$", path)
                 if match:
@@ -3286,7 +3893,7 @@ def make_handler(app):
                     experiment_id = urllib.parse.unquote(match.group(1))
                     action = match.group(2)
                     if action == "check":
-                        json_response(self, 200, app.command(experiment_id, ["check"], timeout=60))
+                        json_response(self, 200, app.command(experiment_id, ["check", "--json"], timeout=60))
                         return
                     if action == "probe":
                         selector = payload.get("selector")
@@ -3346,6 +3953,22 @@ def make_handler(app):
                 exp_path = app.experiment_path(experiment_id)
                 (exp_path / "Experiment").write_text(payload.get("experiment", ""), encoding="utf-8")
                 json_response(self, 200, {"saved": True, "id": experiment_id})
+            except Exception as exc:
+                json_response(self, 400, {"error": str(exc)})
+
+        def do_DELETE(self):
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path
+            try:
+                if path.startswith("/api/") and not self.require_token():
+                    json_response(self, 401, {"error": "missing or invalid token"})
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/submit-lock$", path)
+                if not match:
+                    json_response(self, 404, {"error": "not found"})
+                    return
+                experiment_id = urllib.parse.unquote(match.group(1))
+                json_response(self, 200, app.clear_submit_lock(experiment_id))
             except Exception as exc:
                 json_response(self, 400, {"error": str(exc)})
 
