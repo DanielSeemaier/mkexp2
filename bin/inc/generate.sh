@@ -4,6 +4,7 @@ PrepareGenerateOutputs() {
   mkdir -p "$PWD/jobs" "$PWD/logs" "$MKEXP2_WORK_DIR/bin" "$MKEXP2_WORK_DIR/src"
   GENERATED_JOB_META=()
   GENERATED_JOB_KEYS=()
+  MKEXP2_LOCAL_HAS_RUN_JOBS=0
   MKEXP2_SLURM_HAS_RUN_JOBS=0
   MKEXP2_SLURM_PARSE_JOB_SCRIPT=""
 
@@ -14,12 +15,35 @@ set -euo pipefail
 typeset -A JOB_IDS=()
 typeset -A AVAILABLE_ALGORITHMS=()
 typeset -A SELECTED_ALGORITHM_SET=()
-typeset -a SELECTED_ALGORITHMS=("$@")
+typeset -a SELECTED_ALGORITHMS=()
 typeset -a REGISTERED_META_FILES=()
+SUBMIT_INSTALL=0
 INSTALL_JOB_ID=""
 SUBMIT_DIR="${0:A:h}"
 FILTER_DIR=""
 SELECTED_FILTER_FILE=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --install)
+      SUBMIT_INSTALL=1
+      shift
+      ;;
+    --)
+      shift
+      SELECTED_ALGORITHMS+=("$@")
+      break
+      ;;
+    --*)
+      echo "error: unknown submit option: $1" >&2
+      exit 1
+      ;;
+    *)
+      SELECTED_ALGORITHMS+=("$1")
+      shift
+      ;;
+  esac
+done
 
 cd "$SUBMIT_DIR"
 
@@ -364,6 +388,14 @@ submit_parse_slurm() {
 
   echo "$out"
 }
+
+run_install_local() {
+  local mkexp2_bin="$1"
+  shift
+
+  echo "==> Installing dependencies"
+  "$mkexp2_bin" install "$@"
+}
 SCRIPT
 
   chmod +x "$PWD/submit.sh"
@@ -599,9 +631,9 @@ GenerateCurrentExperiment() {
   if [[ "$_system" == "slurm" ]]; then
     local install_mode=""
     install_mode=$(ResolveRunProperty "slurm.install.mode" "local")
+    EnsureSlurmInstallJob
     if [[ "$install_mode" == "job" ]]; then
       MKEXP2_SLURM_INSTALL_JOB_REQUIRED=1
-      EnsureSlurmInstallJob
     fi
   fi
 
@@ -843,13 +875,38 @@ FinalizeGenerateOutputs() {
     local meta_file=""
 
     IFS='|' read -r launcher job_script dep_key cmd_file meta_file <<< "$entry"
+    if [[ "$launcher" == "local" ]]; then
+      MKEXP2_LOCAL_HAS_RUN_JOBS=1
+    elif [[ "$launcher" == "slurm" ]]; then
+      MKEXP2_SLURM_HAS_RUN_JOBS=1
+    fi
     printf 'register_meta %q\n' "$meta_file" >> "$PWD/submit.sh"
   done
 
   echo "validate_selected_algorithms" >> "$PWD/submit.sh"
 
-  if (( MKEXP2_SLURM_INSTALL_JOB_REQUIRED )) && [[ -n "$MKEXP2_SLURM_INSTALL_JOB_SCRIPT" ]]; then
-    printf 'submit_install_slurm %q\n' "$MKEXP2_SLURM_INSTALL_JOB_SCRIPT" >> "$PWD/submit.sh"
+  if (( MKEXP2_LOCAL_HAS_RUN_JOBS )); then
+    {
+      echo "if (( SUBMIT_INSTALL )); then"
+      printf '  run_install_local %q' "$MKEXP2_HOME/bin/mkexp2"
+      if [[ -n "$MKEXP2_BUILD_MAX_CORES" ]]; then
+        printf ' --build-max-cores %q' "$MKEXP2_BUILD_MAX_CORES"
+      fi
+      printf '\n'
+      echo "fi"
+    } >> "$PWD/submit.sh"
+  fi
+
+  if [[ -n "$MKEXP2_SLURM_INSTALL_JOB_SCRIPT" ]]; then
+    if (( MKEXP2_SLURM_INSTALL_JOB_REQUIRED )); then
+      printf 'submit_install_slurm %q\n' "$MKEXP2_SLURM_INSTALL_JOB_SCRIPT" >> "$PWD/submit.sh"
+    else
+      {
+        echo "if (( SUBMIT_INSTALL )); then"
+        printf '  submit_install_slurm %q\n' "$MKEXP2_SLURM_INSTALL_JOB_SCRIPT"
+        echo "fi"
+      } >> "$PWD/submit.sh"
+    fi
     EchoStep "Generated Slurm install job: $MKEXP2_SLURM_INSTALL_JOB_SCRIPT"
   fi
 
@@ -867,7 +924,6 @@ FinalizeGenerateOutputs() {
 
     IFS='|' read -r launcher job_script dep_key cmd_file meta_file <<< "$entry"
     if [[ "$launcher" == "slurm" ]]; then
-      MKEXP2_SLURM_HAS_RUN_JOBS=1
       printf 'submit_slurm %q %q %q %q %q\n' "$key" "$dep_key" "$job_script" "$cmd_file" "$meta_file" >> "$PWD/submit.sh"
     else
       printf 'submit_local %q %q %q\n' "$job_script" "$cmd_file" "$meta_file" >> "$PWD/submit.sh"

@@ -28,6 +28,20 @@ EOF
 }
 
 test_e2e_local_pipeline_and_parse() {
+  local tmp_generate=""
+  tmp_generate=$(mktemp -d)
+  write_test_harness_pipeline_experiment "$tmp_generate"
+
+  (
+    cd "$tmp_generate"
+    "$MKEXP2" generate >/dev/null
+    assert_file_contains submit.sh "run_install_local" "generated local submit script supports install flag"
+    zsh ./submit.sh --install TestHarness-Dbg > submit-install.out
+    assert_path_exists logs/install.md "local submit --install writes install log"
+    assert_file_contains logs/install.md "test-harness build: TestHarness" "local submit --install builds partitioner"
+    assert_eq "$(find logs -name '*.log' | wc -l | tr -d ' ')" "2" "local submit --install runs selected algorithm"
+  )
+
   local tmp=""
   tmp=$(mktemp -d)
   write_test_harness_pipeline_experiment "$tmp"
@@ -120,6 +134,7 @@ EOF
   (
     cd "$tmp"
     "$MKEXP2" generate >/dev/null
+    assert_file_contains submit.sh "SUBMIT_INSTALL" "generated slurm submit script supports install flag"
     mkdir -p fakebin
     cat > fakebin/sbatch <<'EOF'
 #!/usr/bin/env zsh
@@ -128,9 +143,15 @@ echo "Submitted batch job 123"
 EOF
     chmod +x fakebin/sbatch
     PATH="$PWD/fakebin:$PATH" SBATCH_ARGS_FILE="$PWD/sbatch.args" zsh ./submit.sh MockB > submit.out
+    assert_file_not_contains sbatch.args "jobs/install__" "slurm submit without --install does not submit install job"
+
+    : > sbatch.args
+    PATH="$PWD/fakebin:$PATH" SBATCH_ARGS_FILE="$PWD/sbatch.args" zsh ./submit.sh --install MockB > submit-install.out
+    assert_file_contains sbatch.args "jobs/install__" "slurm submit --install submits install job first"
+    assert_file_contains sbatch.args "--dependency=afterok:123" "slurm submit --install makes run jobs depend on install"
     assert_file_contains sbatch.args "--array=2,3%7" "slurm filtered submit overrides array indices"
     assert_file_contains sbatch.args "MKEXP2_META_FILE=$PWD/jobs/ExperimentArrayFilter__1x1x2.cmds.meta.tsv" "slurm filtered submit exports metadata path"
-    assert_file_contains submit.out "Submitted batch job 123" "slurm filtered submit invokes sbatch"
+    assert_file_contains submit-install.out "Submitted batch job 123" "slurm filtered submit invokes sbatch"
   )
 
   pass "slurm array submit filter"

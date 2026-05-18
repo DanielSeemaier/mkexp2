@@ -531,7 +531,7 @@ class Mkexp2WebApp:
                 }
 
             submit = run_command(
-                ["zsh", "./submit.sh", *algorithms],
+                ["zsh", "./submit.sh", "--install", *algorithms],
                 cwd=self.experiment_path(experiment_id),
                 timeout=120,
             )
@@ -609,6 +609,22 @@ class Mkexp2WebApp:
                     }
                 )
         return {"files": files}
+
+    def install_log(self, experiment_id):
+        path = self.experiment_path(experiment_id)
+        log_file = path / "logs" / "install.md"
+        if not log_file.is_file():
+            return {"exists": False, "path": str(log_file), "content": ""}
+        stat = log_file.stat()
+        content = log_file.read_text(encoding="utf-8", errors="replace")
+        return {
+            "exists": True,
+            "path": str(log_file),
+            "size": stat.st_size,
+            "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+            "content": content[:MAX_TEXT_RESPONSE],
+            "truncated": len(content) > MAX_TEXT_RESPONSE,
+        }
 
 
 def experiment_from_form(name, form):
@@ -691,6 +707,21 @@ HTML = r"""<!doctype html>
     button.danger {
       color: var(--danger);
       border-color: #f1b7b1;
+    }
+    .icon-button {
+      width: 34px;
+      padding: 0;
+      display: inline-grid;
+      place-items: center;
+    }
+    .icon-button svg {
+      width: 16px;
+      height: 16px;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
     }
     input, textarea, select {
       width: 100%;
@@ -1097,6 +1128,8 @@ HTML = r"""<!doctype html>
     .check-json pre {
       max-height: 180px;
       overflow: auto;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
       margin: 8px 0 0;
       padding: 8px;
       border-radius: 6px;
@@ -1144,12 +1177,183 @@ HTML = r"""<!doctype html>
     .action-json pre {
       max-height: 180px;
       overflow: auto;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
       margin: 8px 0 0;
       padding: 8px;
       border-radius: 6px;
       background: #101820;
       color: #e7eef2;
       font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .probe-output {
+      display: grid;
+      gap: 16px;
+      font-size: 14px;
+      min-width: 0;
+      max-width: 100%;
+    }
+    .probe-panel {
+      margin-top: 14px;
+    }
+    .probe-output > * {
+      min-width: 0;
+    }
+    .probe-placeholder {
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      background: #fbfcfd;
+    }
+    .probe-section {
+      display: grid;
+      gap: 12px;
+    }
+    .probe-section-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .probe-section h3 {
+      margin: 0;
+      font-size: 17px;
+    }
+    .probe-section-meta {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .probe-algorithm-list {
+      display: grid;
+      gap: 10px;
+    }
+    .probe-algorithm-row {
+      display: grid;
+      gap: 10px;
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      border-radius: 8px;
+      background: white;
+      padding: 12px;
+    }
+    .probe-algorithm-main {
+      display: grid;
+      grid-template-columns: minmax(180px, 0.8fr) minmax(220px, 1fr) minmax(320px, 1.45fr);
+      gap: 12px;
+      align-items: stretch;
+      min-width: 0;
+    }
+    .probe-identity {
+      display: grid;
+      align-content: start;
+      gap: 5px;
+      min-width: 0;
+    }
+    .probe-algorithm-title {
+      display: grid;
+      gap: 4px;
+      font-weight: 750;
+      font-size: 15px;
+    }
+    .probe-algorithm-base {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .probe-chain {
+      color: var(--muted);
+      overflow-wrap: anywhere;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .probe-primary-field {
+      min-width: 0;
+      display: grid;
+      align-content: start;
+      gap: 6px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #f8fafc;
+      padding: 10px;
+    }
+    .probe-primary-label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 750;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .probe-primary-value {
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .probe-empty {
+      color: var(--muted);
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+    }
+    .probe-detail-row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      border-top: 1px solid var(--border);
+      padding-top: 8px;
+    }
+    .probe-detail-row details > summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .probe-setting-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .probe-setting-chip {
+      display: inline-flex;
+      max-width: 100%;
+      gap: 4px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: #f8fafc;
+      padding: 4px 8px;
+      font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .probe-setting-key {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      font-weight: 650;
+    }
+    .probe-setting-value {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .probe-extra-settings {
+      margin-top: 8px;
+    }
+    .probe-extra-settings pre {
+      max-height: 220px;
+      overflow: auto;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      margin: 8px 0 0;
+      padding: 8px;
+      border-radius: 6px;
+      background: #101820;
+      color: #e7eef2;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    @media (max-width: 1000px) {
+      .probe-algorithm-main {
+        grid-template-columns: 1fr;
+      }
     }
     .chips {
       display: grid;
@@ -1211,6 +1415,13 @@ HTML = r"""<!doctype html>
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 10px;
+    }
+    .compare-select {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
     }
     .column-selector {
       display: grid;
@@ -1324,6 +1535,61 @@ HTML = r"""<!doctype html>
       border-radius: 6px;
       background: #fbfcfd;
     }
+    .markdown-doc {
+      color: var(--text);
+      max-height: calc(100vh - 210px);
+      overflow: auto;
+    }
+    .markdown-doc h1,
+    .markdown-doc h2,
+    .markdown-doc h3,
+    .markdown-doc h4 {
+      margin: 18px 0 8px;
+      letter-spacing: 0;
+    }
+    .markdown-doc h1:first-child,
+    .markdown-doc h2:first-child,
+    .markdown-doc h3:first-child {
+      margin-top: 0;
+    }
+    .markdown-doc h1 { font-size: 20px; }
+    .markdown-doc h2 { font-size: 16px; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
+    .markdown-doc h3 { font-size: 14px; }
+    .markdown-doc p {
+      margin: 7px 0;
+      color: #334155;
+    }
+    .markdown-doc ul {
+      margin: 7px 0 7px 20px;
+      padding: 0;
+    }
+    .markdown-doc li {
+      margin: 4px 0;
+    }
+    .markdown-doc code {
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: #f8fafc;
+      padding: 1px 4px;
+      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .markdown-doc pre {
+      margin: 10px 0;
+      padding: 10px;
+      border-radius: 6px;
+      background: #101820;
+      color: #e7eef2;
+      overflow: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .markdown-doc pre code {
+      border: 0;
+      background: transparent;
+      padding: 0;
+      color: inherit;
+    }
     .form-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -1369,7 +1635,7 @@ HTML = r"""<!doctype html>
       <div class="view-tabs">
         <button class="view-tab active" data-view="experiment-view">Experiment</button>
         <button class="view-tab" data-view="results-view">Results</button>
-        <button class="view-tab" data-view="compare-view">Compare</button>
+        <button class="view-tab" data-view="install-log-view">Install Log</button>
         <button class="view-tab" data-view="plots-view">Plots</button>
       </div>
       <section id="experiment-view" class="view-panel active">
@@ -1381,7 +1647,6 @@ HTML = r"""<!doctype html>
                 <div class="muted" id="selected-path"></div>
               </div>
               <div class="actions">
-                <button id="save">Save</button>
                 <button id="check">Check</button>
               </div>
             </div>
@@ -1412,6 +1677,20 @@ HTML = r"""<!doctype html>
             </section>
           </div>
         </section>
+        <section class="panel probe-panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Probe</div>
+              <div id="probe-summary" class="csv-summary">No probe loaded.</div>
+            </div>
+            <button id="probe-run">Run Probe</button>
+          </div>
+          <div class="panel-body">
+            <div id="probe-output" class="probe-output">
+              <div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>
+            </div>
+          </div>
+        </section>
       </section>
       <section id="results-view" class="view-panel">
         <section class="panel">
@@ -1422,15 +1701,27 @@ HTML = r"""<!doctype html>
             </div>
             <div class="actions">
               <button id="parse-results">Parse Logs</button>
-              <button id="load-results">Load CSVs</button>
+              <button id="load-results" class="icon-button" aria-label="Reload CSVs" title="Reload CSVs">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+              </button>
             </div>
           </div>
           <div class="panel-body">
             <div class="csv-tools">
-              <div id="result-file-tabs" class="result-file-tabs"></div>
-              <div class="column-actions">
-                <button id="columns-all">All columns</button>
-                <button id="columns-none">No columns</button>
+              <div class="result-toolbar">
+                <div id="result-file-tabs" class="result-file-tabs"></div>
+                <div class="column-actions">
+                  <button id="add-compare">Add comparison</button>
+                  <button id="clear-compare" class="hidden">Single CSV</button>
+                  <button id="columns-all">All columns</button>
+                  <button id="columns-none">No columns</button>
+                </div>
+              </div>
+              <div id="compare-controls" class="csv-selectors hidden">
+                <label class="compare-select">
+                  <span>Compare against</span>
+                  <select id="compare-right"></select>
+                </label>
               </div>
               <div id="column-selector" class="column-selector"></div>
             </div>
@@ -1438,37 +1729,19 @@ HTML = r"""<!doctype html>
           </div>
         </section>
       </section>
-      <section id="compare-view" class="view-panel">
+      <section id="install-log-view" class="view-panel">
         <section class="panel">
           <div class="panel-header">
             <div>
-              <div class="panel-title">Compare CSVs</div>
-              <div id="compare-summary" class="csv-summary">No comparison loaded.</div>
+              <div class="panel-title">Install Log</div>
+              <div id="install-log-summary" class="csv-summary">No install log loaded.</div>
             </div>
-            <button id="load-compare-results">Load CSVs</button>
+            <button id="load-install-log" class="icon-button" aria-label="Reload install log" title="Reload install log">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+            </button>
           </div>
           <div class="panel-body">
-            <div class="csv-tools">
-              <div class="csv-selectors">
-                <select id="compare-left"></select>
-                <select id="compare-right"></select>
-              </div>
-              <div class="column-actions">
-                <button id="compare-columns-all">All columns</button>
-                <button id="compare-columns-none">No columns</button>
-              </div>
-              <div id="compare-column-selector" class="column-selector"></div>
-            </div>
-            <div class="compare-grid">
-              <div class="compare-pane">
-                <div id="compare-left-title" class="compare-pane-title">Left CSV</div>
-                <div id="compare-left-table" class="csv-empty">Select two CSV files to compare.</div>
-              </div>
-              <div class="compare-pane">
-                <div id="compare-right-title" class="compare-pane-title">Right CSV</div>
-                <div id="compare-right-table" class="csv-empty">Select two CSV files to compare.</div>
-              </div>
-            </div>
+            <div id="install-log" class="csv-empty">Select an experiment, then reload the install log.</div>
           </div>
         </section>
       </section>
@@ -1499,9 +1772,11 @@ HTML = r"""<!doctype html>
       results: [],
       resultsFor: null,
       activeResult: '',
-      compareLeft: '',
       compareRight: '',
+      compareEnabled: false,
       compareColumnModes: {},
+      installLog: null,
+      installLogFor: null,
       activeView: 'experiment-view'
     };
     const tokenInput = document.getElementById('token');
@@ -1660,6 +1935,190 @@ HTML = r"""<!doctype html>
       card.appendChild(details);
       box.appendChild(card);
     }
+    function algorithmDefinitionMap(declared) {
+      const map = new Map();
+      for (const definition of declared?.algorithm_definitions || []) {
+        map.set(definition.name, definition);
+      }
+      return map;
+    }
+    function algorithmChain(name, definitionMap) {
+      const chain = [];
+      const seen = new Set();
+      let current = name;
+      while (current && !seen.has(current)) {
+        seen.add(current);
+        const definition = definitionMap.get(current);
+        if (!definition) {
+          chain.push({ name: current, base: '', args: '', plugin: true });
+          break;
+        }
+        chain.push(definition);
+        current = definition.base;
+      }
+      return chain;
+    }
+    function probeDisplayValue(value) {
+      if (value === '' || value === null || value === undefined) return '(none)';
+      return String(value);
+    }
+    function probeChainText(algorithm, declared) {
+      const definitions = algorithmDefinitionMap(declared);
+      return algorithmChain(algorithm.name, definitions).map(node => node.name).join(' -> ');
+    }
+    function renderProbeIdentity(algorithm, declared) {
+      const identity = document.createElement('div');
+      identity.className = 'probe-identity';
+      const title = document.createElement('div');
+      title.className = 'probe-algorithm-title';
+      const name = document.createElement('div');
+      name.textContent = algorithm.name;
+      const base = document.createElement('div');
+      base.className = 'probe-algorithm-base';
+      base.textContent = `base ${algorithm.base || '(none)'}`;
+      title.appendChild(name);
+      title.appendChild(base);
+      const chain = document.createElement('div');
+      chain.className = 'probe-chain';
+      chain.textContent = probeChainText(algorithm, declared);
+      identity.appendChild(title);
+      identity.appendChild(chain);
+      return identity;
+    }
+    function renderProbePrimaryField(label, value) {
+      const field = document.createElement('div');
+      field.className = 'probe-primary-field';
+      const fieldLabel = document.createElement('div');
+      fieldLabel.className = 'probe-primary-label';
+      fieldLabel.textContent = label;
+      const fieldValue = document.createElement('div');
+      fieldValue.className = 'probe-primary-value';
+      fieldValue.textContent = probeDisplayValue(value);
+      if (fieldValue.textContent === '(none)') fieldValue.classList.add('probe-empty');
+      field.appendChild(fieldLabel);
+      field.appendChild(fieldValue);
+      return field;
+    }
+    function probeSettingPairs(algorithm) {
+      const pairs = [];
+      const add = (key, value) => {
+        if (value === '' || value === null || value === undefined) return;
+        pairs.push([key, String(value)]);
+      };
+      add('parser', algorithm.parser?.spec);
+      const properties = algorithm.properties || {};
+      for (const key of Object.keys(properties).sort()) {
+        if (key === 'repo_ref') continue;
+        if (key === 'build_key' || key === 'binary_path') continue;
+        add(key, properties[key]);
+      }
+      return pairs;
+    }
+    function renderProbeSettings(algorithm) {
+      const wrapper = document.createElement('details');
+      wrapper.className = 'probe-settings-details';
+      const settingsSummary = document.createElement('summary');
+      settingsSummary.textContent = `Resolved settings (${probeSettingPairs(algorithm).length})`;
+      wrapper.appendChild(settingsSummary);
+      const chips = document.createElement('div');
+      chips.className = 'probe-setting-chips';
+      const pairs = probeSettingPairs(algorithm);
+      if (!pairs.length) {
+        const empty = document.createElement('span');
+        empty.className = 'probe-empty';
+        empty.textContent = '(none)';
+        chips.appendChild(empty);
+      }
+      for (const [key, value] of pairs) {
+        const chip = document.createElement('span');
+        chip.className = 'probe-setting-chip';
+        const keyNode = document.createElement('span');
+        keyNode.className = 'probe-setting-key';
+        keyNode.textContent = `${key}=`;
+        const valueNode = document.createElement('span');
+        valueNode.className = 'probe-setting-value';
+        valueNode.title = value;
+        valueNode.textContent = value;
+        chip.appendChild(keyNode);
+        chip.appendChild(valueNode);
+        chips.appendChild(chip);
+      }
+      wrapper.appendChild(chips);
+      return wrapper;
+    }
+    function renderProbeRawJson(algorithm) {
+      const details = document.createElement('details');
+      details.className = 'probe-extra-settings';
+      const summary = document.createElement('summary');
+      summary.textContent = 'Raw algorithm JSON';
+      const pre = document.createElement('pre');
+      pre.textContent = JSON.stringify(algorithm, null, 2);
+      details.appendChild(summary);
+      details.appendChild(pre);
+      return details;
+    }
+    function renderProbeResult(results, saveResult) {
+      const box = document.getElementById('probe-output');
+      const summaryBox = document.getElementById('probe-summary');
+      box.innerHTML = '';
+      box.className = 'probe-output';
+      const root = document.createElement('div');
+      root.className = 'probe-output';
+
+      const functionCount = results.length;
+      const algorithmCount = results.reduce((sum, result) => sum + (result.resolved?.algorithms?.length || 0), 0);
+      summaryBox.textContent = `Probed ${functionCount} experiment function(s), ${algorithmCount} enabled algorithm(s).`;
+      if (saveResult?.path) summaryBox.textContent += ` Source: ${saveResult.path}`;
+
+      for (const result of results) {
+        const section = document.createElement('section');
+        section.className = 'probe-section';
+        const sectionHeader = document.createElement('div');
+        sectionHeader.className = 'probe-section-header';
+        const title = document.createElement('h3');
+        title.textContent = `${result.experiment?.name || 'Experiment'} (${result.experiment?.function || 'unknown'})`;
+        sectionHeader.appendChild(title);
+
+        const details = document.createElement('div');
+        details.className = 'probe-section-meta';
+        details.textContent = `System ${result.experiment?.system || 'unknown'}; ${result.resolved?.algorithms?.length || 0} enabled algorithm(s).`;
+        sectionHeader.appendChild(details);
+        section.appendChild(sectionHeader);
+
+        const list = document.createElement('div');
+        list.className = 'probe-algorithm-list';
+
+        for (const algorithm of result.resolved?.algorithms || []) {
+          const row = document.createElement('article');
+          row.className = 'probe-algorithm-row';
+          const main = document.createElement('div');
+          main.className = 'probe-algorithm-main';
+          main.appendChild(renderProbeIdentity(algorithm, result.declared || {}));
+          main.appendChild(renderProbePrimaryField('Branch', algorithm.properties?.repo_ref || ''));
+          main.appendChild(renderProbePrimaryField('CLI arguments', algorithm.args || ''));
+          row.appendChild(main);
+          const detailRow = document.createElement('div');
+          detailRow.className = 'probe-detail-row';
+          detailRow.appendChild(renderProbeSettings(algorithm));
+          detailRow.appendChild(renderProbeRawJson(algorithm));
+          row.appendChild(detailRow);
+          list.appendChild(row);
+        }
+        section.appendChild(list);
+        root.appendChild(section);
+      }
+
+      const raw = document.createElement('details');
+      raw.className = 'action-json';
+      const summary = document.createElement('summary');
+      summary.textContent = 'Probe JSON';
+      const pre = document.createElement('pre');
+      pre.textContent = JSON.stringify(results, null, 2);
+      raw.appendChild(summary);
+      raw.appendChild(pre);
+      root.appendChild(raw);
+      box.appendChild(root);
+    }
     async function api(path, options = {}) {
       const headers = Object.assign({ 'X-MKEXP2-Token': token() }, options.headers || {});
       if (options.body && !(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
@@ -1673,6 +2132,92 @@ HTML = r"""<!doctype html>
       return String(value ?? '').replace(/[&<>"']/g, char => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
       }[char]));
+    }
+    function appendInlineMarkdown(parent, text) {
+      const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+      let cursor = 0;
+      for (const match of text.matchAll(pattern)) {
+        if (match.index > cursor) parent.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+        const value = match[0];
+        const node = value.startsWith('`') ? document.createElement('code') : document.createElement('strong');
+        node.textContent = value.startsWith('`') ? value.slice(1, -1) : value.slice(2, -2);
+        parent.appendChild(node);
+        cursor = match.index + value.length;
+      }
+      if (cursor < text.length) parent.appendChild(document.createTextNode(text.slice(cursor)));
+    }
+    function renderMarkdown(markdown, target) {
+      target.innerHTML = '';
+      target.className = 'markdown-doc';
+      const lines = String(markdown || '').split(/\r?\n/);
+      let paragraph = [];
+      let list = null;
+      let code = null;
+
+      const flushParagraph = () => {
+        if (!paragraph.length) return;
+        const p = document.createElement('p');
+        appendInlineMarkdown(p, paragraph.join(' '));
+        target.appendChild(p);
+        paragraph = [];
+      };
+      const flushList = () => {
+        if (!list) return;
+        target.appendChild(list);
+        list = null;
+      };
+      const flushCode = () => {
+        if (!code) return;
+        const pre = document.createElement('pre');
+        const codeNode = document.createElement('code');
+        codeNode.textContent = code.join('\n');
+        pre.appendChild(codeNode);
+        target.appendChild(pre);
+        code = null;
+      };
+
+      for (const line of lines) {
+        if (code) {
+          if (/^```/.test(line)) flushCode();
+          else code.push(line);
+          continue;
+        }
+        if (/^```/.test(line)) {
+          flushParagraph();
+          flushList();
+          code = [];
+          continue;
+        }
+        const heading = line.match(/^(#{1,4})\s+(.+)$/);
+        if (heading) {
+          flushParagraph();
+          flushList();
+          const level = Math.min(heading[1].length, 4);
+          const h = document.createElement(`h${level}`);
+          appendInlineMarkdown(h, heading[2]);
+          target.appendChild(h);
+          continue;
+        }
+        const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+        if (bullet) {
+          flushParagraph();
+          if (!list) list = document.createElement('ul');
+          const item = document.createElement('li');
+          appendInlineMarkdown(item, bullet[1]);
+          list.appendChild(item);
+          continue;
+        }
+        if (!line.trim()) {
+          flushParagraph();
+          flushList();
+          continue;
+        }
+        flushList();
+        paragraph.push(line.trim());
+      }
+      flushCode();
+      flushParagraph();
+      flushList();
     }
     function span(className, value) {
       return `<span class="${className}">${esc(value)}</span>`;
@@ -1909,7 +2454,7 @@ HTML = r"""<!doctype html>
       } else {
         state.compareColumnModes[header] = next;
       }
-      setTimeout(renderCompareWorkspace, 0);
+      setTimeout(renderResultsWorkspace, 0);
     }
     function syncCompareScroll(leftBox, rightBox) {
       let syncing = false;
@@ -2065,12 +2610,24 @@ HTML = r"""<!doctype html>
     function renderResultsWorkspace() {
       const summary = document.getElementById('results-summary');
       const box = document.getElementById('results');
+      const selector = document.getElementById('column-selector');
+      const addCompareButton = document.getElementById('add-compare');
+      const clearCompareButton = document.getElementById('clear-compare');
+      const compareControls = document.getElementById('compare-controls');
+      const compareRightSelect = document.getElementById('compare-right');
+      const allButton = document.getElementById('columns-all');
+      const noneButton = document.getElementById('columns-none');
       renderResultFileTabs();
+      addCompareButton.disabled = true;
+      addCompareButton.classList.remove('hidden');
+      clearCompareButton.classList.add('hidden');
+      compareControls.classList.add('hidden');
+      allButton.disabled = true;
+      noneButton.disabled = true;
       if (!state.selected) {
         summary.textContent = 'No experiment selected.';
         box.className = 'csv-empty';
         box.textContent = 'Select an experiment first.';
-        const selector = document.getElementById('column-selector');
         selector.className = 'column-selector';
         selector.innerHTML = '';
         return;
@@ -2079,114 +2636,141 @@ HTML = r"""<!doctype html>
         summary.textContent = 'No CSV files loaded.';
         box.className = 'csv-empty';
         box.textContent = 'No CSV files loaded.';
-        const selector = document.getElementById('column-selector');
         selector.className = 'column-selector';
         selector.innerHTML = '';
         return;
       }
       if (!findResult(state.activeResult)) state.activeResult = state.results[0].name;
       const file = findResult(state.activeResult);
-      summary.textContent = `${state.results.length} CSV file(s), ${file.rows.length} row(s) in ${csvLabel(file.name)}`;
-      renderColumnSelector(document.getElementById('column-selector'), file.headers, renderResultsWorkspace);
-      document.getElementById('columns-all').onclick = () => setAllColumns(file.headers, true, renderResultsWorkspace);
-      document.getElementById('columns-none').onclick = () => setAllColumns(file.headers, false, renderResultsWorkspace);
-      renderCsvTable(file, box, file.headers);
-    }
-    function renderCompareSelectors() {
-      const left = document.getElementById('compare-left');
-      const right = document.getElementById('compare-right');
-      left.innerHTML = '';
-      right.innerHTML = '';
-      for (const select of [left, right]) {
-        for (const file of state.results) {
-          const option = document.createElement('option');
-          option.value = file.name;
-          option.textContent = csvLabel(file.name);
-          select.appendChild(option);
+      addCompareButton.disabled = state.results.length < 2;
+      addCompareButton.onclick = () => {
+        state.compareEnabled = true;
+        if (!findResult(state.compareRight) || state.compareRight === state.activeResult) {
+          state.compareRight = state.results.find(item => item.name !== state.activeResult)?.name || state.activeResult;
         }
-      }
-      if (!findResult(state.compareLeft)) state.compareLeft = state.results[0]?.name || '';
-      if (!findResult(state.compareRight)) state.compareRight = state.results[1]?.name || state.results[0]?.name || '';
-      left.value = state.compareLeft;
-      right.value = state.compareRight;
-      left.onchange = () => {
-        state.compareLeft = left.value;
-        renderCompareWorkspace();
+        renderResultsWorkspace();
       };
-      right.onchange = () => {
-        state.compareRight = right.value;
-        renderCompareWorkspace();
-      };
-    }
-    function renderCompareWorkspace() {
-      const summary = document.getElementById('compare-summary');
-      const leftBox = document.getElementById('compare-left-table');
-      const rightBox = document.getElementById('compare-right-table');
-      const compareAllButton = document.getElementById('compare-columns-all');
-      const compareNoneButton = document.getElementById('compare-columns-none');
-      compareAllButton.disabled = true;
-      compareNoneButton.disabled = true;
-      if (!state.selected) {
-        summary.textContent = 'No experiment selected.';
-        document.getElementById('compare-left').innerHTML = '';
-        document.getElementById('compare-right').innerHTML = '';
-        leftBox.className = 'csv-empty';
-        rightBox.className = 'csv-empty';
-        leftBox.textContent = 'Select an experiment first.';
-        rightBox.textContent = 'Select an experiment first.';
+
+      if (!state.compareEnabled) {
+        state.compareColumnModes = {};
+        summary.textContent = `${state.results.length} CSV file(s), ${file.rows.length} row(s) in ${csvLabel(file.name)}`;
+        renderColumnSelector(selector, file.headers, renderResultsWorkspace);
+        allButton.disabled = false;
+        noneButton.disabled = false;
+        allButton.onclick = () => setAllColumns(file.headers, true, renderResultsWorkspace);
+        noneButton.onclick = () => setAllColumns(file.headers, false, renderResultsWorkspace);
+        renderCsvTable(file, box, file.headers);
         return;
       }
-      if (!state.results.length) {
-        summary.textContent = 'No CSV files loaded.';
-        document.getElementById('compare-left').innerHTML = '';
-        document.getElementById('compare-right').innerHTML = '';
-        leftBox.className = 'csv-empty';
-        rightBox.className = 'csv-empty';
-        leftBox.textContent = 'Load CSV files first.';
-        rightBox.textContent = 'Load CSV files first.';
-        const selector = document.getElementById('compare-column-selector');
-        selector.className = 'column-selector';
-        selector.innerHTML = '';
-        return;
+
+      clearCompareButton.classList.remove('hidden');
+      addCompareButton.classList.add('hidden');
+      clearCompareButton.onclick = () => {
+        state.compareEnabled = false;
+        state.compareColumnModes = {};
+        renderResultsWorkspace();
+      };
+      compareControls.classList.remove('hidden');
+      compareRightSelect.innerHTML = '';
+      for (const item of state.results) {
+        const option = document.createElement('option');
+        option.value = item.name;
+        option.textContent = csvLabel(item.name);
+        compareRightSelect.appendChild(option);
       }
-      renderCompareSelectors();
-      const leftFile = findResult(state.compareLeft);
+      if (!findResult(state.compareRight) || state.compareRight === state.activeResult) {
+        state.compareRight = state.results.find(item => item.name !== state.activeResult)?.name || state.activeResult;
+      }
+      compareRightSelect.value = state.compareRight;
+      compareRightSelect.onchange = () => {
+        state.compareRight = compareRightSelect.value;
+        renderResultsWorkspace();
+      };
+
       const rightFile = findResult(state.compareRight);
-      const headers = headersForFiles([leftFile, rightFile]);
-      summary.textContent = `${csvLabel(leftFile?.name)} vs ${csvLabel(rightFile?.name)}`;
-      document.getElementById('compare-left-title').textContent = leftFile ? csvLabel(leftFile.name) : 'Left CSV';
-      document.getElementById('compare-right-title').textContent = rightFile ? csvLabel(rightFile.name) : 'Right CSV';
-      if (leftFile && rightFile && leftFile.rows.length !== rightFile.rows.length) {
-        const message = `Cannot compare: row counts differ (${csvLabel(leftFile.name)} has ${leftFile.rows.length}, ${csvLabel(rightFile.name)} has ${rightFile.rows.length}).`;
+      const headers = headersForFiles([file, rightFile]);
+      summary.textContent = `${csvLabel(file?.name)} vs ${csvLabel(rightFile?.name)}`;
+      if (file && rightFile && file.rows.length !== rightFile.rows.length) {
+        const message = `Cannot compare: row counts differ (${csvLabel(file.name)} has ${file.rows.length}, ${csvLabel(rightFile.name)} has ${rightFile.rows.length}).`;
         summary.textContent = message;
-        const selector = document.getElementById('compare-column-selector');
         selector.className = 'csv-empty status-bad';
         selector.textContent = 'Row-wise comparison is disabled until both CSV files have the same number of rows.';
-        leftBox.onscroll = null;
-        rightBox.onscroll = null;
-        leftBox.className = 'csv-empty status-bad';
-        rightBox.className = 'csv-empty status-bad';
-        leftBox.textContent = message;
-        rightBox.textContent = message;
+        box.onscroll = null;
+        box.className = 'csv-empty status-bad';
+        box.textContent = message;
         return;
       }
-      renderColumnSelector(document.getElementById('compare-column-selector'), headers, renderCompareWorkspace);
-      compareAllButton.disabled = false;
-      compareNoneButton.disabled = false;
-      compareAllButton.onclick = () => setAllColumns(headers, true, renderCompareWorkspace);
-      compareNoneButton.onclick = () => setAllColumns(headers, false, renderCompareWorkspace);
-      renderCsvTable(leftFile, leftBox, headers, { compare: true, peer: rightFile });
-      renderCsvTable(rightFile, rightBox, headers, { compare: true, peer: leftFile });
+      renderColumnSelector(selector, headers, renderResultsWorkspace);
+      allButton.disabled = false;
+      noneButton.disabled = false;
+      allButton.onclick = () => setAllColumns(headers, true, renderResultsWorkspace);
+      noneButton.onclick = () => setAllColumns(headers, false, renderResultsWorkspace);
+
+      box.onscroll = null;
+      box.className = 'compare-grid';
+      box.innerHTML = '';
+      const leftPane = document.createElement('div');
+      leftPane.className = 'compare-pane';
+      const leftTitle = document.createElement('div');
+      leftTitle.className = 'compare-pane-title';
+      leftTitle.textContent = file ? csvLabel(file.name) : 'Selected CSV';
+      const leftBox = document.createElement('div');
+      leftBox.className = 'csv-empty';
+      leftPane.appendChild(leftTitle);
+      leftPane.appendChild(leftBox);
+
+      const rightPane = document.createElement('div');
+      rightPane.className = 'compare-pane';
+      const rightTitle = document.createElement('div');
+      rightTitle.className = 'compare-pane-title';
+      rightTitle.textContent = rightFile ? csvLabel(rightFile.name) : 'Comparison CSV';
+      const rightBox = document.createElement('div');
+      rightBox.className = 'csv-empty';
+      rightPane.appendChild(rightTitle);
+      rightPane.appendChild(rightBox);
+
+      box.appendChild(leftPane);
+      box.appendChild(rightPane);
+      renderCsvTable(file, leftBox, headers, { compare: true, peer: rightFile });
+      renderCsvTable(rightFile, rightBox, headers, { compare: true, peer: file });
       syncCompareScroll(leftBox, rightBox);
+    }
+    function renderInstallLogWorkspace() {
+      const summary = document.getElementById('install-log-summary');
+      const box = document.getElementById('install-log');
+      if (!state.selected) {
+        summary.textContent = 'No experiment selected.';
+        box.className = 'csv-empty';
+        box.textContent = 'Select an experiment first.';
+        return;
+      }
+      if (state.installLogFor !== state.selected || !state.installLog) {
+        summary.textContent = 'No install log loaded.';
+        box.className = 'csv-empty';
+        box.textContent = 'Reload the install log for this experiment.';
+        return;
+      }
+      if (!state.installLog.exists) {
+        summary.textContent = 'logs/install.md does not exist.';
+        box.className = 'csv-empty';
+        box.textContent = 'No install log exists for this experiment yet. Run install or submit with install first.';
+        return;
+      }
+      const suffix = state.installLog.truncated ? ' (truncated)' : '';
+      summary.textContent = `logs/install.md, ${state.installLog.size || 0} bytes, modified ${state.installLog.modified_at || 'unknown'}${suffix}`;
+      renderMarkdown(state.installLog.content || '', box);
     }
     async function ensureResultsLoaded() {
       if (!state.selected) return;
       if (state.resultsFor !== state.selected) await loadResults();
     }
+    async function ensureInstallLogLoaded() {
+      if (!state.selected) return;
+      if (state.installLogFor !== state.selected) await loadInstallLog();
+    }
     async function activateCsvView(viewId) {
       await ensureResultsLoaded();
       if (viewId === 'results-view') renderResultsWorkspace();
-      if (viewId === 'compare-view') renderCompareWorkspace();
     }
     function setView(viewId) {
       state.activeView = viewId;
@@ -2196,8 +2780,11 @@ HTML = r"""<!doctype html>
       document.querySelectorAll('.view-panel').forEach(panel => {
         panel.classList.toggle('active', panel.id === viewId);
       });
-      if (viewId === 'results-view' || viewId === 'compare-view') {
+      if (viewId === 'results-view') {
         activateCsvView(viewId).catch(err => out(String(err)));
+      }
+      if (viewId === 'install-log-view') {
+        ensureInstallLogLoaded().catch(err => out(String(err)));
       }
       if (viewId === 'plots-view') {
         renderPlotPanel();
@@ -2304,11 +2891,15 @@ HTML = r"""<!doctype html>
       state.results = [];
       state.resultsFor = null;
       state.activeResult = '';
-      state.compareLeft = '';
       state.compareRight = '';
+      state.compareEnabled = false;
       state.compareColumnModes = {};
+      state.installLog = null;
+      state.installLogFor = null;
       renderResultsWorkspace();
-      renderCompareWorkspace();
+      renderInstallLogWorkspace();
+      document.getElementById('probe-summary').textContent = 'No probe loaded.';
+      document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
       openExperimentAncestors(id);
       await refreshExperiments();
       const data = await api(`/api/experiments/${encodeURIComponent(id)}/experiment`);
@@ -2317,6 +2908,9 @@ HTML = r"""<!doctype html>
       document.getElementById('selected-path').textContent = data.path;
       setEditorValue(data.experiment);
       await loadAlgorithms();
+      if (state.activeView === 'install-log-view') {
+        await loadInstallLog();
+      }
     }
     async function persistExperiment() {
       if (!state.selected) return;
@@ -2325,16 +2919,6 @@ HTML = r"""<!doctype html>
         method: 'PUT',
         body: JSON.stringify({ experiment })
       });
-    }
-    async function saveExperiment() {
-      if (!state.selected) return;
-      const data = await persistExperiment();
-      try {
-        await loadAlgorithms();
-        out(Object.assign({}, data, { algorithms: state.algorithms }));
-      } catch (err) {
-        out(Object.assign({}, data, { algorithm_refresh_error: String(err) }));
-      }
     }
     async function createExperiment() {
       const name = document.getElementById('new-name').value || 'experiment';
@@ -2366,6 +2950,30 @@ HTML = r"""<!doctype html>
         }
       } finally {
         button.disabled = false;
+      }
+    }
+    async function probeExperiment() {
+      if (!state.selected) return;
+      setActionButtons(['probe-run'], true);
+      document.getElementById('probe-summary').textContent = 'Running mkexp2 probe...';
+      document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Running mkexp2 probe...</div>';
+      try {
+        const listing = await api(`/api/experiments/${encodeURIComponent(state.selected)}/probe`, {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+        const results = [];
+        for (const item of listing.experiments || []) {
+          const detail = await api(`/api/experiments/${encodeURIComponent(state.selected)}/probe`, {
+            method: 'POST',
+            body: JSON.stringify({ selector: item.name })
+          });
+          results.push(detail);
+        }
+        renderProbeResult(results, null);
+        await loadAlgorithms();
+      } finally {
+        setActionButtons(['probe-run'], false);
       }
     }
     async function loadAlgorithms() {
@@ -2499,19 +3107,29 @@ HTML = r"""<!doctype html>
       state.results = (data.files || []).map(prepareCsvFile);
       state.resultsFor = state.selected;
       state.activeResult = state.results[0]?.name || '';
-      state.compareLeft = state.results[0]?.name || '';
       state.compareRight = state.results[1]?.name || state.results[0]?.name || '';
+      state.compareEnabled = false;
       state.compareColumnModes = {};
       renderResultsWorkspace();
-      renderCompareWorkspace();
+    }
+    async function loadInstallLog() {
+      if (!state.selected) return;
+      const data = await api(`/api/experiments/${encodeURIComponent(state.selected)}/install-log`);
+      clearTransientOutput();
+      state.installLog = data;
+      state.installLogFor = state.selected;
+      renderInstallLogWorkspace();
     }
     function cpuCount(value) {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : NaN;
     }
     function formatCpuCount(value) {
-      const text = String(value ?? '').trim();
-      return text ? `${text} CPU` : 'n/a';
+      const parsed = cpuCount(value);
+      if (!Number.isFinite(parsed)) return 'n/a';
+      const cores = parsed / 2;
+      const text = Number.isInteger(cores) ? String(cores) : cores.toFixed(1);
+      return `${text} cores`;
     }
     function nodeStateClass(state) {
       const raw = String(state ?? '').trim().toLowerCase();
@@ -2551,13 +3169,13 @@ HTML = r"""<!doctype html>
     };
     document.getElementById('refresh-status').onclick = refreshStatus;
     document.getElementById('create').onclick = createExperiment;
-    document.getElementById('save').onclick = saveExperiment;
     document.getElementById('check').onclick = checkExperiment;
+    document.getElementById('probe-run').onclick = probeExperiment;
     document.getElementById('submit').onclick = submitExperiment;
     document.getElementById('parse-results').onclick = parseExperiment;
     document.getElementById('plot-results').onclick = plotExperiment;
     document.getElementById('load-results').onclick = loadResults;
-    document.getElementById('load-compare-results').onclick = loadResults;
+    document.getElementById('load-install-log').onclick = loadInstallLog;
     document.querySelectorAll('.view-tab').forEach(button => {
       button.onclick = () => setView(button.dataset.view);
     });
@@ -2621,6 +3239,10 @@ def make_handler(app):
                 match = re.match(r"^/api/experiments/([^/]+)/results$", path)
                 if match:
                     json_response(self, 200, app.results(urllib.parse.unquote(match.group(1))))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/install-log$", path)
+                if match:
+                    json_response(self, 200, app.install_log(urllib.parse.unquote(match.group(1))))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/plots\.pdf$", path)
                 if match:

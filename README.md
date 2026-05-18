@@ -59,6 +59,12 @@ Or submit only selected algorithm variants from the generated command set:
 ./submit.sh KaMinPar-FM KaMinPar-LP
 ```
 
+To install/build first as part of the same submit action:
+
+```bash
+./submit.sh --install [KaMinPar-FM KaMinPar-LP]
+```
+
 Discover available systems/partitioners/presets from the CLI:
 
 ```bash
@@ -215,11 +221,14 @@ Example:
 - `generate` writes one command manifest per job as `jobs/<job>.cmds` and a
   sidecar `jobs/<job>.cmds.meta.tsv` with zero-based command index, algorithm,
   base partitioner, experiment function, topology, and log path.
-- Generated `submit.sh` accepts optional algorithm filters. Without arguments it
-  submits every generated command. With arguments, it validates exact algorithm
-  names against the sidecar metadata and submits only matching commands. Slurm
-  array jobs are submitted with filtered array indices; local and non-array
-  Slurm jobs use filtered temporary manifests under `.mkexp2/`.
+- Generated `submit.sh` accepts optional algorithm filters and an `--install`
+  flag. Without algorithm arguments it submits every generated command. With
+  algorithm arguments, it validates exact algorithm names against the sidecar
+  metadata and submits only matching commands. With `--install`, local submit
+  first runs `mkexp2 install` on the current machine, while Slurm submit first
+  submits the generated install job and makes run jobs depend on it. Slurm array
+  jobs are submitted with filtered array indices; local and non-array Slurm jobs
+  use filtered temporary manifests under `.mkexp2/`.
 - No timelimit is applied by default.
   - Set `Property timelimit <DD:HH:MM:SS|HH:MM:SS>` to add a Slurm job timelimit.
   - Set `Property timelimit.per_instance <DD:HH:MM:SS|HH:MM:SS>` to wrap each run with `timeout`.
@@ -288,17 +297,21 @@ The UI can:
 - edit the raw `Experiment` file with lightweight syntax highlighting
 - save the current editor contents before running `mkexp2 check`, then render
   the command JSON with clear pass/fail messages
-- use `mkexp2 probe` internally to populate algorithm choices
+- run `mkexp2 probe` from the Experiment page to render enabled algorithms
+  below the editor as compact rows that emphasize branch/ref settings and CLI
+  arguments, with resolved settings and raw algorithm JSON collapsed by default
 - fetch bundled init presets with `mkexp2 probe --presets` for new experiments
 - fetch algorithm names with `probe`, select all by default, and submit only the
   checked subset when the user deselects variants
-- run `mkexp2 generate`, then `./submit.sh [algorithms...]`
+- run `mkexp2 generate`, then `./submit.sh --install [algorithms...]`
 - commit submitted state to Git after submission
 - run `mkexp2 parse` from the Results tab and reload CSV results when parsing
   succeeds
-- display CSV results in full-page tabs with parsed tables, remembered column
-  visibility, and side-by-side comparison for two CSV files from the selected
-  experiment; comparison tables lock scrolling, require matching row counts,
+- auto-load and render `logs/install.md` from the Install Log tab, with a
+  reload action and an empty state when the log does not exist yet
+- display CSV results in the Results tab with parsed tables, remembered column
+  visibility, and an Add comparison control that dynamically adds a second CSV
+  side by side; comparison tables lock scrolling, require matching row counts,
   and support header-click numeric coloring for lower-is-better or
   higher-is-better columns
 - serve `plots.pdf`
@@ -306,7 +319,7 @@ The UI can:
   there
 - show compact Slurm node status in the sidebar, sorted by CPU count, from
   `sinfo -lN -p all` while the status API also attaches live job/user data from
-  `squeue`
+  `squeue`; displayed CPU counts are divided by two and labeled as cores
 
 The web backend uses Python's standard library only. It rejects experiment ids
 that would escape the configured repo root and invokes commands with argv arrays

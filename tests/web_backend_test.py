@@ -121,7 +121,27 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("editor.addEventListener('input'", mkexp2_web.HTML)
         self.assertNotIn("Manual override", mkexp2_web.HTML)
         self.assertNotIn('id="force"', mkexp2_web.HTML)
+        self.assertNotIn('id="save"', mkexp2_web.HTML)
         self.assertNotIn('id="probe"', mkexp2_web.HTML)
+        self.assertNotIn("async function saveExperiment", mkexp2_web.HTML)
+        self.assertIn("async function probeExperiment", mkexp2_web.HTML)
+        self.assertIn("function renderProbeResult", mkexp2_web.HTML)
+        self.assertNotIn('data-view="probe-view"', mkexp2_web.HTML)
+        self.assertIn('class="panel probe-panel"', mkexp2_web.HTML)
+        self.assertIn('id="probe-output"', mkexp2_web.HTML)
+        self.assertIn('id="probe-run"', mkexp2_web.HTML)
+        self.assertIn("Running mkexp2 probe...", mkexp2_web.HTML)
+        self.assertNotIn("Saving and probing", mkexp2_web.HTML)
+        self.assertNotIn("Saving the Experiment file and running mkexp2 probe", mkexp2_web.HTML)
+        self.assertIn("function probeChainText", mkexp2_web.HTML)
+        self.assertIn("probe-algorithm-row", mkexp2_web.HTML)
+        self.assertIn("probe-primary-field", mkexp2_web.HTML)
+        self.assertIn("probe-detail-row", mkexp2_web.HTML)
+        self.assertIn("function renderProbeRawJson", mkexp2_web.HTML)
+        self.assertIn("Resolved settings (", mkexp2_web.HTML)
+        self.assertIn("white-space: pre-wrap", mkexp2_web.HTML)
+        self.assertNotIn("probe-algorithm-grid", mkexp2_web.HTML)
+        self.assertIn("Probe JSON", mkexp2_web.HTML)
         self.assertIn("async function persistExperiment", mkexp2_web.HTML)
         self.assertIn("function renderCheckResult", mkexp2_web.HTML)
         self.assertIn("Saving and checking...", mkexp2_web.HTML)
@@ -138,10 +158,15 @@ class WebBackendTest(unittest.TestCase):
 
     def test_html_contains_csv_tabs_and_comparison_view(self):
         self.assertIn('data-view="results-view"', mkexp2_web.HTML)
-        self.assertIn('data-view="compare-view"', mkexp2_web.HTML)
+        self.assertNotIn('data-view="compare-view"', mkexp2_web.HTML)
         self.assertIn('id="result-file-tabs"', mkexp2_web.HTML)
-        self.assertIn('id="compare-left"', mkexp2_web.HTML)
+        self.assertIn('id="add-compare"', mkexp2_web.HTML)
+        self.assertIn('id="clear-compare"', mkexp2_web.HTML)
+        self.assertIn('id="compare-controls"', mkexp2_web.HTML)
+        self.assertNotIn('id="compare-left"', mkexp2_web.HTML)
         self.assertIn('id="compare-right"', mkexp2_web.HTML)
+        self.assertIn('aria-label="Reload CSVs"', mkexp2_web.HTML)
+        self.assertNotIn(">Load CSVs</button>", mkexp2_web.HTML)
         self.assertIn("function parseCsv", mkexp2_web.HTML)
         self.assertIn("function csvLabel", mkexp2_web.HTML)
         self.assertIn("function syncCompareScroll", mkexp2_web.HTML)
@@ -151,6 +176,39 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("Cannot compare: row counts differ", mkexp2_web.HTML)
         self.assertIn("mkexp2-columns:", mkexp2_web.HTML)
         self.assertIn("renderCsvTable", mkexp2_web.HTML)
+        self.assertIn("state.compareEnabled", mkexp2_web.HTML)
+
+    def test_html_contains_install_log_view(self):
+        self.assertIn('data-view="install-log-view"', mkexp2_web.HTML)
+        self.assertIn('id="load-install-log"', mkexp2_web.HTML)
+        self.assertIn('aria-label="Reload install log"', mkexp2_web.HTML)
+        self.assertIn("function renderMarkdown", mkexp2_web.HTML)
+        self.assertIn("async function loadInstallLog", mkexp2_web.HTML)
+        self.assertIn("ensureInstallLogLoaded", mkexp2_web.HTML)
+        self.assertIn("state.activeView === 'install-log-view'", mkexp2_web.HTML)
+        self.assertIn("/install-log", mkexp2_web.HTML)
+        self.assertIn("logs/install.md does not exist.", mkexp2_web.HTML)
+        self.assertIn("markdown-doc", mkexp2_web.HTML)
+        self.assertNotIn(".markdown-doc {\n      border:", mkexp2_web.HTML)
+        self.assertIn("cores", mkexp2_web.HTML)
+
+    def test_install_log_result_handles_missing_and_existing_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            (exp / "logs").mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            missing = app.install_log("exp")
+            self.assertFalse(missing["exists"])
+            self.assertTrue(missing["path"].endswith("logs/install.md"))
+
+            (exp / "logs" / "install.md").write_text("# mkexp2 install log\n\n```console\nok\n```\n")
+            existing = app.install_log("exp")
+            self.assertTrue(existing["exists"])
+            self.assertIn("# mkexp2 install log", existing["content"])
+            self.assertFalse(existing["truncated"])
 
     def test_submit_action_uses_argv_arrays(self):
         calls = []
@@ -183,7 +241,7 @@ class WebBackendTest(unittest.TestCase):
         exp_cwd = str((repo / "exp").resolve())
         self.assertIn((["/fake/mkexp2", "check"], exp_cwd), calls)
         self.assertIn((["/fake/mkexp2", "generate"], exp_cwd), calls)
-        self.assertIn((["zsh", "./submit.sh", "MockA"], exp_cwd), calls)
+        self.assertIn((["zsh", "./submit.sh", "--install", "MockA"], exp_cwd), calls)
         self.assertTrue(any(call[0][:3] == ["git", "commit", "-m"] for call in calls))
 
     def test_parse_action_uses_argv_array(self):
