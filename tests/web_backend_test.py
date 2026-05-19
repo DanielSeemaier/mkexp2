@@ -704,7 +704,13 @@ class WebBackendTest(unittest.TestCase):
         self.assertTrue(result["plotted"])
         self.assertEqual(
             calls,
-            [(["/fake/mkexp2", "plot", "--no-docker", "--running-time", "MockA"], str((repo / "exp").resolve()), 600)],
+            [
+                (
+                    ["/fake/mkexp2", "plot", "--no-docker", "--running-time", "MockA"],
+                    str((repo / "exp").resolve()),
+                    mkexp2_web.PLOT_ACTION_TIMEOUT_SECONDS,
+                )
+            ],
         )
 
     def test_slurm_parsers(self):

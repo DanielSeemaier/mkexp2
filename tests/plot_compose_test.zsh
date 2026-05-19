@@ -58,13 +58,16 @@ stopifnot(Sys.getenv("MKEXP2_PLOTS_DATA_DIR") == Sys.getenv("EXPECTED_RESULTS"))
 stopifnot(Sys.getenv("MKEXP2_PLOTS_DATA_OUTPUT_DIR") == Sys.getenv("EXPECTED_RESULTS"))
 stopifnot(nzchar(Sys.getenv("MKEXP2_PLOTS_CACHE_DIR")))
 stopifnot(grepl(".r-libs-native", Sys.getenv("R_LIBS_USER"), fixed = TRUE))
+stopifnot(grepl(Sys.getenv("EXISTING_R_LIB"), Sys.getenv("R_LIBS_USER"), fixed = TRUE))
 EOF
 
   export EXPECTED_RESULTS="$results_dir"
+  export EXISTING_R_LIB="$tmp/existing-r-lib"
+  export R_LIBS_USER="$EXISTING_R_LIB"
   _RunNativeRscript "$plots_dir" "$results_dir" "$script"
-  unset EXPECTED_RESULTS
+  unset EXPECTED_RESULTS EXISTING_R_LIB R_LIBS_USER
 
-  pass "native R receives mkexp2 plot paths"
+  pass "native R receives mkexp2 plot paths and preserves existing R library paths"
 }
 
 test_topology_validation_for_plot_threads() {

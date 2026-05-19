@@ -21,6 +21,7 @@ MAX_TEXT_RESPONSE = 1024 * 1024
 MAX_LOG_LIST_ENTRIES = 500
 SLURM_CACHE_SECONDS = 15
 EXPERIMENT_CACHE_SECONDS = 60
+PLOT_ACTION_TIMEOUT_SECONDS = 7200
 WEB_STATE_DIR = ".mkexp2"
 WEB_PINS_FILE = "web-pins.json"
 EXPERIMENT_SKIP_DIRS = {".git", ".mkexp2", "jobs", "logs", "results", "slurm"}
@@ -913,7 +914,7 @@ class Mkexp2WebApp:
         argv.extend(str(item) for item in algorithms)
 
         def action():
-            plot = self.command(experiment_id, argv, timeout=600)
+            plot = self.command(experiment_id, argv, timeout=PLOT_ACTION_TIMEOUT_SECONDS)
             return {"plotted": plot["returncode"] == 0, "plot": plot}
 
         return self.actions.start_unique(f"plot:{experiment_id}", f"plot {experiment_id}", action)

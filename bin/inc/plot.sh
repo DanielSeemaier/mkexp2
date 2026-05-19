@@ -169,6 +169,16 @@ _BuildPlotRArgs() {
   PLOT_R_ARGS+=("$@")
 }
 
+_MaybeLoadSpackRTidyverse() {
+  command -v spack >/dev/null 2>&1 || return 1
+
+  local spack_env=""
+  spack_env="$(spack load --sh r-tidyverse 2>/dev/null)" || return 1
+  [[ -n "$spack_env" ]] || return 1
+
+  eval "$spack_env"
+}
+
 _RunNativeRscript() {
   local plots_dir="$1"
   local results_dir="$2"
@@ -177,12 +187,18 @@ _RunNativeRscript() {
 
   local native_lib="$plots_dir/.r-libs-native"
   local native_cache="$plots_dir/.cache-native"
+  local native_user_libs=""
   mkdir -p "$native_lib" "$native_cache"
 
   (
     cd "$plots_dir" || exit 1
+    _MaybeLoadSpackRTidyverse >/dev/null 2>&1 || true
+    native_user_libs="$native_lib"
+    if [[ -n "$R_LIBS_USER" ]]; then
+      native_user_libs="$native_user_libs:$R_LIBS_USER"
+    fi
     env \
-      R_LIBS_USER="$native_lib" \
+      R_LIBS_USER="$native_user_libs" \
       MKEXP2_PLOTS_NATIVE=1 \
       MKEXP2_PLOTS_DATA_DIR="$results_dir" \
       MKEXP2_PLOTS_CACHE_DIR="$native_cache" \
