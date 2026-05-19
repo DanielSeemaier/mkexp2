@@ -169,14 +169,24 @@ _BuildPlotRArgs() {
   PLOT_R_ARGS+=("$@")
 }
 
-_MaybeLoadSpackRTidyverse() {
+_MaybeLoadSpackRPackage() {
+  local package="$1"
+
   command -v spack >/dev/null 2>&1 || return 1
 
   local spack_env=""
-  spack_env="$(spack load --sh r-tidyverse 2>/dev/null)" || return 1
+  spack_env="$(spack load --sh "$package" 2>/dev/null)" || return 1
   [[ -n "$spack_env" ]] || return 1
 
   eval "$spack_env"
+}
+
+_MaybeLoadSpackPlotPackages() {
+  local package=""
+
+  for package in r-tidyverse r-plyr r-cli r-rcolorbrewer; do
+    _MaybeLoadSpackRPackage "$package" >/dev/null 2>&1 || true
+  done
 }
 
 _RunNativeRscript() {
@@ -192,7 +202,7 @@ _RunNativeRscript() {
 
   (
     cd "$plots_dir" || exit 1
-    _MaybeLoadSpackRTidyverse >/dev/null 2>&1 || true
+    _MaybeLoadSpackPlotPackages
     native_user_libs="$native_lib"
     if [[ -n "$R_LIBS_USER" ]]; then
       native_user_libs="$native_user_libs:$R_LIBS_USER"

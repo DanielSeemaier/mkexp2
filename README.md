@@ -323,11 +323,11 @@ Native R fallback requires `Rscript` on `PATH`. Missing R packages are installed
 into `plots/.r-libs-native`, and native plot cache files go to
 `plots/.cache-native`. The native runner prepends this cache to
 `R_LIBS_USER`, preserves existing R library paths, and tries
-`spack load --sh r-tidyverse` when Spack is available so Spack-installed R
-packages can satisfy plotting dependencies. Native package installation is
-guarded by a filesystem lock so overlapping plot runs wait instead of racing on
-R's `00LOCK-*` directories. To force the native backend even when Docker works,
-run:
+`spack load --sh` for known plotting packages when Spack is available so
+Spack-installed R packages can satisfy plotting dependencies. Native package
+installation is guarded by a filesystem lock so overlapping plot runs wait
+instead of racing on R's `00LOCK-*` directories. To force the native backend
+even when Docker works, run:
 
 ```bash
 mkexp2 plot --no-docker
