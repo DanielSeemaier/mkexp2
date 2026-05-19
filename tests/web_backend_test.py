@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import importlib.util
+import subprocess
 import tempfile
 import time
 import unittest
@@ -54,6 +55,27 @@ class WebBackendTest(unittest.TestCase):
             self.assertEqual(nested["name"], "run-a")
             self.assertEqual(nested["parent"], "2026")
             self.assertEqual(nested["depth"], 2)
+
+    def test_list_experiments_prefers_git_index_and_caches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
+            (repo / "tracked").mkdir()
+            (repo / "tracked" / "Experiment").write_text("ExperimentTracked() { :; }\n")
+            subprocess.run(["git", "add", "tracked/Experiment"], cwd=repo, check=True)
+            (repo / "untracked").mkdir()
+            (repo / "untracked" / "Experiment").write_text("ExperimentUntracked() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "%Y.%m.%d-<name>", "token")
+
+            first = app.list_experiments()
+            self.assertEqual([item["id"] for item in first], ["tracked", "untracked"])
+
+            (repo / "later").mkdir()
+            (repo / "later" / "Experiment").write_text("ExperimentLater() { :; }\n")
+            cached = app.list_experiments()
+            self.assertEqual([item["id"] for item in cached], ["tracked", "untracked"])
+            refreshed = app.list_experiments(force=True)
+            self.assertEqual([item["id"] for item in refreshed], ["later", "tracked", "untracked"])
 
     def test_create_experiment_uses_template(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -19,6 +19,7 @@ from pathlib import Path
 MAX_TEXT_RESPONSE = 1024 * 1024
 MAX_LOG_LIST_ENTRIES = 500
 SLURM_CACHE_SECONDS = 15
+EXPERIMENT_CACHE_SECONDS = 60
 WEB_STATE_DIR = ".mkexp2"
 WEB_PINS_FILE = "web-pins.json"
 EXPERIMENT_SKIP_DIRS = {".git", ".mkexp2", "jobs", "logs", "results", "slurm"}
@@ -448,6 +449,8 @@ class Mkexp2WebApp:
         self.slurm = SlurmStatus()
         self._plot_backend_cache = None
         self._plot_backend_cache_at = 0.0
+        self._experiments_cache = None
+        self._experiments_cache_at = 0.0
 
     def experiment_path(self, experiment_id):
         parts = str(experiment_id or "").split("/")
@@ -462,7 +465,31 @@ class Mkexp2WebApp:
             raise ValueError("experiment path escapes repo")
         return path
 
-    def list_experiments(self):
+    def _git_experiment_files(self):
+        tracked = run_command(
+            ["git", "ls-files", "-z", "--", "Experiment", "*/Experiment"],
+            cwd=self.repo,
+            timeout=30,
+        )
+        if tracked["returncode"] != 0:
+            return None
+        untracked = run_command(
+            ["git", "ls-files", "-z", "--others", "--exclude-standard", "--", "Experiment", "*/Experiment"],
+            cwd=self.repo,
+            timeout=30,
+        )
+        if untracked["returncode"] != 0:
+            return None
+        files = set()
+        for output in (tracked["stdout"], untracked["stdout"]):
+            for item in output.split("\0"):
+                item = item.strip("/")
+                if item == "Experiment" or item.endswith("/Experiment"):
+                    files.add(item)
+        return sorted(files)
+
+    def _walk_experiment_files(self):
+        files = []
         experiments = []
         for root, dirnames, filenames in os.walk(self.repo):
             dirnames[:] = sorted(
@@ -472,17 +499,28 @@ class Mkexp2WebApp:
             )
             if "Experiment" not in filenames:
                 continue
-            exp_file = Path(root) / "Experiment"
-            path = exp_file.parent.resolve()
-            rel = path.relative_to(self.repo).as_posix()
-            parts = rel.split("/")
+            files.append((Path(root) / "Experiment").resolve().relative_to(self.repo).as_posix())
+        return files
+
+    def _discover_experiments(self):
+        experiments = []
+        experiment_files = self._git_experiment_files()
+        if experiment_files is None:
+            experiment_files = self._walk_experiment_files()
+        for rel_file in experiment_files:
+            rel_dir = str(Path(rel_file).parent)
+            if rel_dir in ("", "."):
+                continue
+            parts = rel_dir.split("/")
             if any(part in EXPERIMENT_SKIP_DIRS or part.startswith(".") for part in parts):
                 continue
-            self.experiment_path(rel)
+            self.experiment_path(rel_dir)
+            exp_file = self.repo / rel_file
+            path = exp_file.parent.resolve()
             stat = exp_file.stat()
             experiments.append(
                 {
-                    "id": rel,
+                    "id": rel_dir,
                     "name": parts[-1],
                     "parent": "/".join(parts[:-1]),
                     "depth": len(parts),
@@ -494,6 +532,23 @@ class Mkexp2WebApp:
             )
         experiments.sort(key=lambda item: item["id"])
         return experiments
+
+    def list_experiments(self, force=False):
+        now = time.time()
+        if (
+            not force
+            and self._experiments_cache is not None
+            and now - self._experiments_cache_at < EXPERIMENT_CACHE_SECONDS
+        ):
+            return self._experiments_cache
+        experiments = self._discover_experiments()
+        self._experiments_cache = experiments
+        self._experiments_cache_at = now
+        return experiments
+
+    def invalidate_experiments_cache(self):
+        self._experiments_cache = None
+        self._experiments_cache_at = 0.0
 
     def pins_path(self):
         return self.repo / WEB_STATE_DIR / WEB_PINS_FILE
@@ -509,12 +564,11 @@ class Mkexp2WebApp:
         pinned = payload.get("pinned") or []
         if not isinstance(pinned, list):
             raise ValueError("invalid pins JSON: pinned is not an array")
-        valid = {experiment["id"] for experiment in self.list_experiments()}
         filtered = []
         seen = set()
         for experiment_id in pinned:
             experiment_id = str(experiment_id)
-            if experiment_id in valid and experiment_id not in seen:
+            if experiment_id not in seen:
                 filtered.append(experiment_id)
                 seen.add(experiment_id)
         return {"pinned": filtered, "path": str(path)}
@@ -566,12 +620,14 @@ class Mkexp2WebApp:
                 if init["returncode"] != 0:
                     message = init["stderr"].strip() or init["stdout"].strip() or f"failed to initialize preset {preset}"
                     raise ValueError(message)
+                self.invalidate_experiments_cache()
                 return {"id": experiment_id, "path": str(path), "preset": preset, "init": init}
 
             raw = payload.get("experiment")
             if not raw:
                 raw = experiment_from_form(name, payload.get("form") or {})
             (path / "Experiment").write_text(raw, encoding="utf-8")
+            self.invalidate_experiments_cache()
             return {"id": experiment_id, "path": str(path)}
         except Exception:
             shutil.rmtree(path, ignore_errors=True)
@@ -4111,9 +4167,10 @@ HTML = r"""<!doctype html>
         renderExperimentsList();
       }
     }
-    async function refreshExperiments() {
+    async function refreshExperiments(options = {}) {
+      const query = options.force ? '?refresh=1' : '';
       const [data, pins] = await Promise.all([
-        api('/api/experiments'),
+        api(`/api/experiments${query}`),
         api('/api/pins')
       ]);
       clearTransientOutput();
@@ -4306,7 +4363,7 @@ HTML = r"""<!doctype html>
       document.getElementById('probe-summary').textContent = 'No probe loaded.';
       document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
       openExperimentAncestors(id);
-      await refreshExperiments();
+      renderExperimentsList();
       const data = await api(`/api/experiments/${encodeURIComponent(id)}/experiment`);
       clearTransientOutput();
       document.getElementById('selected-title').textContent = id;
@@ -4633,7 +4690,7 @@ HTML = r"""<!doctype html>
     }
     document.getElementById('refresh').onclick = () => {
       refreshPresets().catch(err => out(String(err)));
-      refreshExperiments().catch(err => out(String(err)));
+      refreshExperiments({ force: true }).catch(err => out(String(err)));
     };
     document.getElementById('refresh-status').onclick = refreshStatus;
     document.getElementById('git-open').onclick = openGitDialog;
@@ -4714,7 +4771,9 @@ def make_handler(app):
                     json_response(self, 200, app.plot_backend_status())
                     return
                 if path == "/api/experiments":
-                    json_response(self, 200, {"experiments": app.list_experiments()})
+                    query = urllib.parse.parse_qs(parsed.query)
+                    force = (query.get("refresh") or ["0"])[0] in ("1", "true", "yes")
+                    json_response(self, 200, {"experiments": app.list_experiments(force=force)})
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/experiment$", path)
                 if match:
