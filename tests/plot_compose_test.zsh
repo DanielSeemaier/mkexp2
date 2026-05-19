@@ -70,6 +70,24 @@ EOF
   pass "native R receives mkexp2 plot paths and preserves existing R library paths"
 }
 
+test_native_r_env_paths_allow_unset_user_lib() {
+  local tmp=""
+  tmp=$(mktemp -d)
+  local plots_dir="$tmp/plots"
+  local results_dir="$tmp/results"
+  local script="$tmp/check-env.R"
+
+  mkdir -p "$plots_dir" "$results_dir"
+  cat > "$script" <<'EOF'
+stopifnot(grepl(".r-libs-native", Sys.getenv("R_LIBS_USER"), fixed = TRUE))
+EOF
+
+  unset R_LIBS_USER
+  _RunNativeRscript "$plots_dir" "$results_dir" "$script"
+
+  pass "native R accepts an unset R_LIBS_USER"
+}
+
 test_topology_validation_for_plot_threads() {
   assert_eq "$(NormalizeTopology 4)" "1x1x4" "bare thread count normalizes to local topology"
   assert_eq "$(NormalizeTopology 2x3x4)" "2x3x4" "full topology is preserved"

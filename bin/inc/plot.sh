@@ -204,7 +204,7 @@ _RunNativeRscript() {
     cd "$plots_dir" || exit 1
     _MaybeLoadSpackPlotPackages
     native_user_libs="$native_lib"
-    if [[ -n "$R_LIBS_USER" ]]; then
+    if [[ -n "${R_LIBS_USER:-}" ]]; then
       native_user_libs="$native_user_libs:$R_LIBS_USER"
     fi
     env \
@@ -387,6 +387,11 @@ GeneratePlots() {
     EchoWarn "Docker is not available; falling back to native R"
     _GeneratePlotsWithNativeR "$plots_dir" "$results_dir" "$experiment_dir" \
       "$do_pp" "$do_speedup" "$do_rt" "${active_algos[@]}" || return 1
+  fi
+
+  if [[ ! -s "$experiment_dir/plots.pdf" ]]; then
+    EchoFatal "plot generation finished without creating $experiment_dir/plots.pdf"
+    return 1
   fi
 
   # ── Ensure plots.pdf is ignored by git ─────────────────────────────────────
