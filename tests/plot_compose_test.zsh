@@ -59,13 +59,17 @@ stopifnot(Sys.getenv("MKEXP2_PLOTS_DATA_OUTPUT_DIR") == Sys.getenv("EXPECTED_RES
 stopifnot(nzchar(Sys.getenv("MKEXP2_PLOTS_CACHE_DIR")))
 stopifnot(grepl(".r-libs-native", Sys.getenv("R_LIBS_USER"), fixed = TRUE))
 stopifnot(grepl(Sys.getenv("EXISTING_R_LIB"), Sys.getenv("R_LIBS_USER"), fixed = TRUE))
+stopifnot(grepl(".r-libs-native", Sys.getenv("R_LIBS"), fixed = TRUE))
+stopifnot(grepl(Sys.getenv("EXISTING_R_LIBS"), Sys.getenv("R_LIBS"), fixed = TRUE))
 EOF
 
   export EXPECTED_RESULTS="$results_dir"
   export EXISTING_R_LIB="$tmp/existing-r-lib"
+  export EXISTING_R_LIBS="$tmp/existing-r-libs"
   export R_LIBS_USER="$EXISTING_R_LIB"
+  export R_LIBS="$EXISTING_R_LIBS"
   _RunNativeRscript "$plots_dir" "$results_dir" "$script"
-  unset EXPECTED_RESULTS EXISTING_R_LIB R_LIBS_USER
+  unset EXPECTED_RESULTS EXISTING_R_LIB EXISTING_R_LIBS R_LIBS_USER R_LIBS
 
   pass "native R receives mkexp2 plot paths and preserves existing R library paths"
 }
@@ -80,9 +84,10 @@ test_native_r_env_paths_allow_unset_user_lib() {
   mkdir -p "$plots_dir" "$results_dir"
   cat > "$script" <<'EOF'
 stopifnot(grepl(".r-libs-native", Sys.getenv("R_LIBS_USER"), fixed = TRUE))
+stopifnot(grepl(".r-libs-native", Sys.getenv("R_LIBS"), fixed = TRUE))
 EOF
 
-  unset R_LIBS_USER
+  unset R_LIBS_USER R_LIBS
   _RunNativeRscript "$plots_dir" "$results_dir" "$script"
 
   pass "native R accepts an unset R_LIBS_USER"

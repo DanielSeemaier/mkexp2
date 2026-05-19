@@ -198,6 +198,7 @@ _RunNativeRscript() {
   local native_lib="$plots_dir/.r-libs-native"
   local native_cache="$plots_dir/.cache-native"
   local native_user_libs=""
+  local native_libs=""
   mkdir -p "$native_lib" "$native_cache"
 
   (
@@ -207,7 +208,12 @@ _RunNativeRscript() {
     if [[ -n "${R_LIBS_USER:-}" ]]; then
       native_user_libs="$native_user_libs:$R_LIBS_USER"
     fi
+    native_libs="$native_lib"
+    if [[ -n "${R_LIBS:-}" ]]; then
+      native_libs="$native_libs:$R_LIBS"
+    fi
     env \
+      R_LIBS="$native_libs" \
       R_LIBS_USER="$native_user_libs" \
       MKEXP2_PLOTS_NATIVE=1 \
       MKEXP2_PLOTS_DATA_DIR="$results_dir" \
