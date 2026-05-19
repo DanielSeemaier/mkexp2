@@ -214,7 +214,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("async function loadProgress", mkexp2_web.HTML)
         self.assertIn("progress_json", mkexp2_web.HTML)
         self.assertIn("progress-experiment", mkexp2_web.HTML)
-        self.assertIn("}, 2000)", mkexp2_web.HTML)
+        self.assertIn("}, 15000)", mkexp2_web.HTML)
         self.assertIn("async function clearSubmitLock", mkexp2_web.HTML)
         self.assertIn("function renderPlotPanel", mkexp2_web.HTML)
         self.assertIn("async function loadPlotInfo", mkexp2_web.HTML)

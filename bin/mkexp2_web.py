@@ -4529,7 +4529,7 @@ HTML = r"""<!doctype html>
       if (state.progressTimer) return;
       state.progressTimer = setInterval(() => {
         if (state.selected) loadProgress({ quiet: true }).catch(err => out(String(err)));
-      }, 2000);
+      }, 15000);
     }
     function stopProgressPolling() {
       if (!state.progressTimer) return;

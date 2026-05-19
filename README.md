@@ -375,8 +375,8 @@ The UI can:
 - view stats below Results, backed by `mkexp2 stats --json`, currently showing
   geometric-mean cut and geometric-mean time per algorithm from parsed CSV files
 - refresh run progress from the Experiment page by running `mkexp2 progress
-  --json`; after progress has been loaded, incomplete runs auto-refresh every 2
-  seconds, while `.mkexp2/submit.lock` keeps the Submit button disabled
+  --json`; after progress has been loaded, incomplete runs auto-refresh every
+  15 seconds, while `.mkexp2/submit.lock` keeps the Submit button disabled
 - clear `.mkexp2/submit.lock` from the Submit panel to recover from crashed or
   abandoned submissions
 - auto-load and render `logs/install.md` from the Install Log tab, with a
