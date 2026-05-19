@@ -2462,7 +2462,9 @@ HTML = r"""<!doctype html>
       <section class="sidebar-nodes">
         <div class="sidebar-section-header">
           <div class="sidebar-section-title">Nodes</div>
-          <button id="refresh-status" class="small-button">Update</button>
+          <button id="refresh-status" class="icon-button" aria-label="Reload node status" title="Reload node status">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+          </button>
         </div>
         <div id="slurm-status" class="node-list muted">No status loaded.</div>
       </section>
@@ -2485,7 +2487,9 @@ HTML = r"""<!doctype html>
           <div id="git-output" class="csv-empty">Open the dialog to load repository status.</div>
         </div>
         <div class="modal-footer">
-          <button id="git-refresh">Refresh</button>
+          <button id="git-refresh" class="icon-button" aria-label="Reload Git status" title="Reload Git status">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+          </button>
           <button id="git-push" class="primary">Push</button>
         </div>
       </div>
@@ -2550,7 +2554,9 @@ HTML = r"""<!doctype html>
                   <div class="panel-title">Progress</div>
                   <div id="progress-summary" class="csv-summary">No progress loaded.</div>
                 </div>
-                <button id="refresh-progress">Refresh</button>
+                <button id="refresh-progress" class="icon-button" aria-label="Reload progress" title="Reload progress">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+                </button>
               </div>
               <div class="panel-body">
                 <div id="progress-output" class="csv-empty">Run progress to count finished log files against expected runs.</div>
