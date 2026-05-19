@@ -337,10 +337,37 @@ directories. To force the native backend even when Docker works, run:
 mkexp2 plot --no-docker
 ```
 
-The web UI exposes the same choice with the Plots tab's "No docker" checkbox. If
-the backend cannot use Docker, the checkbox is checked and disabled automatically.
-Web-triggered plot actions have a two-hour timeout to allow first-run native R
-dependency setup on shared filesystems.
+The supported managed plot types are discoverable:
+
+```bash
+mkexp2 plot --list --json
+```
+
+Legacy `mkexp2 plot` without managed options still writes `plots.pdf` in the
+experiment directory. Managed plot generation writes to an explicit output path
+and accepts one or more data sources:
+
+```bash
+mkexp2 plot --plot running-time-box --output plots/box.pdf KaMinPar-FM KaMinPar-LP
+mkexp2 plot --plot speedup --output plots/speedup.pdf KaMinPar-FM
+mkexp2 plot --plot performance-profile --output plots/profile.pdf \
+  Current=results/KaMinPar-FM.csv Other=/path/to/other/results/KaMinPar-FM.csv
+```
+
+Source tokens can be an algorithm name, an absolute or experiment-relative CSV
+path, or `Alias=/path/to/file.csv`. External CSVs are staged into
+`.mkexp2/plot-inputs/<run-id>/` before plotting so Docker and native R consume
+the same resolved inputs. The managed speedup plot takes exactly one source, uses
+the smallest available `Cores` value as the baseline, and plots geometric mean
+speedup curves for larger core counts over baseline running-time thresholds.
+
+The web UI exposes the same backend choice with the Plots tab's "No docker"
+checkbox. If the backend cannot use Docker, the checkbox is checked and disabled
+automatically. Web-triggered plot actions have a two-hour timeout to allow
+first-run native R dependency setup on shared filesystems. Web-generated plot
+artifacts are immutable timestamped PDFs under each experiment's `plots/`
+directory, with metadata in `plots/index.json`; the legacy `plots.pdf` remains
+readable for older experiments.
 
 ## Web UI
 
@@ -407,9 +434,11 @@ The UI can:
   table, requires matching row counts, and supports header-click numeric
   coloring for lower-is-better or higher-is-better columns, including orange
   middle values in three-way-or-larger comparisons
-- serve `plots.pdf`
-- run `mkexp2 plot` on demand from the Plots tab and show plot action status
-  there
+- manage plots from the Plots tab: discover supported plot types from
+  `mkexp2 plot --list --json`, select current-experiment CSV sources or CSVs
+  from other experiments, validate source-count restrictions, generate one
+  immutable PDF artifact per selected plot type, and preview/list generated
+  artifacts while retaining legacy `plots.pdf` support
 - show compact Slurm node status in the sidebar, sorted by CPU count, from
   `sinfo -lN -p all` while the status API also attaches live job/user data from
   `squeue`; displayed CPU counts are divided by two and labeled as cores

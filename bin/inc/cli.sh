@@ -37,8 +37,11 @@ Options:
   --jobs                     With `probe`, return detailed job metadata
   --calls                    With `probe`, return expanded call details
   --presets                  With `probe`, return init presets as JSON
-  --json                     With `check`, `progress`, or `stats`, return structured JSON
+  --json                     With `check`, `progress`, `stats`, or `plot --list`, return structured JSON
   --property A[.B]           With `probe`, print algorithm properties or one resolved property
+  --list                     With `plot`, list supported plot types
+  --plot ID                  With `plot`, include one supported plot type
+  --output FILE              With `plot`, write the PDF to FILE
   --performance-profile      With `plot`, include performance profile plot
   --speedup                  With `plot`, include speedup plot (first algorithm is baseline)
   --running-time             With `plot`, include running time and graph-grid plots
@@ -449,9 +452,13 @@ ParseCli() {
         shift
         ;;
       --json)
-        MKEXP2_CHECK_JSON=1
-        MKEXP2_PROGRESS_JSON=1
-        MKEXP2_STATS_JSON=1
+        if [[ "$MKEXP2_MODE" == "plot" ]]; then
+          MKEXP2_PLOT_JSON=1
+        else
+          MKEXP2_CHECK_JSON=1
+          MKEXP2_PROGRESS_JSON=1
+          MKEXP2_STATS_JSON=1
+        fi
         shift
         ;;
       --property)
@@ -493,6 +500,43 @@ ParseCli() {
         MKEXP2_LIST_PRESETS=1
         MKEXP2_LIST_PARSERS=1
         list_flag_set=1
+        shift
+        ;;
+      --list)
+        if [[ "$MKEXP2_MODE" == "plot" ]]; then
+          MKEXP2_PLOT_LIST=1
+        else
+          EchoFatal "--list is currently only supported with plot"
+          exit 1
+        fi
+        shift
+        ;;
+      --plot)
+        shift
+        if [[ $# -eq 0 ]]; then
+          EchoFatal "missing value for --plot"
+          exit 1
+        fi
+        MKEXP2_PLOT_TYPES+=("$1")
+        MKEXP2_PLOT_EXPLICIT_SELECTION=1
+        shift
+        ;;
+      --plot=*)
+        MKEXP2_PLOT_TYPES+=("${1#*=}")
+        MKEXP2_PLOT_EXPLICIT_SELECTION=1
+        shift
+        ;;
+      --output)
+        shift
+        if [[ $# -eq 0 ]]; then
+          EchoFatal "missing value for --output"
+          exit 1
+        fi
+        MKEXP2_PLOT_OUTPUT="$1"
+        shift
+        ;;
+      --output=*)
+        MKEXP2_PLOT_OUTPUT="${1#*=}"
         shift
         ;;
       --performance-profile)
@@ -731,13 +775,25 @@ ParseCli() {
     EchoFatal "--property can only be used with probe"
     exit 1
   fi
-  if (( MKEXP2_CHECK_JSON || MKEXP2_PROGRESS_JSON || MKEXP2_STATS_JSON )) && [[ "$MKEXP2_MODE" != "check" && "$MKEXP2_MODE" != "progress" && "$MKEXP2_MODE" != "stats" ]]; then
-    EchoFatal "--json can only be used with check, progress, or stats"
+  if (( MKEXP2_CHECK_JSON || MKEXP2_PROGRESS_JSON || MKEXP2_STATS_JSON || MKEXP2_PLOT_JSON )) && [[ "$MKEXP2_MODE" != "check" && "$MKEXP2_MODE" != "progress" && "$MKEXP2_MODE" != "stats" && "$MKEXP2_MODE" != "plot" ]]; then
+    EchoFatal "--json can only be used with check, progress, stats, or plot --list"
     exit 1
   fi
 
   if (( MKEXP2_PLOT_EXPLICIT_SELECTION )) && [[ "$MKEXP2_MODE" != "plot" ]]; then
-    EchoFatal "--performance-profile/--speedup/--running-time can only be used with plot"
+    EchoFatal "--plot/--performance-profile/--speedup/--running-time can only be used with plot"
+    exit 1
+  fi
+  if (( MKEXP2_PLOT_LIST )) && [[ "$MKEXP2_MODE" != "plot" ]]; then
+    EchoFatal "--list can only be used with plot"
+    exit 1
+  fi
+  if (( MKEXP2_PLOT_JSON )) && ! (( MKEXP2_PLOT_LIST )); then
+    EchoFatal "plot --json is only supported with --list"
+    exit 1
+  fi
+  if [[ -n "$MKEXP2_PLOT_OUTPUT" && "$MKEXP2_MODE" != "plot" ]]; then
+    EchoFatal "--output can only be used with plot"
     exit 1
   fi
   if (( MKEXP2_PLOT_NO_DOCKER )) && [[ "$MKEXP2_MODE" != "plot" ]]; then

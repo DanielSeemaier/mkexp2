@@ -76,6 +76,11 @@ if [[ "$MKEXP2_MODE" == "plot" && "$MKEXP2_PLOT_RESOLVE_SPACK_R_LIBS" -eq 1 ]]; 
   exit $?
 fi
 
+if [[ "$MKEXP2_MODE" == "plot" && "$MKEXP2_PLOT_LIST" -eq 1 ]]; then
+  PrintPlotCatalog "$MKEXP2_PLOT_JSON"
+  exit $?
+fi
+
 if [[ ! -f "$PWD/Experiment" ]]; then
   EchoFatal "no Experiment file in current directory"
   exit 1

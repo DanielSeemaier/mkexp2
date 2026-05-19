@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import importlib.util
+import json
 import subprocess
 import tempfile
 import threading
@@ -231,7 +232,15 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("async function loadPlotBackendStatus", mkexp2_web.HTML)
         self.assertIn("function applyPlotBackendStatus", mkexp2_web.HTML)
         self.assertIn("/api/plot/backend", mkexp2_web.HTML)
-        self.assertIn("body: JSON.stringify({ no_docker: noDocker })", mkexp2_web.HTML)
+        self.assertIn("/api/plots/catalog", mkexp2_web.HTML)
+        self.assertIn("/plot-sources", mkexp2_web.HTML)
+        self.assertIn("/plot-artifacts", mkexp2_web.HTML)
+        self.assertIn('id="plot-catalog"', mkexp2_web.HTML)
+        self.assertIn('id="plot-sources"', mkexp2_web.HTML)
+        self.assertIn('id="plot-artifacts"', mkexp2_web.HTML)
+        self.assertIn('id="plot-source-modal"', mkexp2_web.HTML)
+        self.assertIn("selectedPlotSourceObjects", mkexp2_web.HTML)
+        self.assertIn("plots: Array.from(state.selectedPlotTypes)", mkexp2_web.HTML)
         self.assertIn("const PLOT_RELOAD_DELAY_MS = 5000", mkexp2_web.HTML)
         self.assertIn("if (action?.status === 'running')", mkexp2_web.HTML)
         self.assertIn('id="clear-submit-lock"', mkexp2_web.HTML)
@@ -259,7 +268,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("URL.revokeObjectURL", mkexp2_web.HTML)
         self.assertIn("/plots", mkexp2_web.HTML)
         self.assertIn('class="plot-pdf"', mkexp2_web.HTML)
-        self.assertIn("plots.pdf does not exist yet.", mkexp2_web.HTML)
+        self.assertIn("Generate a plot artifact to preview it here.", mkexp2_web.HTML)
         self.assertIn('id="git-open"', mkexp2_web.HTML)
         self.assertIn('aria-label="Git status"', mkexp2_web.HTML)
         self.assertIn('id="settings-open"', mkexp2_web.HTML)
@@ -718,6 +727,96 @@ class WebBackendTest(unittest.TestCase):
                 )
             ],
         )
+
+    def test_plot_sources_and_external_csv_validation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            (exp / "results").mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            (exp / "results" / "MockA.csv").write_text("Algorithm,Graph,K,Time,Cut\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+
+            sources = app.plot_sources("exp")
+            self.assertEqual(sources["current"][0]["kind"], "algorithm")
+            self.assertEqual(sources["current"][0]["name"], "MockA")
+
+            resolved = app.resolve_plot_source(
+                "exp",
+                {"kind": "csv", "experiment_id": "exp", "file": "MockA.csv", "alias": "Other"},
+            )
+            self.assertTrue(resolved["token"].startswith("Other="))
+            self.assertIn("/results/MockA.csv", resolved["token"])
+
+            with self.assertRaises(ValueError):
+                app.resolve_plot_source("exp", {"kind": "csv", "experiment_id": "exp", "file": "../MockA.csv"})
+
+    def test_create_plot_artifacts_uses_catalog_and_argv_array(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+
+        catalog = {
+            "plots": [
+                {
+                    "id": "running-time-box",
+                    "name": "Running Time Box Plot",
+                    "description": "desc",
+                    "min_sources": 1,
+                    "max_sources": None,
+                    "default_selected": True,
+                    "expensive": False,
+                    "legacy_flags": ["--running-time"],
+                }
+            ]
+        }
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            self.assertIsInstance(argv, list)
+            calls.append((list(argv), str(cwd) if cwd else None, timeout))
+            if argv[1:4] == ["plot", "--list", "--json"]:
+                return {"returncode": 0, "stdout": json.dumps(catalog), "stderr": ""}
+            if "plot" in argv:
+                output = argv[argv.index("--output") + 1]
+                (Path(cwd) / output).parent.mkdir(parents=True, exist_ok=True)
+                (Path(cwd) / output).write_bytes(b"%PDF-1.4\n")
+            return {"returncode": 0, "stdout": "", "stderr": ""}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            (exp / "results").mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            (exp / "results" / "MockA.csv").write_text("Algorithm,Graph,K,Time,Cut\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+            mkexp2_web.run_command = fake_run_command
+            try:
+                action = app.create_plot_artifacts_action(
+                    "exp",
+                    {
+                        "plots": ["running-time-box"],
+                        "sources": [{"kind": "algorithm", "name": "MockA"}],
+                        "label": "Test Plot",
+                        "no_docker": True,
+                    },
+                )
+                for _ in range(100):
+                    current = app.actions.get(action["id"])
+                    if current["status"] != "running":
+                        break
+                    time.sleep(0.02)
+                result = app.actions.get(action["id"])["result"]
+                index_exists = (repo / "exp" / "plots" / "index.json").is_file()
+            finally:
+                mkexp2_web.run_command = original_run_command
+
+        self.assertTrue(result["plotted"])
+        self.assertEqual(len(result["created"]), 1)
+        self.assertTrue(index_exists)
+        plot_calls = [call for call in calls if call[0][1:2] == ["plot"] and "--output" in call[0]]
+        self.assertEqual(len(plot_calls), 1)
+        self.assertEqual(plot_calls[0][0][0:4], ["/fake/mkexp2", "plot", "--no-docker", "--plot"])
+        self.assertIn("running-time-box", plot_calls[0][0])
+        self.assertIn("MockA", plot_calls[0][0])
 
     def test_slurm_parsers(self):
         scontrol = """NodeName=node01 Arch=x86_64 CPUTot=64 RealMemory=257000 State=ALLOCATED

@@ -145,7 +145,96 @@ _WritePlotsComposeFile() {
 }
 
 typeset -a PLOT_R_ARGS=()
+typeset -a PLOT_SOURCE_ARGS_NATIVE=()
+typeset -a PLOT_SOURCE_ARGS_DOCKER=()
 typeset -gi _PLOT_SPACK_PACKAGES_LOADED=0
+
+_PrintPlotCatalogJsonEntry() {
+  local id="$1"
+  local name="$2"
+  local description="$3"
+  local min_sources="$4"
+  local max_sources="$5"
+  local default_selected="$6"
+  local expensive="$7"
+  shift 7
+  local -a legacy_flags=("$@")
+  local sep=""
+  local flag=""
+
+  printf '{'
+  printf '"id":%s,' "$(JsonString "$id")"
+  printf '"name":%s,' "$(JsonString "$name")"
+  printf '"description":%s,' "$(JsonString "$description")"
+  printf '"min_sources":%s,' "$min_sources"
+  if [[ "$max_sources" == "null" ]]; then
+    printf '"max_sources":null,'
+  else
+    printf '"max_sources":%s,' "$max_sources"
+  fi
+  printf '"default_selected":%s,' "$default_selected"
+  printf '"expensive":%s,' "$expensive"
+  printf '"legacy_flags":['
+  for flag in "${legacy_flags[@]}"; do
+    printf '%s%s' "$sep" "$(JsonString "$flag")"
+    sep=","
+  done
+  printf ']}'
+}
+
+PrintPlotCatalog() {
+  local json="${1:-0}"
+  if (( json )); then
+    printf '{"plots":['
+    _PrintPlotCatalogJsonEntry \
+      "performance-profile" \
+      "Performance Profile" \
+      "Compares algorithms by the fraction of instances solved within a cut or running-time ratio." \
+      2 null true false "--performance-profile"
+    printf ','
+    _PrintPlotCatalogJsonEntry \
+      "running-time-box" \
+      "Running Time Box Plot" \
+      "Shows running-time distributions for the selected algorithms." \
+      1 null true false "--running-time"
+    printf ','
+    _PrintPlotCatalogJsonEntry \
+      "running-time-by-core" \
+      "Running Time by Core" \
+      "Shows running-time distributions grouped by available core counts." \
+      1 null true false "--running-time"
+    printf ','
+    _PrintPlotCatalogJsonEntry \
+      "relative-cut-graph-grid" \
+      "Relative Cut Graph Grid" \
+      "Shows relative cut per graph and core count against the first selected source." \
+      2 null false true "--running-time"
+    printf ','
+    _PrintPlotCatalogJsonEntry \
+      "relative-time-graph-grid" \
+      "Relative Running Time Graph Grid" \
+      "Shows relative running time per graph and core count against the first selected source." \
+      2 null false true "--running-time"
+    printf ','
+    _PrintPlotCatalogJsonEntry \
+      "speedup" \
+      "Speedup" \
+      "For one algorithm, uses the smallest available core count as baseline and plots geometric-mean speedup curves for larger core counts." \
+      1 1 false false "--plot" "speedup"
+    printf ']}\n'
+    return 0
+  fi
+
+  cat <<'EOF'
+Supported plot types:
+  performance-profile        Performance Profile
+  running-time-box           Running Time Box Plot
+  running-time-by-core       Running Time by Core
+  relative-cut-graph-grid    Relative Cut Graph Grid
+  relative-time-graph-grid   Relative Running Time Graph Grid
+  speedup                    Speedup
+EOF
+}
 
 _BuildPlotRArgs() {
   local do_pp="$1"
@@ -168,6 +257,132 @@ _BuildPlotRArgs() {
   fi
   PLOT_R_ARGS+=("--output" "$output_file")
   PLOT_R_ARGS+=("$@")
+}
+
+_BuildManagedPlotRArgs() {
+  local output_file="$1"
+  shift
+
+  PLOT_R_ARGS=()
+  local plot_id=""
+  for plot_id in "${MKEXP2_PLOT_TYPES[@]}"; do
+    PLOT_R_ARGS+=("--plot" "$plot_id")
+  done
+  if [[ -n "$MKEXP2_PLOT_THREADS" ]]; then
+    PLOT_R_ARGS+=("--threads" "$MKEXP2_PLOT_THREADS")
+  fi
+  PLOT_R_ARGS+=("--output" "$output_file")
+  PLOT_R_ARGS+=("$@")
+}
+
+_PlotSourcePathPart() {
+  local source="$1"
+  if [[ "$source" == *=* ]]; then
+    printf '%s' "${source#*=}"
+  else
+    printf '%s' "$source"
+  fi
+}
+
+_PlotSourceAliasPart() {
+  local source="$1"
+  local source_path=""
+  if [[ "$source" == *=* ]]; then
+    printf '%s' "${source%%=*}"
+    return
+  fi
+  source_path="$(_PlotSourcePathPart "$source")"
+  if _PlotSourceLooksLikeCsvPath "$source_path"; then
+    printf '%s' "${source_path:t:r}"
+  else
+    printf '%s' "$source"
+  fi
+}
+
+_PlotSourceLooksLikeCsvPath() {
+  local source="$1"
+  [[ "$source" == *.csv || "$source" == */* || "$source" == ./* || "$source" == ../* ]]
+}
+
+_SlugForFileName() {
+  local value="$1"
+  value="${value:l}"
+  value="${value//[^a-z0-9._-]/-}"
+  value="${value##-}"
+  value="${value%%-}"
+  [[ -n "$value" ]] || value="source"
+  printf '%s' "$value"
+}
+
+_PreparePlotSources() {
+  local experiment_dir="$1"
+  local -a sources=("${@:2}")
+  local stage_dir="$experiment_dir/.mkexp2/plot-inputs/$MKEXP2_RUN_ID"
+  local source="" source_path="" alias="" abs_path="" hash="" slug="" staged=""
+
+  PLOT_SOURCE_ARGS_NATIVE=()
+  PLOT_SOURCE_ARGS_DOCKER=()
+
+  for source in "${sources[@]}"; do
+    source_path="$(_PlotSourcePathPart "$source")"
+    alias="$(_PlotSourceAliasPart "$source")"
+    if _PlotSourceLooksLikeCsvPath "$source_path"; then
+      if [[ "$source_path" == /* ]]; then
+        abs_path="$source_path"
+      else
+        abs_path="$PWD/$source_path"
+      fi
+      abs_path="${abs_path:A}"
+      if [[ ! -f "$abs_path" ]]; then
+        EchoFatal "CSV source not found: $source_path"
+        return 1
+      fi
+      mkdir -p "$stage_dir"
+      hash="$(HashString "$abs_path")"
+      slug="$(_SlugForFileName "$alias")"
+      staged="$stage_dir/${slug}-${hash[1,10]}.csv"
+      cp "$abs_path" "$staged"
+      PLOT_SOURCE_ARGS_NATIVE+=("$alias=$staged")
+      PLOT_SOURCE_ARGS_DOCKER+=("$alias=/output/.mkexp2/plot-inputs/$MKEXP2_RUN_ID/${staged:t}")
+    else
+      PLOT_SOURCE_ARGS_NATIVE+=("$source")
+      PLOT_SOURCE_ARGS_DOCKER+=("$source")
+    fi
+  done
+}
+
+_OutputPathForNative() {
+  local experiment_dir="$1"
+  local output_file="${MKEXP2_PLOT_OUTPUT:-$experiment_dir/plots.pdf}"
+  if [[ "$output_file" == /* ]]; then
+    printf '%s' "$output_file"
+  else
+    printf '%s' "$experiment_dir/$output_file"
+  fi
+}
+
+_OutputPathForDocker() {
+  local experiment_dir="$1"
+  local output_file="$2"
+  local abs_output=""
+  local rel_output=""
+
+  if [[ "$output_file" == /* ]]; then
+    abs_output="${output_file:A}"
+  else
+    abs_output="${experiment_dir:A}/$output_file"
+  fi
+  abs_output="${abs_output:A}"
+  if [[ "$abs_output" == "${experiment_dir:A}" ]]; then
+    printf '/output'
+    return 0
+  fi
+  if [[ "$abs_output" != "${experiment_dir:A}/"* ]]; then
+    EchoFatal "Docker plot output must be inside the experiment directory: $output_file"
+    return 1
+  fi
+  rel_output="${abs_output#${experiment_dir:A}/}"
+  printf '/output/%s' "$rel_output"
 }
 
 _MaybeLoadSpackRPackage() {
@@ -337,7 +552,13 @@ _GeneratePlotsWithDocker() {
     fi
   fi
 
-  _BuildPlotRArgs "$1" "$2" "$3" "/output/plots.pdf" "${@:4}"
+  local output_file=""
+  output_file="$(_OutputPathForDocker "$experiment_dir" "${MKEXP2_PLOT_OUTPUT:-plots.pdf}")" || return 1
+  if (( ${#MKEXP2_PLOT_TYPES[@]} > 0 )); then
+    _BuildManagedPlotRArgs "$output_file" "${PLOT_SOURCE_ARGS_DOCKER[@]}"
+  else
+    _BuildPlotRArgs "$1" "$2" "$3" "$output_file" "${PLOT_SOURCE_ARGS_DOCKER[@]}"
+  fi
 
   EchoStep "Generating plots with Docker"
   if ! _DockerCompose -f "$compose_file" run --rm plot \
@@ -359,7 +580,13 @@ _GeneratePlotsWithNativeR() {
   fi
 
   _InstallNativeRPackages "$plots_dir" "$results_dir" || return 1
-  _BuildPlotRArgs "$1" "$2" "$3" "$experiment_dir/plots.pdf" "${@:4}"
+  local output_file=""
+  output_file="$(_OutputPathForNative "$experiment_dir")"
+  if (( ${#MKEXP2_PLOT_TYPES[@]} > 0 )); then
+    _BuildManagedPlotRArgs "$output_file" "${PLOT_SOURCE_ARGS_NATIVE[@]}"
+  else
+    _BuildPlotRArgs "$1" "$2" "$3" "$output_file" "${PLOT_SOURCE_ARGS_NATIVE[@]}"
+  fi
 
   EchoStep "Generating plots with native R"
   if ! _RunNativeRscript "$plots_dir" "$results_dir" "$plots_dir/mkplots.R" "${PLOT_R_ARGS[@]}"; then
@@ -372,6 +599,7 @@ GeneratePlots() {
   local plots_dir="$MKEXP2_HOME/plots"
   local results_dir="$PWD/results"
   local experiment_dir="$PWD"
+  local output_file=""
 
   # ── Validate prerequisites ──────────────────────────────────────────────────
 
@@ -413,6 +641,8 @@ GeneratePlots() {
     return 0
   fi
 
+  output_file="$(_OutputPathForNative "$experiment_dir")"
+
   EchoStep "Active algorithms: ${(j:, :)active_algos}"
   if [[ -n "$MKEXP2_PLOT_THREADS" ]]; then
     EchoStep "Plot thread filter: $MKEXP2_PLOT_THREADS"
@@ -422,6 +652,9 @@ GeneratePlots() {
 
   local algo=""
   for algo in "${active_algos[@]}"; do
+    if _PlotSourceLooksLikeCsvPath "$(_PlotSourcePathPart "$algo")"; then
+      continue
+    fi
     if [[ ! -f "$results_dir/${algo}.csv" ]]; then
       EchoWarn "CSV not found: $results_dir/${algo}.csv (run mkexp2 parse first)"
     fi
@@ -439,32 +672,53 @@ GeneratePlots() {
     do_rt=1
   fi
 
+  local plot_type=""
+  for plot_type in "${MKEXP2_PLOT_TYPES[@]}"; do
+    case "$plot_type" in
+      performance-profile|running-time-box|running-time-by-core|relative-cut-graph-grid|relative-time-graph-grid|speedup) ;;
+      *)
+        EchoFatal "unknown plot type '$plot_type' (run mkexp2 plot --list --json)"
+        return 1
+        ;;
+    esac
+  done
+
+  _PreparePlotSources "$experiment_dir" "${active_algos[@]}" || return 1
+
   # ── Generate plots ─────────────────────────────────────────────────────────
 
   if (( MKEXP2_PLOT_NO_DOCKER )); then
     EchoStep "Docker disabled; using native R"
     _GeneratePlotsWithNativeR "$plots_dir" "$results_dir" "$experiment_dir" \
-      "$do_pp" "$do_speedup" "$do_rt" "${active_algos[@]}" || return 1
+      "$do_pp" "$do_speedup" "$do_rt" || return 1
   elif _CheckDockerAvailable; then
     _GeneratePlotsWithDocker "$plots_dir" "$results_dir" "$experiment_dir" \
-      "$do_pp" "$do_speedup" "$do_rt" "${active_algos[@]}" || return 1
+      "$do_pp" "$do_speedup" "$do_rt" || return 1
   else
     EchoWarn "Docker is not available; falling back to native R"
     _GeneratePlotsWithNativeR "$plots_dir" "$results_dir" "$experiment_dir" \
-      "$do_pp" "$do_speedup" "$do_rt" "${active_algos[@]}" || return 1
+      "$do_pp" "$do_speedup" "$do_rt" || return 1
   fi
 
-  if [[ ! -s "$experiment_dir/plots.pdf" ]]; then
-    EchoFatal "plot generation finished without creating $experiment_dir/plots.pdf"
+  if [[ ! -s "$output_file" ]]; then
+    EchoFatal "plot generation finished without creating $output_file"
     return 1
   fi
 
   # ── Ensure plots.pdf is ignored by git ─────────────────────────────────────
 
   local gitignore_file="$PWD/.gitignore"
-  if [[ -f "$gitignore_file" ]] && ! grep -qxF "plots.pdf" "$gitignore_file"; then
-    printf '%s\n' "plots.pdf" >> "$gitignore_file"
+  if [[ -f "$gitignore_file" ]]; then
+    if [[ "${output_file:A}" == "${experiment_dir:A}/plots/"* ]]; then
+      if ! grep -qxF "plots/" "$gitignore_file"; then
+        printf '%s\n' "plots/" >> "$gitignore_file"
+      fi
+    elif [[ "${output_file:A}" == "${experiment_dir:A}/plots.pdf" ]]; then
+      if ! grep -qxF "plots.pdf" "$gitignore_file"; then
+        printf '%s\n' "plots.pdf" >> "$gitignore_file"
+      fi
+    fi
   fi
 
-  EchoStep "Done: $PWD/plots.pdf"
+  EchoStep "Done: $output_file"
 }

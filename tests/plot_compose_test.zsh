@@ -45,6 +45,55 @@ test_plot_threads_filter_builds_r_args() {
   pass "plot threads filter R arguments"
 }
 
+test_plot_catalog_json() {
+  local tmp=""
+  tmp=$(mktemp)
+
+  "$MKEXP2" plot --list --json > "$tmp"
+
+  assert_eq "$(json_value "$tmp" '.plots | length')" "6" "plot catalog lists initial plot types"
+  assert_eq "$(json_value "$tmp" '.plots[] | select(.id == "speedup") | .min_sources')" "1" "speedup plot has minimum source count"
+  assert_eq "$(json_value "$tmp" '.plots[] | select(.id == "speedup") | .max_sources')" "1" "speedup plot has maximum source count"
+  assert_eq "$(json_value "$tmp" '.plots[] | select(.id == "relative-cut-graph-grid") | .expensive')" "true" "graph-grid plot is marked expensive"
+
+  pass "plot catalog JSON"
+}
+
+test_managed_plot_args() {
+  MKEXP2_PLOT_THREADS="$(NormalizeTopology 2)"
+  MKEXP2_PLOT_TYPES=(performance-profile running-time-box)
+
+  _BuildManagedPlotRArgs /tmp/managed.pdf KaMinPar-FM KaMinPar-LP
+
+  assert_eq "${(j: :)PLOT_R_ARGS}" "--plot performance-profile --plot running-time-box --threads 1x1x2 --output /tmp/managed.pdf KaMinPar-FM KaMinPar-LP" "managed plot passes plot ids and output to R"
+
+  MKEXP2_PLOT_THREADS=""
+  MKEXP2_PLOT_TYPES=()
+  pass "managed plot R arguments"
+}
+
+test_plot_source_csv_staging() {
+  local tmp=""
+  tmp=$(mktemp -d)
+  local csv="$tmp/source.csv"
+
+  mkdir -p "$tmp/exp"
+  print "Algorithm,Graph,K,Epsilon,Cores,Time,Cut,Imbalance,Failed,Timeout" > "$csv"
+  print "A,g,2,0.03,1,1,10,0,0,0" >> "$csv"
+
+  (
+    cd "$tmp/exp" || exit 1
+    MKEXP2_RUN_ID="test-run"
+    _PreparePlotSources "$PWD" "Alias=$csv" "Algo"
+    assert_path_exists "$PWD/.mkexp2/plot-inputs/test-run/alias-"*".csv" "external CSV is staged"
+    assert_contains "${PLOT_SOURCE_ARGS_NATIVE[1]}" "Alias=$PWD/.mkexp2/plot-inputs/test-run/alias-" "native source uses staged CSV"
+    assert_contains "${PLOT_SOURCE_ARGS_DOCKER[1]}" "Alias=/output/.mkexp2/plot-inputs/test-run/alias-" "docker source uses mounted staged CSV"
+    assert_eq "${PLOT_SOURCE_ARGS_NATIVE[2]}" "Algo" "algorithm source remains unchanged"
+  )
+
+  pass "plot CSV source staging"
+}
+
 test_native_r_env_paths_are_passed() {
   local tmp=""
   tmp=$(mktemp -d)

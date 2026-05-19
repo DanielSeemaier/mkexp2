@@ -24,7 +24,8 @@ EXPERIMENT_CACHE_SECONDS = 60
 PLOT_ACTION_TIMEOUT_SECONDS = 7200
 WEB_STATE_DIR = ".mkexp2"
 WEB_PINS_FILE = "web-pins.json"
-EXPERIMENT_SKIP_DIRS = {".git", ".mkexp2", "jobs", "logs", "results", "slurm"}
+PLOT_INDEX_FILE = "index.json"
+EXPERIMENT_SKIP_DIRS = {".git", ".mkexp2", "jobs", "logs", "plots", "results", "slurm"}
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 SINFO_LONG_FALLBACK = """Sat May 16 15:57:01 2026
 NODELIST    NODES PARTITION       STATE CPUS    S:C:T MEMORY TMP_DISK WEIGHT AVAIL_FE REASON
@@ -1082,6 +1083,242 @@ class Mkexp2WebApp:
             "size": stat.st_size,
             "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
         }
+
+    def plot_catalog(self):
+        result = run_command([str(self.mkexp2), "plot", "--list", "--json"], cwd=self.mkexp2_root(), timeout=30)
+        if result["returncode"] != 0:
+            raise ValueError("could not load plot catalog")
+        try:
+            payload = json.loads(result["stdout"] or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid plot catalog JSON: {exc}") from exc
+        payload["_command"] = result
+        return payload
+
+    def plot_catalog_map(self):
+        return {item["id"]: item for item in self.plot_catalog().get("plots", [])}
+
+    def plot_sources(self, experiment_id, include_all=False):
+        def csv_entry(exp_id, csv_file):
+            stat = csv_file.stat()
+            return {
+                "kind": "csv",
+                "experiment_id": exp_id,
+                "file": csv_file.name,
+                "name": csv_file.stem,
+                "alias": csv_file.stem if exp_id == experiment_id else f"{exp_id}/{csv_file.stem}",
+                "size": stat.st_size,
+                "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+            }
+
+        current_path = self.experiment_path(experiment_id)
+        current = []
+        results_dir = current_path / "results"
+        if results_dir.is_dir():
+            for csv_file in sorted(results_dir.glob("*.csv")):
+                item = csv_entry(experiment_id, csv_file)
+                item["kind"] = "algorithm"
+                current.append(item)
+
+        payload = {"current": current}
+        if include_all:
+            experiments = []
+            for exp in self.list_experiments():
+                exp_results = self.experiment_path(exp["id"]) / "results"
+                files = []
+                if exp_results.is_dir():
+                    files = [csv_entry(exp["id"], csv_file) for csv_file in sorted(exp_results.glob("*.csv"))]
+                if files:
+                    experiments.append({"id": exp["id"], "name": exp.get("name") or exp["id"], "files": files})
+            payload["experiments"] = experiments
+        return payload
+
+    def plot_artifacts_dir(self, experiment_id):
+        return self.experiment_path(experiment_id) / "plots"
+
+    def plot_artifacts_index_path(self, experiment_id):
+        return self.plot_artifacts_dir(experiment_id) / PLOT_INDEX_FILE
+
+    def read_plot_artifacts_index(self, experiment_id):
+        path = self.plot_artifacts_index_path(experiment_id)
+        if not path.is_file():
+            return {"version": 1, "artifacts": []}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8") or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+        artifacts = payload.get("artifacts")
+        if not isinstance(artifacts, list):
+            artifacts = []
+        return {"version": 1, "artifacts": artifacts}
+
+    def write_plot_artifacts_index(self, experiment_id, index):
+        directory = self.plot_artifacts_dir(experiment_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        path = self.plot_artifacts_index_path(experiment_id)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(path)
+
+    def list_plot_artifacts(self, experiment_id):
+        index = self.read_plot_artifacts_index(experiment_id)
+        directory = self.plot_artifacts_dir(experiment_id)
+        artifacts = []
+        for artifact in index.get("artifacts", []):
+            rel_path = str(artifact.get("path") or "")
+            pdf = (self.experiment_path(experiment_id) / rel_path).resolve()
+            if not rel_path.startswith("plots/") or not pdf.is_file():
+                continue
+            stat = pdf.stat()
+            item = dict(artifact)
+            item.update(
+                {
+                    "exists": True,
+                    "size": stat.st_size,
+                    "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+                }
+            )
+            artifacts.append(item)
+        artifacts.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+        return {"artifacts": artifacts, "legacy": self.plots_info(experiment_id), "index_path": str(directory / PLOT_INDEX_FILE)}
+
+    def plot_artifact_pdf(self, experiment_id, artifact_id):
+        if not re.match(r"^[A-Za-z0-9._-]+$", artifact_id or ""):
+            raise ValueError("invalid plot artifact id")
+        for artifact in self.list_plot_artifacts(experiment_id).get("artifacts", []):
+            if artifact.get("id") == artifact_id:
+                path = (self.experiment_path(experiment_id) / artifact.get("path", "")).resolve()
+                root = self.experiment_path(experiment_id).resolve()
+                if root not in path.parents:
+                    raise ValueError("plot artifact path escapes experiment")
+                return path
+        raise ValueError("plot artifact not found")
+
+    def resolve_plot_source(self, experiment_id, source):
+        if isinstance(source, str):
+            return {
+                "token": source,
+                "metadata": {"kind": "algorithm", "name": source, "alias": source, "experiment_id": experiment_id},
+            }
+        if not isinstance(source, dict):
+            raise ValueError("plot sources must be strings or objects")
+
+        kind = source.get("kind") or source.get("type") or "algorithm"
+        alias = str(source.get("alias") or source.get("name") or "").strip()
+        if kind == "algorithm":
+            name = str(source.get("name") or source.get("file") or "").strip()
+            if not name:
+                raise ValueError("algorithm plot source requires name")
+            return {
+                "token": name,
+                "metadata": {"kind": "algorithm", "name": name, "alias": alias or name, "experiment_id": experiment_id},
+            }
+
+        if kind != "csv":
+            raise ValueError(f"unsupported plot source kind: {kind}")
+        source_experiment = str(source.get("experiment_id") or experiment_id)
+        file_name = str(source.get("file") or "").strip()
+        if not file_name or Path(file_name).name != file_name or not file_name.endswith(".csv"):
+            raise ValueError("CSV plot source requires a results/*.csv file name")
+        exp_path = self.experiment_path(source_experiment)
+        csv_path = (exp_path / "results" / file_name).resolve()
+        results_root = (exp_path / "results").resolve()
+        if results_root not in csv_path.parents or not csv_path.is_file():
+            raise ValueError("CSV plot source must exist under an experiment results directory")
+        alias = (alias or f"{source_experiment}/{Path(file_name).stem}").replace("=", "-")
+        return {
+            "token": f"{alias}={csv_path}",
+            "metadata": {
+                "kind": "csv",
+                "experiment_id": source_experiment,
+                "file": file_name,
+                "alias": alias,
+                "path": str(csv_path),
+            },
+        }
+
+    def validate_plot_request(self, plot_ids, sources):
+        catalog = self.plot_catalog_map()
+        if not plot_ids:
+            raise ValueError("at least one plot type must be selected")
+        if not sources:
+            raise ValueError("at least one plot source must be selected")
+        for plot_id in plot_ids:
+            if plot_id not in catalog:
+                raise ValueError(f"unknown plot type: {plot_id}")
+            entry = catalog[plot_id]
+            count = len(sources)
+            min_sources = int(entry.get("min_sources") or 0)
+            max_sources = entry.get("max_sources")
+            if count < min_sources:
+                raise ValueError(f"{entry.get('name', plot_id)} requires at least {min_sources} source(s)")
+            if max_sources is not None and count > int(max_sources):
+                raise ValueError(f"{entry.get('name', plot_id)} accepts at most {max_sources} source(s)")
+        return catalog
+
+    def create_plot_artifacts_action(self, experiment_id, payload):
+        plot_ids = [str(item) for item in (payload.get("plots") or [])]
+        source_payloads = payload.get("sources") or []
+        resolved_sources = [self.resolve_plot_source(experiment_id, item) for item in source_payloads]
+        catalog = self.validate_plot_request(plot_ids, resolved_sources)
+        label = str(payload.get("label") or "").strip()
+        no_docker = bool(payload.get("no_docker"))
+        threads = str(payload.get("threads") or "").strip()
+
+        def action():
+            created = []
+            commands = []
+            index = self.read_plot_artifacts_index(experiment_id)
+            for plot_id in plot_ids:
+                entry = catalog[plot_id]
+                created_at = _dt.datetime.now().isoformat(timespec="seconds")
+                label_text = label or f"{entry.get('name', plot_id)} - {', '.join(src['metadata'].get('alias') or src['metadata'].get('name') or '' for src in resolved_sources)}"
+                if len(plot_ids) > 1 and label:
+                    label_text = f"{label} - {entry.get('name', plot_id)}"
+                artifact_id = "-".join(
+                    [
+                        _dt.datetime.now().strftime("%Y%m%d-%H%M%S"),
+                        slugify(plot_id),
+                        slugify(label_text)[:48],
+                        secrets.token_urlsafe(4).replace("_", "-"),
+                    ]
+                )
+                rel_output = f"plots/{artifact_id}.pdf"
+                argv = ["plot"]
+                if no_docker:
+                    argv.append("--no-docker")
+                argv.extend(["--plot", plot_id, "--output", rel_output])
+                if threads:
+                    argv.extend(["--threads", threads])
+                argv.extend(source["token"] for source in resolved_sources)
+                command = self.command(experiment_id, argv, timeout=PLOT_ACTION_TIMEOUT_SECONDS)
+                commands.append({"plot_id": plot_id, "plot_name": entry.get("name", plot_id), "command": command})
+                pdf = self.experiment_path(experiment_id) / rel_output
+                if command["returncode"] == 0 and pdf.is_file() and pdf.stat().st_size > 0:
+                    stat = pdf.stat()
+                    artifact = {
+                        "id": artifact_id,
+                        "label": label_text,
+                        "plot_id": plot_id,
+                        "plot_name": entry.get("name", plot_id),
+                        "description": entry.get("description", ""),
+                        "sources": [source["metadata"] for source in resolved_sources],
+                        "path": rel_output,
+                        "created_at": created_at,
+                        "size": stat.st_size,
+                        "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+                    }
+                    index.setdefault("artifacts", []).append(artifact)
+                    created.append(artifact)
+            self.write_plot_artifacts_index(experiment_id, index)
+            return {
+                "plotted": len(created) == len(plot_ids),
+                "created": created,
+                "commands": commands,
+                "artifacts": self.list_plot_artifacts(experiment_id),
+            }
+
+        return self.actions.start_unique(f"plot-artifacts:{experiment_id}", f"plot artifacts {experiment_id}", action)
 
     def logs_root(self, experiment_id):
         return self.experiment_path(experiment_id) / "logs"
@@ -2282,6 +2519,107 @@ HTML = r"""<!doctype html>
       border-radius: 6px;
       background: white;
     }
+    .plot-manager {
+      display: grid;
+      gap: 14px;
+    }
+    .plot-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .plot-box {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fbfcfd;
+    }
+    .plot-box-title {
+      font-weight: 750;
+    }
+    .plot-choice,
+    .plot-source-row,
+    .plot-artifact-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+      min-width: 0;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: white;
+    }
+    .plot-choice.expensive {
+      border-color: #fed7aa;
+      background: #fff7ed;
+    }
+    .plot-choice-title,
+    .plot-source-title,
+    .plot-artifact-title {
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .plot-choice-desc,
+    .plot-source-meta,
+    .plot-artifact-meta {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .plot-source-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .plot-source-alias {
+      height: 30px;
+      padding: 5px 8px;
+      font-size: 12px;
+    }
+    .plot-artifact-list {
+      display: grid;
+      gap: 8px;
+    }
+    .plot-artifact-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      text-align: left;
+      height: auto;
+    }
+    .plot-artifact-row.active {
+      border-color: var(--accent);
+      background: #e8f5f3;
+    }
+    .plot-preview {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }
+    .plot-source-modal-list {
+      display: grid;
+      gap: 8px;
+      max-height: 55vh;
+      overflow: auto;
+    }
+    .plot-source-modal-exp {
+      display: grid;
+      gap: 6px;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fbfcfd;
+    }
+    .plot-source-modal-files {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
     .compare-grid {
       display: flex;
       gap: 12px;
@@ -2873,6 +3211,23 @@ HTML = r"""<!doctype html>
         </div>
       </div>
     </div>
+    <div id="plot-source-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="plot-source-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="plot-source-modal-title" class="modal-title">Add CSV Source</div>
+            <div id="plot-source-modal-summary" class="csv-summary">Load CSV files from other experiments.</div>
+          </div>
+          <button id="plot-source-close" class="icon-button" title="Close">x</button>
+        </div>
+        <div class="modal-body">
+          <div id="plot-source-modal-list" class="plot-source-modal-list csv-empty">No CSV files loaded.</div>
+        </div>
+        <div class="modal-footer">
+          <button id="plot-source-close-footer">Close</button>
+        </div>
+      </div>
+    </div>
     <main class="main">
       <div class="view-tabs">
         <button class="view-tab icon-tab" data-view="install-log-view" aria-label="Install Log" title="Install Log">?</button>
@@ -3053,9 +3408,30 @@ HTML = r"""<!doctype html>
               <button id="plot-results">Generate Plots</button>
             </div>
           </div>
-          <div class="panel-body">
+          <div class="panel-body plot-manager">
+            <div class="plot-grid">
+              <section class="plot-box">
+                <div class="plot-box-title">Plot Types</div>
+                <div id="plot-catalog" class="csv-empty">Loading plot types...</div>
+              </section>
+              <section class="plot-box">
+                <div class="plot-source-actions">
+                  <div class="plot-box-title">Sources</div>
+                  <button id="add-plot-source" class="small-button">Add CSV</button>
+                </div>
+                <div id="plot-sources" class="csv-empty">Loading sources...</div>
+              </section>
+            </div>
+            <label>
+              <span class="csv-summary">Artifact label</span>
+              <input id="plot-label" type="text" placeholder="Auto-generated label">
+            </label>
             <div id="plot-action-output" class="action-output"></div>
-            <div id="plot-file" class="csv-empty">Generate plots to update plots.pdf.</div>
+            <section class="plot-box">
+              <div class="plot-box-title">Artifacts</div>
+              <div id="plot-artifacts" class="csv-empty">No plot artifacts loaded.</div>
+            </section>
+            <div id="plot-file" class="csv-empty">Select a plot artifact to preview it.</div>
           </div>
         </section>
       </section>
@@ -3086,11 +3462,21 @@ HTML = r"""<!doctype html>
       submitLock: null,
       submitBusy: false,
       plotBackend: null,
-      plotInfo: null,
-      plotInfoFor: null,
+      plotCatalog: null,
+      plotCatalogInitialized: false,
+      plotSources: null,
+      plotSourcesFor: null,
+      plotSourcesInitializedFor: null,
+      selectedPlotTypes: new Set(),
+      selectedPlotSources: new Set(),
+      externalPlotSources: [],
+      plotArtifacts: null,
+      plotArtifactsFor: null,
+      selectedPlotArtifact: '',
       plotPdfUrl: '',
       plotPdfUrlFor: null,
       plotPdfVersion: '',
+      plotLabelTouched: false,
       plotNoDockerTouched: false,
       spackCache: null,
       consoleEntries: [],
@@ -3239,11 +3625,13 @@ HTML = r"""<!doctype html>
       if (action?.status !== 'completed') return false;
       if (kind === 'parse') return Boolean(action.result?.parsed);
       if (kind === 'plot') return Boolean(action.result?.plotted);
+      if (kind === 'plot-artifacts') return Boolean(action.result?.plotted);
       return true;
     }
     function actionCommand(action, kind) {
       if (kind === 'parse') return action?.result?.parse;
       if (kind === 'plot') return action?.result?.plot;
+      if (kind === 'plot-artifacts') return action?.result?.commands?.[0]?.command || null;
       return null;
     }
     function renderActionStatus(targetId, title, action, kind) {
@@ -4671,6 +5059,8 @@ HTML = r"""<!doctype html>
       if (viewId === 'plots-view') {
         await Promise.all([
           loadPlotBackendStatus(),
+          state.plotCatalog ? Promise.resolve(state.plotCatalog) : loadPlotCatalog(),
+          state.plotSourcesFor === state.selected ? Promise.resolve(state.plotSources) : loadPlotSources(false),
           loadPlotInfo()
         ]);
         renderPlotPanel();
@@ -5037,8 +5427,15 @@ HTML = r"""<!doctype html>
       state.selectedLog = '';
       state.logContent = null;
       state.submitLock = null;
-      state.plotInfo = null;
-      state.plotInfoFor = null;
+      state.plotSources = null;
+      state.plotSourcesFor = null;
+      state.plotSourcesInitializedFor = null;
+      state.selectedPlotSources = new Set();
+      state.externalPlotSources = [];
+      state.plotArtifacts = null;
+      state.plotArtifactsFor = null;
+      state.selectedPlotArtifact = '';
+      state.plotLabelTouched = false;
       clearPlotPdfUrl();
       setView('experiment-view').catch(err => out(String(err)));
       renderResultsWorkspace();
@@ -5202,53 +5599,267 @@ HTML = r"""<!doctype html>
         }
       });
     }
+    function sourceKey(source) {
+      if (source.kind === 'algorithm') return `algorithm:${source.name}`;
+      return `csv:${source.experiment_id}:${source.file}:${source.alias || ''}`;
+    }
+    function selectedPlotSourceObjects() {
+      const current = state.plotSources?.current || [];
+      const all = [...current, ...state.externalPlotSources];
+      return all.filter(source => state.selectedPlotSources.has(sourceKey(source)));
+    }
+    function plotById(id) {
+      return (state.plotCatalog?.plots || []).find(plot => plot.id === id) || null;
+    }
+    function suggestedPlotLabel() {
+      const selectedPlots = Array.from(state.selectedPlotTypes).map(plotById).filter(Boolean);
+      const sources = selectedPlotSourceObjects();
+      if (!selectedPlots.length || !sources.length) return '';
+      const sourceText = sources.map(source => source.alias || source.name || source.file).join(', ');
+      if (selectedPlots.length === 1) return `${selectedPlots[0].name} - ${sourceText}`;
+      return `Plot set - ${sourceText}`;
+    }
+    function syncPlotLabelSuggestion() {
+      const input = document.getElementById('plot-label');
+      if (!input) return;
+      if (!state.plotLabelTouched) input.value = suggestedPlotLabel();
+    }
+    function validatePlotSelection() {
+      const plots = Array.from(state.selectedPlotTypes).map(plotById).filter(Boolean);
+      const sourceCount = selectedPlotSourceObjects().length;
+      if (!plots.length) return 'Select at least one plot type.';
+      if (!sourceCount) return 'Select at least one CSV source.';
+      for (const plot of plots) {
+        if (sourceCount < Number(plot.min_sources || 0)) return `${plot.name} requires at least ${plot.min_sources} source(s).`;
+        if (plot.max_sources !== null && plot.max_sources !== undefined && sourceCount > Number(plot.max_sources)) {
+          return `${plot.name} accepts at most ${plot.max_sources} source(s).`;
+        }
+      }
+      return '';
+    }
+    function renderPlotCatalog() {
+      const box = document.getElementById('plot-catalog');
+      if (!box) return;
+      const plots = state.plotCatalog?.plots || [];
+      if (!plots.length) {
+        box.className = 'csv-empty';
+        box.textContent = 'No plot types loaded.';
+        return;
+      }
+      if (!state.plotCatalogInitialized) {
+        state.selectedPlotTypes = new Set(plots.filter(plot => plot.default_selected).map(plot => plot.id));
+        state.plotCatalogInitialized = true;
+      }
+      box.className = 'plot-artifact-list';
+      box.innerHTML = '';
+      for (const plot of plots) {
+        const label = document.createElement('label');
+        label.className = 'plot-choice' + (plot.expensive ? ' expensive' : '');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = state.selectedPlotTypes.has(plot.id);
+        checkbox.onchange = () => {
+          if (checkbox.checked) state.selectedPlotTypes.add(plot.id);
+          else state.selectedPlotTypes.delete(plot.id);
+          syncPlotLabelSuggestion();
+          renderPlotPanel();
+        };
+        const body = document.createElement('div');
+        const title = document.createElement('div');
+        title.className = 'plot-choice-title';
+        title.textContent = plot.name;
+        const desc = document.createElement('div');
+        desc.className = 'plot-choice-desc';
+        const maxText = plot.max_sources === null || plot.max_sources === undefined ? 'any' : plot.max_sources;
+        desc.textContent = `${plot.description} Sources: ${plot.min_sources}-${maxText}.${plot.expensive ? ' Expensive.' : ''}`;
+        body.appendChild(title);
+        body.appendChild(desc);
+        label.appendChild(checkbox);
+        label.appendChild(body);
+        box.appendChild(label);
+      }
+    }
+    function renderPlotSources() {
+      const box = document.getElementById('plot-sources');
+      if (!box) return;
+      const current = state.plotSources?.current || [];
+      const sources = [...current, ...state.externalPlotSources];
+      if (!sources.length) {
+        box.className = 'csv-empty';
+        box.textContent = 'No CSV results found. Run Parse Logs first or add a CSV from another experiment.';
+        return;
+      }
+      box.className = 'plot-artifact-list';
+      box.innerHTML = '';
+      for (const source of sources) {
+        const key = sourceKey(source);
+        const row = document.createElement('label');
+        row.className = 'plot-source-row';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = state.selectedPlotSources.has(key);
+        checkbox.onchange = () => {
+          if (checkbox.checked) state.selectedPlotSources.add(key);
+          else state.selectedPlotSources.delete(key);
+          syncPlotLabelSuggestion();
+          renderPlotPanel();
+        };
+        const body = document.createElement('div');
+        const title = document.createElement('div');
+        title.className = 'plot-source-title';
+        title.textContent = source.alias || source.name || source.file;
+        const meta = document.createElement('div');
+        meta.className = 'plot-source-meta';
+        const sourceFile = source.file || `${source.name}.csv`;
+        meta.textContent = source.kind === 'algorithm'
+          ? `${sourceFile}, ${formatBytes(source.size)}`
+          : `${source.experiment_id}/${source.file}, ${formatBytes(source.size)}`;
+        body.appendChild(title);
+        body.appendChild(meta);
+        if (source.kind === 'csv') {
+          const alias = document.createElement('input');
+          alias.className = 'plot-source-alias';
+          alias.value = source.alias || '';
+          alias.onchange = () => {
+            const wasSelected = state.selectedPlotSources.has(key);
+            source.alias = alias.value.trim() || `${source.experiment_id}/${source.name || csvLabel(source.file)}`;
+            state.selectedPlotSources.delete(key);
+            if (wasSelected) state.selectedPlotSources.add(sourceKey(source));
+            syncPlotLabelSuggestion();
+            renderPlotPanel();
+          };
+          body.appendChild(alias);
+        }
+        row.appendChild(checkbox);
+        row.appendChild(body);
+        box.appendChild(row);
+      }
+    }
+    function renderPlotArtifacts() {
+      const box = document.getElementById('plot-artifacts');
+      if (!box) return;
+      const artifacts = state.plotArtifacts?.artifacts || [];
+      if (!artifacts.length) {
+        box.className = 'csv-empty';
+        box.textContent = state.plotArtifacts?.legacy?.exists
+          ? 'No managed artifacts yet. Legacy plots.pdf is still available below.'
+          : 'No managed artifacts yet.';
+        return;
+      }
+      if (!state.selectedPlotArtifact || !artifacts.find(item => item.id === state.selectedPlotArtifact)) {
+        state.selectedPlotArtifact = artifacts[0].id;
+      }
+      box.className = 'plot-artifact-list';
+      box.innerHTML = '';
+      for (const artifact of artifacts) {
+        const button = document.createElement('button');
+        button.className = 'plot-artifact-row' + (state.selectedPlotArtifact === artifact.id ? ' active' : '');
+        const body = document.createElement('div');
+        const title = document.createElement('div');
+        title.className = 'plot-artifact-title';
+        title.textContent = artifact.label || artifact.plot_name || artifact.id;
+        const meta = document.createElement('div');
+        meta.className = 'plot-artifact-meta';
+        const sources = (artifact.sources || []).map(source => source.alias || source.name || source.file).join(', ');
+        meta.textContent = `${artifact.plot_name || artifact.plot_id}; ${sources}; ${formatBytes(artifact.size)}; ${artifact.created_at || artifact.modified_at || ''}`;
+        body.appendChild(title);
+        body.appendChild(meta);
+        const open = document.createElement('span');
+        open.textContent = 'Open';
+        button.appendChild(body);
+        button.appendChild(open);
+        button.onclick = () => {
+          state.selectedPlotArtifact = artifact.id;
+          clearPlotPdfUrl();
+          renderPlotPanel();
+        };
+        box.appendChild(button);
+      }
+    }
+    function renderSelectedPlotArtifact() {
+      const file = document.getElementById('plot-file');
+      if (!file) return;
+      const artifacts = state.plotArtifacts?.artifacts || [];
+      const artifact = artifacts.find(item => item.id === state.selectedPlotArtifact);
+      if (!artifact) {
+        if (state.plotArtifacts?.legacy?.exists) {
+          renderLegacyPlotPdf();
+          return;
+        }
+        file.className = 'csv-empty';
+        file.textContent = 'Generate a plot artifact to preview it here.';
+        return;
+      }
+      const pdfUrl = `/api/experiments/${encodeURIComponent(state.selected)}/plot-artifacts/${encodeURIComponent(artifact.id)}.pdf`;
+      const version = encodeURIComponent(`${artifact.modified_at || ''}-${artifact.size || ''}`);
+      if (state.plotPdfUrlFor === artifact.id && state.plotPdfVersion === version && state.plotPdfUrl) {
+        file.className = 'plot-preview';
+        file.innerHTML = `
+          <iframe class="plot-pdf" src="${esc(state.plotPdfUrl)}" title="${esc(artifact.label || artifact.id)}"></iframe>
+          <div class="csv-summary"><a href="${esc(state.plotPdfUrl)}" target="_blank" rel="noreferrer">Open ${esc(artifact.label || artifact.id)}</a></div>
+        `;
+      } else {
+        file.className = 'csv-empty';
+        file.textContent = 'Loading plot artifact...';
+        loadPlotPdf(pdfUrl, version, artifact.id).catch(err => {
+          file.className = 'csv-empty status-bad';
+          file.textContent = `Could not load plot artifact: ${err.message || err}`;
+        });
+      }
+    }
+    function renderLegacyPlotPdf() {
+      const file = document.getElementById('plot-file');
+      const legacy = state.plotArtifacts?.legacy;
+      if (!file || !legacy?.exists) return;
+      const pdfUrl = `/api/experiments/${encodeURIComponent(state.selected)}/plots.pdf`;
+      const version = encodeURIComponent(`${legacy.modified_at || ''}-${legacy.size || ''}`);
+      if (state.plotPdfUrlFor === 'legacy' && state.plotPdfVersion === version && state.plotPdfUrl) {
+        file.className = 'plot-preview';
+        file.innerHTML = `
+          <iframe class="plot-pdf" src="${esc(state.plotPdfUrl)}" title="plots.pdf"></iframe>
+          <div class="csv-summary"><a href="${esc(state.plotPdfUrl)}" target="_blank" rel="noreferrer">Open legacy plots.pdf</a></div>
+        `;
+      } else {
+        file.className = 'csv-empty';
+        file.textContent = 'Loading legacy plots.pdf...';
+        loadPlotPdf(pdfUrl, version, 'legacy').catch(err => {
+          file.className = 'csv-empty status-bad';
+          file.textContent = `Could not load legacy plots.pdf: ${err.message || err}`;
+        });
+      }
+    }
     function renderPlotPanel(action = null) {
       const summary = document.getElementById('plots-summary');
-      const file = document.getElementById('plot-file');
-      if (!summary || !file) return;
+      if (!summary) return;
       applyPlotBackendStatus();
+      renderPlotCatalog();
+      renderPlotSources();
+      renderPlotArtifacts();
+      syncPlotLabelSuggestion();
+      const error = validatePlotSelection();
+      const button = document.getElementById('plot-results');
+      if (button && button.dataset.busy !== '1') {
+        button.disabled = Boolean(error) || !state.selected;
+        button.title = error || 'Generate selected plot artifacts';
+      }
       if (!state.selected) {
         summary.textContent = 'No experiment selected.';
-        file.className = 'csv-empty';
-        file.textContent = 'Select an experiment first.';
         return;
       }
       const actionOutput = document.getElementById('plot-action-output');
       if (action?.status === 'running') {
         if (actionOutput) actionOutput.innerHTML = '';
       } else if (action) {
-        renderActionStatus('plot-action-output', 'Plot generation', action, 'plot');
+        renderActionStatus('plot-action-output', 'Plot generation', action, 'plot-artifacts');
       }
       summary.textContent = action?.status === 'running'
         ? 'Plot generation is running.'
         : action?.status === 'completed'
-          ? (actionSucceeded(action, 'plot') ? 'Plot generation completed.' : 'Plot generation failed.')
-          : (state.plotInfoFor === state.selected && state.plotInfo?.exists
-              ? `plots.pdf, ${formatBytes(state.plotInfo.size || 0)}, modified ${state.plotInfo.modified_at || 'unknown time'}`
-              : 'Generate plots for the selected experiment.');
-      const pdfUrl = `/api/experiments/${encodeURIComponent(state.selected)}/plots.pdf`;
-      if (state.plotInfoFor === state.selected && state.plotInfo?.exists) {
-        const version = encodeURIComponent(`${state.plotInfo.modified_at || ''}-${state.plotInfo.size || ''}`);
-        if (state.plotPdfUrlFor === state.selected && state.plotPdfVersion === version && state.plotPdfUrl) {
-          file.className = 'plot-preview';
-          file.innerHTML = `
-            <iframe class="plot-pdf" src="${esc(state.plotPdfUrl)}" title="plots.pdf"></iframe>
-            <div class="csv-summary"><a href="${esc(state.plotPdfUrl)}" target="_blank" rel="noreferrer">Open plots.pdf</a></div>
-          `;
-        } else {
-          file.className = 'csv-empty';
-          file.textContent = 'Loading plots.pdf...';
-          loadPlotPdf(pdfUrl, version).catch(err => {
-            file.className = 'csv-empty status-bad';
-            file.textContent = `Could not load plots.pdf: ${err.message || err}`;
-          });
-        }
-      } else {
-        file.className = 'csv-empty';
-        file.textContent = state.plotInfoFor === state.selected
-          ? 'plots.pdf does not exist yet.'
-          : 'Checking for plots.pdf...';
-      }
+          ? (actionSucceeded(action, 'plot-artifacts') ? 'Plot generation completed.' : 'Plot generation failed.')
+          : (state.plotArtifactsFor === state.selected
+              ? `${(state.plotArtifacts?.artifacts || []).length} managed artifact(s).`
+              : 'Loading plot artifacts...');
+      renderSelectedPlotArtifact();
     }
     function applyPlotBackendStatus() {
       const checkbox = document.getElementById('plot-no-docker');
@@ -5282,32 +5893,117 @@ HTML = r"""<!doctype html>
     }
     async function loadPlotInfo() {
       if (!state.selected) return null;
-      state.plotInfo = await api(`/api/experiments/${encodeURIComponent(state.selected)}/plots`);
-      state.plotInfoFor = state.selected;
+      state.plotArtifacts = await api(`/api/experiments/${encodeURIComponent(state.selected)}/plot-artifacts`);
+      state.plotArtifactsFor = state.selected;
       renderPlotPanel();
-      return state.plotInfo;
+      return state.plotArtifacts;
     }
-    async function loadPlotPdf(pdfUrl, version) {
+    async function loadPlotPdf(pdfUrl, version, owner = state.selectedPlotArtifact || 'legacy') {
       if (!state.selected) return null;
       const selected = state.selected;
       const blob = await fetchBlob(`${pdfUrl}?v=${version}`);
       if (state.selected !== selected) return null;
       clearPlotPdfUrl();
       state.plotPdfUrl = URL.createObjectURL(blob);
-      state.plotPdfUrlFor = selected;
+      state.plotPdfUrlFor = owner;
       state.plotPdfVersion = version;
       renderPlotPanel();
       return state.plotPdfUrl;
+    }
+    async function loadPlotCatalog() {
+      state.plotCatalog = await api('/api/plots/catalog');
+      renderPlotPanel();
+      return state.plotCatalog;
+    }
+    async function loadPlotSources(includeAll = false) {
+      if (!state.selected) return null;
+      const query = includeAll ? '?all=1' : '';
+      const data = await api(`/api/experiments/${encodeURIComponent(state.selected)}/plot-sources${query}`);
+      if (includeAll) return data;
+      state.plotSources = data;
+      state.plotSourcesFor = state.selected;
+      if (state.plotSourcesInitializedFor !== state.selected) {
+        state.selectedPlotSources = new Set((data.current || []).map(sourceKey));
+        state.plotSourcesInitializedFor = state.selected;
+      }
+      renderPlotPanel();
+      return data;
+    }
+    async function openPlotSourceDialog() {
+      if (!state.selected) return;
+      const modal = document.getElementById('plot-source-modal');
+      const list = document.getElementById('plot-source-modal-list');
+      const summary = document.getElementById('plot-source-modal-summary');
+      modal.classList.remove('hidden');
+      list.className = 'plot-source-modal-list csv-empty';
+      list.textContent = 'Loading CSV files...';
+      const data = await loadPlotSources(true);
+      const experiments = data.experiments || [];
+      summary.textContent = `${experiments.length} experiment(s) with CSV results.`;
+      list.className = 'plot-source-modal-list';
+      list.innerHTML = '';
+      if (!experiments.length) {
+        list.className = 'plot-source-modal-list csv-empty';
+        list.textContent = 'No CSV files found in other experiments.';
+        return;
+      }
+      for (const experiment of experiments) {
+        const section = document.createElement('section');
+        section.className = 'plot-source-modal-exp';
+        const title = document.createElement('div');
+        title.className = 'plot-artifact-title';
+        title.textContent = experiment.id;
+        const files = document.createElement('div');
+        files.className = 'plot-source-modal-files';
+        for (const file of experiment.files || []) {
+          const button = document.createElement('button');
+          button.className = 'small-button';
+          button.textContent = csvLabel(file.file);
+          button.title = `${experiment.id}/${file.file}`;
+          button.onclick = () => {
+            const source = Object.assign({}, file, {
+              kind: 'csv',
+              alias: file.alias || `${experiment.id}/${csvLabel(file.file)}`
+            });
+            const key = sourceKey(source);
+            if (!state.externalPlotSources.find(item => sourceKey(item) === key)) {
+              state.externalPlotSources.push(source);
+            }
+            state.selectedPlotSources.add(key);
+            syncPlotLabelSuggestion();
+            renderPlotPanel();
+          };
+          files.appendChild(button);
+        }
+        section.appendChild(title);
+        section.appendChild(files);
+        list.appendChild(section);
+      }
+    }
+    function closePlotSourceDialog() {
+      document.getElementById('plot-source-modal').classList.add('hidden');
     }
     async function plotExperiment() {
       if (!state.selected) return;
       setView('plots-view').catch(err => out(String(err)));
       applyPlotBackendStatus();
+      const error = validatePlotSelection();
+      if (error) {
+        out(error);
+        renderPlotPanel();
+        return;
+      }
       await withBusyButton('plot-results', 'Generating...', async () => {
         const noDocker = document.getElementById('plot-no-docker')?.checked || false;
-        const action = await api(`/api/experiments/${encodeURIComponent(state.selected)}/plot`, {
+        const label = document.getElementById('plot-label')?.value || '';
+        const action = await api(`/api/experiments/${encodeURIComponent(state.selected)}/plot-artifacts`, {
           method: 'POST',
-          body: JSON.stringify({ no_docker: noDocker })
+          body: JSON.stringify({
+            no_docker: noDocker,
+            plots: Array.from(state.selectedPlotTypes),
+            sources: selectedPlotSourceObjects(),
+            label
+          })
         });
         renderPlotPanel({ status: 'running', id: action.id });
         const completed = await watchAction(action.id, current => renderPlotPanel(current));
@@ -5424,6 +6120,12 @@ HTML = r"""<!doctype html>
     document.getElementById('refresh-progress').onclick = () => withBusyButton('refresh-progress', '', () => loadProgress()).catch(err => out(String(err)));
     document.getElementById('parse-results').onclick = parseExperiment;
     document.getElementById('plot-results').onclick = plotExperiment;
+    document.getElementById('add-plot-source').onclick = () => withBusyButton('add-plot-source', 'Loading...', openPlotSourceDialog).catch(err => out(String(err)));
+    document.getElementById('plot-source-close').onclick = closePlotSourceDialog;
+    document.getElementById('plot-source-close-footer').onclick = closePlotSourceDialog;
+    document.getElementById('plot-label').oninput = () => {
+      state.plotLabelTouched = true;
+    };
     document.getElementById('plot-no-docker').onchange = () => {
       state.plotNoDockerTouched = true;
     };
@@ -5496,6 +6198,9 @@ def make_handler(app):
                 if path == "/api/plot/spack-r-libs":
                     json_response(self, 200, app.spack_plot_cache_info())
                     return
+                if path == "/api/plots/catalog":
+                    json_response(self, 200, app.plot_catalog())
+                    return
                 if path == "/api/experiments":
                     query = urllib.parse.parse_qs(parsed.query)
                     force = (query.get("refresh") or ["0"])[0] in ("1", "true", "yes")
@@ -5533,6 +6238,16 @@ def make_handler(app):
                 if match:
                     json_response(self, 200, app.plots_info(urllib.parse.unquote(match.group(1))))
                     return
+                match = re.match(r"^/api/experiments/([^/]+)/plot-sources$", path)
+                if match:
+                    query = urllib.parse.parse_qs(parsed.query)
+                    include_all = (query.get("all") or ["0"])[0] in ("1", "true", "yes")
+                    json_response(self, 200, app.plot_sources(urllib.parse.unquote(match.group(1)), include_all=include_all))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/plot-artifacts$", path)
+                if match:
+                    json_response(self, 200, app.list_plot_artifacts(urllib.parse.unquote(match.group(1))))
+                    return
                 match = re.match(r"^/api/experiments/([^/]+)/stats$", path)
                 if match:
                     json_response(self, 200, app.stats(urllib.parse.unquote(match.group(1))))
@@ -5562,6 +6277,16 @@ def make_handler(app):
                     if not pdf.is_file():
                         json_response(self, 404, {"error": "plots.pdf not found"})
                         return
+                    data = pdf.read_bytes()
+                    self.send_response(200)
+                    self.send_header("Content-Type", mimetypes.types_map.get(".pdf", "application/pdf"))
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/plot-artifacts/([^/]+)\.pdf$", path)
+                if match:
+                    pdf = app.plot_artifact_pdf(urllib.parse.unquote(match.group(1)), urllib.parse.unquote(match.group(2)))
                     data = pdf.read_bytes()
                     self.send_response(200)
                     self.send_header("Content-Type", mimetypes.types_map.get(".pdf", "application/pdf"))
@@ -5650,6 +6375,10 @@ def make_handler(app):
                     if action == "plot":
                         json_response(self, 202, app.plot_action(experiment_id, payload))
                         return
+                match = re.match(r"^/api/experiments/([^/]+)/plot-artifacts$", path)
+                if match:
+                    json_response(self, 202, app.create_plot_artifacts_action(urllib.parse.unquote(match.group(1)), payload))
+                    return
                 json_response(self, 404, {"error": "not found"})
             except Exception as exc:
                 json_response(self, 400, {"error": str(exc)})
