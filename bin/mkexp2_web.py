@@ -3019,6 +3019,7 @@ HTML = r"""<!doctype html>
       progressTimer: null,
       activeView: 'experiment-view'
     };
+    const PLOT_RELOAD_DELAY_MS = 5000;
     const allowEmptyToken = __ALLOW_EMPTY_TOKEN__;
     const tokenInput = document.getElementById('token');
     const editor = document.getElementById('experiment-editor');
@@ -5099,7 +5100,10 @@ HTML = r"""<!doctype html>
         file.textContent = 'Select an experiment first.';
         return;
       }
-      if (action) {
+      const actionOutput = document.getElementById('plot-action-output');
+      if (action?.status === 'running') {
+        if (actionOutput) actionOutput.innerHTML = '';
+      } else if (action) {
         renderActionStatus('plot-action-output', 'Plot generation', action, 'plot');
       }
       summary.textContent = action?.status === 'running'
@@ -5195,6 +5199,7 @@ HTML = r"""<!doctype html>
         renderPlotPanel({ status: 'running', id: action.id });
         const completed = await watchAction(action.id, current => renderPlotPanel(current));
         if (completed?.status === 'completed' && completed.result?.plotted) {
+          await new Promise(resolve => setTimeout(resolve, PLOT_RELOAD_DELAY_MS));
           await loadPlotInfo();
         }
       });

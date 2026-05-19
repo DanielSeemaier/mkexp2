@@ -232,6 +232,8 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("function applyPlotBackendStatus", mkexp2_web.HTML)
         self.assertIn("/api/plot/backend", mkexp2_web.HTML)
         self.assertIn("body: JSON.stringify({ no_docker: noDocker })", mkexp2_web.HTML)
+        self.assertIn("const PLOT_RELOAD_DELAY_MS = 5000", mkexp2_web.HTML)
+        self.assertIn("if (action?.status === 'running')", mkexp2_web.HTML)
         self.assertIn('id="clear-submit-lock"', mkexp2_web.HTML)
         self.assertIn('id="delete-experiment"', mkexp2_web.HTML)
         self.assertIn('Danger Zone', mkexp2_web.HTML)
