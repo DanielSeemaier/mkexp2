@@ -2258,48 +2258,38 @@ HTML = r"""<!doctype html>
     }
     .git-status-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 10px;
     }
-    .git-status-column {
+    .git-file-list {
       min-width: 0;
       border: 1px solid var(--border);
       border-radius: 6px;
       background: #fbfcfd;
       padding: 10px;
-    }
-    .git-status-column.added {
-      border-color: #bbf7d0;
-      background: #f0fdf4;
-    }
-    .git-status-column.modified {
-      border-color: #fed7aa;
-      background: #fff7ed;
-    }
-    .git-status-column.deleted {
-      border-color: #fecaca;
-      background: #fff1f2;
-    }
-    .git-status-title {
-      margin-bottom: 8px;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 750;
-      text-transform: uppercase;
-    }
-    .git-status-title.added { color: #166534; }
-    .git-status-title.modified { color: #9a3412; }
-    .git-status-title.deleted { color: #991b1b; }
-    .git-file-list {
       display: grid;
       gap: 5px;
     }
     .git-file {
+      display: grid;
+      grid-template-columns: 74px minmax(0, 1fr);
+      align-items: start;
+      gap: 8px;
       min-width: 0;
       overflow-wrap: anywhere;
       border-radius: 5px;
       padding: 4px 6px;
       font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .git-file-kind {
+      font: 11px/1.45 ui-sans-serif, system-ui, sans-serif;
+      font-weight: 750;
+      text-transform: uppercase;
+    }
+    .git-file-kind::after {
+      content: ":";
+    }
+    .git-file-path {
+      min-width: 0;
     }
     .git-file.added {
       background: #dcfce7;
@@ -3300,32 +3290,34 @@ HTML = r"""<!doctype html>
       repoSummary.textContent = `${status.repo || 'experiment repo'}${status.branch ? ` on ${status.branch}` : ''}`;
       grid.innerHTML = '';
       const groups = status.groups || {};
+      const list = document.createElement('div');
+      list.className = 'git-file-list';
+      let total = 0;
       for (const [key, label] of [['added', 'Added'], ['modified', 'Modified'], ['deleted', 'Deleted']]) {
-        const column = document.createElement('section');
-        column.className = `git-status-column ${key}`;
-        const title = document.createElement('div');
-        title.className = `git-status-title ${key}`;
         const files = groups[key] || [];
-        title.textContent = `${label} (${files.length})`;
-        const list = document.createElement('div');
-        list.className = 'git-file-list';
-        if (!files.length) {
-          const empty = document.createElement('div');
-          empty.className = 'csv-summary';
-          empty.textContent = 'None';
-          list.appendChild(empty);
-        }
+        total += files.length;
         for (const file of files) {
           const item = document.createElement('div');
           item.className = `git-file ${key}`;
-          item.textContent = file.path;
           item.title = `${file.status} ${file.path}`;
+          const kind = document.createElement('span');
+          kind.className = 'git-file-kind';
+          kind.textContent = label;
+          const path = document.createElement('span');
+          path.className = 'git-file-path';
+          path.textContent = file.path;
+          item.appendChild(kind);
+          item.appendChild(path);
           list.appendChild(item);
         }
-        column.appendChild(title);
-        column.appendChild(list);
-        grid.appendChild(column);
       }
+      if (!total) {
+        const empty = document.createElement('div');
+        empty.className = 'csv-summary';
+        empty.textContent = 'No added, modified, or deleted files.';
+        list.appendChild(empty);
+      }
+      grid.appendChild(list);
       output.className = status.dirty ? 'csv-empty' : 'csv-empty status-ok';
       output.textContent = status.dirty
         ? 'Enter a commit message, then push to commit and push the experiment repo.'
