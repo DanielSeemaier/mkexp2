@@ -238,6 +238,11 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("token() || allowEmptyToken", mkexp2_web.HTML)
         self.assertIn('id="refresh" class="icon-button" aria-label="Refresh experiments"', mkexp2_web.HTML)
         self.assertIn('id="refresh-status" class="icon-button" aria-label="Reload node status"', mkexp2_web.HTML)
+        self.assertIn('id="queue-open" class="icon-button" aria-label="Show Slurm queue"', mkexp2_web.HTML)
+        self.assertIn('id="queue-modal"', mkexp2_web.HTML)
+        self.assertIn('id="queue-refresh" class="icon-button" aria-label="Reload Slurm queue"', mkexp2_web.HTML)
+        self.assertIn("function renderQueue", mkexp2_web.HTML)
+        self.assertIn("/api/status/squeue", mkexp2_web.HTML)
         self.assertIn('id="git-refresh" class="icon-button" aria-label="Reload Git status"', mkexp2_web.HTML)
         self.assertIn('id="refresh-progress" class="icon-button" aria-label="Reload progress"', mkexp2_web.HTML)
         self.assertLess(mkexp2_web.HTML.index('id="refresh"'), mkexp2_web.HTML.index('id="git-open"'))
@@ -657,6 +662,12 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
         self.assertEqual(jobs[0]["node_names"], ["node01", "node02"])
         self.assertEqual(jobs[0]["user"], "alice")
 
+        queue = mkexp2_web.parse_squeue_table(mkexp2_web.SQUEUE_FALLBACK)
+        self.assertEqual(len(queue), 3)
+        self.assertEqual(queue[0]["job_id"], "67633")
+        self.assertEqual(queue[0]["state"], "PD")
+        self.assertEqual(queue[0]["nodelist"], "(Dependency)")
+
         sinfo = mkexp2_web.parse_sinfo_nodes("node01|cpu|32/32/0/64|257000|gpu:2|zen4|mix|none\n")
         self.assertEqual(sinfo["node01"]["partition"], "cpu")
         self.assertEqual(sinfo["node01"]["cpu_info"], "32/32/0/64")
@@ -697,6 +708,27 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
         backus = next(node for node in status["nodes"] if node["name"] == "backus")
         self.assertEqual(backus["jobs"][0]["user"], "alice")
         self.assertEqual(backus["jobs"][0]["start_time"], "2026-05-16T15:00:00")
+
+    def test_squeue_status_falls_back_when_squeue_is_missing(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            calls.append(list(argv))
+            if argv == ["squeue"]:
+                return {"returncode": 127, "stdout": "", "stderr": "squeue not found"}
+            return {"returncode": 0, "stdout": "", "stderr": ""}
+
+        mkexp2_web.run_command = fake_run_command
+        try:
+            queue = mkexp2_web.SlurmStatus().queue()
+        finally:
+            mkexp2_web.run_command = original_run_command
+
+        self.assertIn(["squeue"], calls)
+        self.assertEqual(queue["source"], "fallback sample: squeue not installed")
+        self.assertEqual(len(queue["rows"]), 3)
+        self.assertEqual(queue["rows"][1]["partition"], "diffie")
 
 
 if __name__ == "__main__":

@@ -44,6 +44,11 @@ rabin           1      all*       idle~ 32      2:8:2  64363        0      1   (
 shamir          1      all*       idle~ 64      4:8:2 515851        0      1   (null) none
 yao             1      all*       down~ 48     2:12:2 128794        0      1   (null) ResumeTimeout reache
 """
+SQUEUE_FALLBACK = """             JOBID PARTITION     NAME     USER ST       TIME  NODES NODELIST(REASON)
+             67633       all submit-l seemaier PD       0:00      1 (Dependency)
+             67632    diffie Experime seemaier  R       4:13      1 diffie
+             67630    liskov run_cost laupichl  R    1:45:10      1 liskov
+"""
 
 
 def slugify(value):
@@ -327,6 +332,31 @@ def parse_squeue_jobs(text):
     return jobs
 
 
+def parse_squeue_table(text):
+    rows = []
+    for line in str(text or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("JOBID"):
+            continue
+        parts = line.split(None, 7)
+        if len(parts) < 8:
+            continue
+        job_id, partition, name, user, state, elapsed, nodes, nodelist = parts
+        rows.append(
+            {
+                "job_id": job_id,
+                "partition": partition,
+                "name": name,
+                "user": user,
+                "state": state,
+                "time": elapsed,
+                "nodes": nodes,
+                "nodelist": nodelist,
+            }
+        )
+    return rows
+
+
 class SlurmStatus:
     def __init__(self):
         self._cache_until = 0
@@ -394,6 +424,22 @@ class SlurmStatus:
             "source": source,
             "nodes": node_list,
             "commands": commands,
+        }
+
+    def queue(self):
+        command = run_command(["squeue"], timeout=8)
+        source = "squeue"
+        raw = command["stdout"]
+        if command["returncode"] == 127:
+            source = "fallback sample: squeue not installed"
+            raw = SQUEUE_FALLBACK
+        return {
+            "ok": command["returncode"] == 0 or command["returncode"] == 127,
+            "generated_at": _dt.datetime.now().isoformat(timespec="seconds"),
+            "source": source,
+            "raw": raw,
+            "rows": parse_squeue_table(raw),
+            "command": command,
         }
 
 
@@ -1337,6 +1383,11 @@ HTML = r"""<!doctype html>
       letter-spacing: 0;
       text-transform: uppercase;
     }
+    .sidebar-section-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
     .small-button {
       height: 28px;
       padding: 0 8px;
@@ -2262,6 +2313,42 @@ HTML = r"""<!doctype html>
       background: #fee2e2;
       color: #7f1d1d;
     }
+    .queue-table-wrap {
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fbfcfd;
+    }
+    .queue-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .queue-table th,
+    .queue-table td {
+      padding: 7px 8px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+      white-space: nowrap;
+    }
+    .queue-table th {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 750;
+      text-transform: uppercase;
+      background: #f8fafb;
+    }
+    .queue-table tr:last-child td {
+      border-bottom: 0;
+    }
+    .queue-state {
+      font-weight: 750;
+      font-variant-numeric: tabular-nums;
+    }
+    .queue-state-running { color: var(--ok); }
+    .queue-state-pending { color: #9a3412; }
+    .queue-state-other { color: var(--muted); }
     .git-message {
       display: grid;
       gap: 6px;
@@ -2487,9 +2574,14 @@ HTML = r"""<!doctype html>
       <section class="sidebar-nodes">
         <div class="sidebar-section-header">
           <div class="sidebar-section-title">Nodes</div>
-          <button id="refresh-status" class="icon-button" aria-label="Reload node status" title="Reload node status">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
-          </button>
+          <div class="sidebar-section-actions">
+            <button id="queue-open" class="icon-button" aria-label="Show Slurm queue" title="Show Slurm queue">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>
+            </button>
+            <button id="refresh-status" class="icon-button" aria-label="Reload node status" title="Reload node status">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+            </button>
+          </div>
         </div>
         <div id="slurm-status" class="node-list muted">No status loaded.</div>
       </section>
@@ -2516,6 +2608,25 @@ HTML = r"""<!doctype html>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
           </button>
           <button id="git-push" class="primary">Push</button>
+        </div>
+      </div>
+    </div>
+    <div id="queue-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="queue-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="queue-modal-title" class="modal-title">Slurm Queue</div>
+            <div id="queue-summary" class="csv-summary">No queue loaded.</div>
+          </div>
+          <button id="queue-close" class="icon-button" aria-label="Close Slurm queue" title="Close">x</button>
+        </div>
+        <div class="modal-body">
+          <div id="queue-output" class="csv-empty">Open the dialog to load squeue output.</div>
+        </div>
+        <div class="modal-footer">
+          <button id="queue-refresh" class="icon-button" aria-label="Reload Slurm queue" title="Reload Slurm queue">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+          </button>
         </div>
       </div>
     </div>
@@ -3238,6 +3349,68 @@ HTML = r"""<!doctype html>
     }
     function closeGitDialog() {
       document.getElementById('git-modal').classList.add('hidden');
+    }
+    function queueStateClass(state) {
+      const raw = String(state || '').toUpperCase();
+      if (raw === 'R' || raw === 'RUNNING') return 'queue-state-running';
+      if (raw === 'PD' || raw === 'PENDING') return 'queue-state-pending';
+      return 'queue-state-other';
+    }
+    function renderQueue(data) {
+      const summary = document.getElementById('queue-summary');
+      const output = document.getElementById('queue-output');
+      const rows = data.rows || [];
+      summary.textContent = `${rows.length} job${rows.length === 1 ? '' : 's'} from ${data.source || 'squeue'}; refreshed ${data.generated_at || 'now'}.`;
+      if (!rows.length) {
+        output.className = 'csv-empty';
+        output.textContent = 'No queued or running Slurm jobs.';
+        return;
+      }
+      output.className = 'queue-table-wrap';
+      output.innerHTML = '';
+      const table = document.createElement('table');
+      table.className = 'queue-table';
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      for (const label of ['Job ID', 'Partition', 'Name', 'User', 'State', 'Time', 'Nodes', 'Node list / reason']) {
+        const th = document.createElement('th');
+        th.textContent = label;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      for (const row of rows) {
+        const tr = document.createElement('tr');
+        for (const key of ['job_id', 'partition', 'name', 'user', 'state', 'time', 'nodes', 'nodelist']) {
+          const td = document.createElement('td');
+          td.textContent = row[key] || '';
+          if (key === 'state') td.className = `queue-state ${queueStateClass(row[key])}`;
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      output.appendChild(table);
+    }
+    async function loadQueue() {
+      const output = document.getElementById('queue-output');
+      output.className = 'csv-empty';
+      output.textContent = 'Loading Slurm queue...';
+      const data = await api('/api/status/squeue');
+      renderQueue(data);
+      return data;
+    }
+    async function openQueueDialog() {
+      document.getElementById('queue-modal').classList.remove('hidden');
+      await loadQueue().catch(err => {
+        const output = document.getElementById('queue-output');
+        output.className = 'csv-empty status-bad';
+        output.textContent = String(err);
+      });
+    }
+    function closeQueueDialog() {
+      document.getElementById('queue-modal').classList.add('hidden');
     }
     function openConsoleDialog() {
       state.consoleOpen = true;
@@ -4851,6 +5024,9 @@ HTML = r"""<!doctype html>
       refreshExperiments({ force: true }).catch(err => out(String(err)));
     };
     document.getElementById('refresh-status').onclick = refreshStatus;
+    document.getElementById('queue-open').onclick = openQueueDialog;
+    document.getElementById('queue-close').onclick = closeQueueDialog;
+    document.getElementById('queue-refresh').onclick = () => loadQueue().catch(err => out(String(err)));
     document.getElementById('git-open').onclick = openGitDialog;
     document.getElementById('git-close').onclick = closeGitDialog;
     document.getElementById('git-refresh').onclick = () => loadGitStatus().catch(err => out(String(err)));
@@ -4916,6 +5092,9 @@ def make_handler(app):
                     return
                 if path == "/api/status/slurm":
                     json_response(self, 200, app.slurm.get())
+                    return
+                if path == "/api/status/squeue":
+                    json_response(self, 200, app.slurm.queue())
                     return
                 if path == "/api/presets":
                     json_response(self, 200, {"presets": app.list_presets()})
