@@ -2607,6 +2607,10 @@ HTML = r"""<!doctype html>
       max-height: 55vh;
       overflow: auto;
     }
+    .plot-source-modal-list .experiment-folder {
+      display: grid;
+      gap: 6px;
+    }
     .plot-source-modal-exp {
       display: grid;
       gap: 6px;
@@ -3467,6 +3471,7 @@ HTML = r"""<!doctype html>
       plotSources: null,
       plotSourcesFor: null,
       plotSourcesInitializedFor: null,
+      plotSourceOpenDirs: new Set(),
       selectedPlotTypes: new Set(),
       selectedPlotSources: new Set(),
       externalPlotSources: [],
@@ -5929,6 +5934,79 @@ HTML = r"""<!doctype html>
       renderPlotPanel();
       return data;
     }
+    function addExternalPlotSource(experiment, file) {
+      const source = Object.assign({}, file, {
+        kind: 'csv',
+        alias: file.alias || `${experiment.id}/${csvLabel(file.file)}`
+      });
+      const key = sourceKey(source);
+      if (!state.externalPlotSources.find(item => sourceKey(item) === key)) {
+        state.externalPlotSources.push(source);
+      }
+      state.selectedPlotSources.add(key);
+      syncPlotLabelSuggestion();
+      renderPlotPanel();
+    }
+    function renderPlotSourceExperiment(container, experiment) {
+      const section = document.createElement('section');
+      section.className = 'plot-source-modal-exp';
+      const title = document.createElement('div');
+      title.className = 'plot-artifact-title';
+      title.textContent = experiment.label || experiment.name || experiment.id;
+      title.title = experiment.id;
+      section.appendChild(title);
+      if (experiment.id !== title.textContent) {
+        const meta = document.createElement('div');
+        meta.className = 'plot-artifact-meta';
+        meta.textContent = experiment.id;
+        section.appendChild(meta);
+      }
+      const files = document.createElement('div');
+      files.className = 'plot-source-modal-files';
+      for (const file of experiment.files || []) {
+        const button = document.createElement('button');
+        button.className = 'small-button';
+        button.textContent = csvLabel(file.file);
+        button.title = `${experiment.id}/${file.file}`;
+        button.onclick = () => addExternalPlotSource(experiment, file);
+        files.appendChild(button);
+      }
+      section.appendChild(files);
+      container.appendChild(section);
+    }
+    function renderPlotSourceTree(container, node, prefix = '') {
+      const folders = Array.from(node.folders.entries()).sort((left, right) => left[0].localeCompare(right[0]));
+      for (const [name, child] of folders) {
+        const id = prefix ? `${prefix}/${name}` : name;
+        const details = document.createElement('details');
+        details.className = 'experiment-folder plot-source-folder';
+        details.open = state.plotSourceOpenDirs.has(id);
+        details.addEventListener('toggle', () => {
+          if (details.open) state.plotSourceOpenDirs.add(id);
+          else state.plotSourceOpenDirs.delete(id);
+        });
+        const summary = document.createElement('summary');
+        summary.className = 'folder-summary';
+        const label = document.createElement('span');
+        label.className = 'folder-name';
+        label.textContent = name;
+        const count = document.createElement('span');
+        count.className = 'folder-count';
+        count.textContent = `${child.count}`;
+        summary.appendChild(label);
+        summary.appendChild(count);
+        const children = document.createElement('div');
+        children.className = 'folder-children';
+        renderPlotSourceTree(children, child, id);
+        details.appendChild(summary);
+        details.appendChild(children);
+        container.appendChild(details);
+      }
+      const experiments = Array.from(node.experiments).sort((left, right) => left.label.localeCompare(right.label));
+      for (const experiment of experiments) {
+        renderPlotSourceExperiment(container, experiment);
+      }
+    }
     async function openPlotSourceDialog() {
       if (!state.selected) return;
       const modal = document.getElementById('plot-source-modal');
@@ -5947,38 +6025,7 @@ HTML = r"""<!doctype html>
         list.textContent = 'No CSV files found in other experiments.';
         return;
       }
-      for (const experiment of experiments) {
-        const section = document.createElement('section');
-        section.className = 'plot-source-modal-exp';
-        const title = document.createElement('div');
-        title.className = 'plot-artifact-title';
-        title.textContent = experiment.id;
-        const files = document.createElement('div');
-        files.className = 'plot-source-modal-files';
-        for (const file of experiment.files || []) {
-          const button = document.createElement('button');
-          button.className = 'small-button';
-          button.textContent = csvLabel(file.file);
-          button.title = `${experiment.id}/${file.file}`;
-          button.onclick = () => {
-            const source = Object.assign({}, file, {
-              kind: 'csv',
-              alias: file.alias || `${experiment.id}/${csvLabel(file.file)}`
-            });
-            const key = sourceKey(source);
-            if (!state.externalPlotSources.find(item => sourceKey(item) === key)) {
-              state.externalPlotSources.push(source);
-            }
-            state.selectedPlotSources.add(key);
-            syncPlotLabelSuggestion();
-            renderPlotPanel();
-          };
-          files.appendChild(button);
-        }
-        section.appendChild(title);
-        section.appendChild(files);
-        list.appendChild(section);
-      }
+      renderPlotSourceTree(list, experimentTree(experiments));
     }
     function closePlotSourceDialog() {
       document.getElementById('plot-source-modal').classList.add('hidden');

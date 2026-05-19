@@ -239,6 +239,8 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="plot-sources"', mkexp2_web.HTML)
         self.assertIn('id="plot-artifacts"', mkexp2_web.HTML)
         self.assertIn('id="plot-source-modal"', mkexp2_web.HTML)
+        self.assertIn("plotSourceOpenDirs", mkexp2_web.HTML)
+        self.assertIn("renderPlotSourceTree", mkexp2_web.HTML)
         self.assertIn("selectedPlotSourceObjects", mkexp2_web.HTML)
         self.assertIn("plots: Array.from(state.selectedPlotTypes)", mkexp2_web.HTML)
         self.assertIn("const PLOT_RELOAD_DELAY_MS = 5000", mkexp2_web.HTML)
