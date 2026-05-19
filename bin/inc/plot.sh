@@ -199,9 +199,12 @@ _InstallNativeRPackages() {
 
   EchoStep "Checking native R packages"
   _AcquireDirLock "$lock_dir" 900 || return 1
-  _RunNativeRscript "$plots_dir" "$results_dir" "$plots_dir/install.R"
-  rc=$?
-  _ReleaseDirLock "$lock_dir"
+  {
+    _RunNativeRscript "$plots_dir" "$results_dir" "$plots_dir/install.R"
+    rc=$?
+  } always {
+    _ReleaseDirLock "$lock_dir"
+  }
   if (( rc != 0 )); then
     EchoFatal "native R package installation failed"
     return 1
