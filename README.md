@@ -357,6 +357,9 @@ The UI can:
 - open the header settings button to manage the session token and inspect the
   full browser-session command log, including argv/cwd/stdout/stderr payloads
   returned by web API actions
+- show a disabled busy state with a spinner on controls that trigger backend
+  work, including reloads, checks, probes, parsing, plotting, Git push, and
+  destructive recovery actions
 - create a new directory from the header `+` dialog, selecting a preset and
   optionally overriding the configured name template for that experiment
 - edit the raw `Experiment` file with lightweight syntax highlighting

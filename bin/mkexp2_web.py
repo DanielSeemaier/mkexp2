@@ -3022,6 +3022,40 @@ HTML = r"""<!doctype html>
     function consoleText(value) {
       return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     }
+    function setButtonBusy(buttonOrId, label = undefined) {
+      const button = typeof buttonOrId === 'string' ? document.getElementById(buttonOrId) : buttonOrId;
+      if (!button) return () => {};
+      if (button.dataset.busy === '1') return () => {};
+      const previous = {
+        disabled: button.disabled,
+        html: button.innerHTML,
+        title: button.title || '',
+      };
+      button.dataset.busy = '1';
+      button.disabled = true;
+      button.classList.add('is-busy');
+      button.setAttribute('aria-busy', 'true');
+      const nextLabel = label === undefined
+        ? (button.classList.contains('icon-button') ? '' : 'Working...')
+        : label;
+      button.textContent = nextLabel;
+      return () => {
+        button.disabled = previous.disabled;
+        button.innerHTML = previous.html;
+        button.title = previous.title;
+        button.classList.remove('is-busy');
+        button.removeAttribute('aria-busy');
+        delete button.dataset.busy;
+      };
+    }
+    async function withBusyButton(buttonOrId, label, task) {
+      const restore = setButtonBusy(buttonOrId, label);
+      try {
+        return await task();
+      } finally {
+        restore();
+      }
+    }
     function appendConsoleLog(title, value) {
       state.consoleEntries.push({
         time: new Date().toLocaleTimeString(),
@@ -3574,7 +3608,7 @@ HTML = r"""<!doctype html>
           button.textContent = 'x';
           button.setAttribute('aria-label', `Cancel Slurm job ${row.job_id}`);
           button.title = `Cancel Slurm job ${row.job_id}`;
-          button.onclick = () => cancelQueueJob(row.job_id);
+          button.onclick = () => cancelQueueJob(row.job_id, button).catch(err => out(String(err)));
           action.appendChild(button);
         } else {
           action.className = 'csv-summary';
@@ -3605,14 +3639,16 @@ HTML = r"""<!doctype html>
     function closeQueueDialog() {
       document.getElementById('queue-modal').classList.add('hidden');
     }
-    async function cancelQueueJob(jobId) {
+    async function cancelQueueJob(jobId, button = null) {
       if (!confirm(`Cancel Slurm job ${jobId}?`)) return;
-      await api('/api/status/squeue/cancel', {
-        method: 'POST',
-        body: JSON.stringify({ job_id: jobId })
+      await withBusyButton(button, '', async () => {
+        await api('/api/status/squeue/cancel', {
+          method: 'POST',
+          body: JSON.stringify({ job_id: jobId })
+        });
+        await loadQueue();
+        await refreshStatus().catch(err => out(String(err)));
       });
-      await loadQueue();
-      await refreshStatus().catch(err => out(String(err)));
     }
     function openSettingsDialog() {
       state.consoleOpen = true;
@@ -3636,27 +3672,26 @@ HTML = r"""<!doctype html>
         output.textContent = 'Commit message is required.';
         return;
       }
-      button.disabled = true;
-      output.className = 'csv-empty';
-      output.textContent = 'Committing and pushing experiment repo...';
-      try {
-        const result = await api('/api/git/push', {
-          method: 'POST',
-          body: JSON.stringify({ message })
-        });
-        if (result.ok) {
-          closeGitDialog();
-          out('Experiment repo pushed.');
-        } else {
-          output.className = 'output rendered-output';
-          output.textContent = JSON.stringify(result, null, 2);
+      await withBusyButton(button, 'Pushing...', async () => {
+        output.className = 'csv-empty';
+        output.textContent = 'Committing and pushing experiment repo...';
+        try {
+          const result = await api('/api/git/push', {
+            method: 'POST',
+            body: JSON.stringify({ message })
+          });
+          if (result.ok) {
+            closeGitDialog();
+            out('Experiment repo pushed.');
+          } else {
+            output.className = 'output rendered-output';
+            output.textContent = JSON.stringify(result, null, 2);
+          }
+        } catch (err) {
+          output.className = 'csv-empty status-bad';
+          output.textContent = String(err);
         }
-      } catch (err) {
-        output.className = 'csv-empty status-bad';
-        output.textContent = String(err);
-      } finally {
-        button.disabled = false;
-      }
+      });
     }
     function appendInlineMarkdown(parent, text) {
       const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g;
@@ -4401,7 +4436,7 @@ HTML = r"""<!doctype html>
         const up = document.createElement('button');
         up.className = 'log-entry';
         up.innerHTML = '<span>..</span><span class="log-entry-name">Parent directory</span><span class="log-entry-meta"></span>';
-        up.onclick = () => loadLogs(parentLogDir(dir));
+        up.onclick = () => withBusyButton(up, 'Loading...', () => loadLogs(parentLogDir(dir))).catch(err => out(String(err)));
         list.appendChild(up);
       }
       if (!listing.entries.length && !dir) {
@@ -4427,10 +4462,9 @@ HTML = r"""<!doctype html>
         button.appendChild(icon);
         button.appendChild(name);
         button.appendChild(meta);
-        button.onclick = () => {
-          if (entry.type === 'dir') loadLogs(entry.path);
-          else loadLogFile(entry.path);
-        };
+        button.onclick = () => withBusyButton(button, 'Loading...', () => (
+          entry.type === 'dir' ? loadLogs(entry.path) : loadLogFile(entry.path)
+        )).catch(err => out(String(err)));
         list.appendChild(button);
       }
       if (listing.has_more) {
@@ -4486,7 +4520,7 @@ HTML = r"""<!doctype html>
         renderStatsWorkspace();
       }
     }
-    function setView(viewId) {
+    async function setView(viewId) {
       state.activeView = viewId;
       document.querySelectorAll('.view-tab').forEach(button => {
         button.classList.toggle('active', button.dataset.view === viewId);
@@ -4495,17 +4529,19 @@ HTML = r"""<!doctype html>
         panel.classList.toggle('active', panel.id === viewId);
       });
       if (viewId === 'results-view') {
-        activateCsvView(viewId).catch(err => out(String(err)));
+        await activateCsvView(viewId);
       }
       if (viewId === 'install-log-view') {
-        ensureInstallLogLoaded().catch(err => out(String(err)));
+        await ensureInstallLogLoaded();
       }
       if (viewId === 'logs-view') {
-        ensureLogsLoaded().catch(err => out(String(err)));
+        await ensureLogsLoaded();
       }
       if (viewId === 'plots-view') {
-        loadPlotBackendStatus().catch(err => out(String(err)));
-        loadPlotInfo().catch(err => out(String(err)));
+        await Promise.all([
+          loadPlotBackendStatus(),
+          loadPlotInfo()
+        ]);
         renderPlotPanel();
       }
     }
@@ -4579,14 +4615,14 @@ HTML = r"""<!doctype html>
       button.className = 'experiment-row' + (state.selected === exp.id ? ' active' : '');
       button.textContent = label;
       button.title = exp.id;
-      button.onclick = () => selectExperiment(exp.id);
+      button.onclick = () => withBusyButton(button, 'Loading...', () => selectExperiment(exp.id)).catch(err => out(String(err)));
       const pin = document.createElement('button');
       pin.className = 'pin-button' + (pinned ? ' active' : '');
       pin.type = 'button';
       pin.textContent = pinned ? '★' : '☆';
       pin.title = pinned ? 'Unpin experiment' : 'Pin experiment';
       pin.setAttribute('aria-label', `${pinned ? 'Unpin' : 'Pin'} ${exp.id}`);
-      pin.onclick = () => togglePinnedExperiment(exp.id);
+      pin.onclick = () => withBusyButton(pin, '', () => togglePinnedExperiment(exp.id)).catch(err => out(String(err)));
       item.appendChild(button);
       item.appendChild(pin);
       container.appendChild(item);
@@ -4728,8 +4764,10 @@ HTML = r"""<!doctype html>
     }
     async function clearSubmitLock() {
       if (!state.selected) return;
-      const result = await api(`/api/experiments/${encodeURIComponent(state.selected)}/submit-lock`, { method: 'DELETE' });
-      renderSubmitLock(result.submit_lock);
+      await withBusyButton('clear-submit-lock', 'Unlocking...', async () => {
+        const result = await api(`/api/experiments/${encodeURIComponent(state.selected)}/submit-lock`, { method: 'DELETE' });
+        renderSubmitLock(result.submit_lock);
+      });
     }
     async function deleteExperiment() {
       if (!state.selected) return;
@@ -4738,8 +4776,7 @@ HTML = r"""<!doctype html>
       if (typed !== id) return;
       if (!confirm(`Delete experiment "${id}" and all files in its directory?`)) return;
       const button = document.getElementById('delete-experiment');
-      button.disabled = true;
-      try {
+      await withBusyButton(button, 'Deleting...', async () => {
         await api(`/api/experiments/${encodeURIComponent(id)}`, { method: 'DELETE' });
         state.selected = null;
         state.submitLock = null;
@@ -4750,9 +4787,7 @@ HTML = r"""<!doctype html>
         renderSubmitLock({ locked: false });
         renderProgress(null);
         await refreshExperiments({ force: true });
-      } finally {
-        button.disabled = false;
-      }
+      });
     }
     function startProgressPolling() {
       if (state.progressTimer) return;
@@ -4874,7 +4909,7 @@ HTML = r"""<!doctype html>
       state.plotInfo = null;
       state.plotInfoFor = null;
       clearPlotPdfUrl();
-      setView('experiment-view');
+      setView('experiment-view').catch(err => out(String(err)));
       renderResultsWorkspace();
       renderStatsWorkspace();
       renderInstallLogWorkspace();
@@ -4906,8 +4941,7 @@ HTML = r"""<!doctype html>
       const preset = document.getElementById('create-preset').value;
       const nameTemplate = activeCreateTemplate();
       const button = document.getElementById('create-submit');
-      button.disabled = true;
-      try {
+      await withBusyButton(button, 'Creating...', async () => {
         const data = await api('/api/experiments', {
           method: 'POST',
           body: JSON.stringify({ name, preset, name_template: nameTemplate })
@@ -4915,16 +4949,13 @@ HTML = r"""<!doctype html>
         closeCreateDialog();
         await refreshExperiments({ force: true });
         await selectExperiment(data.id);
-      } finally {
-        button.disabled = false;
-      }
+      });
     }
     async function checkExperiment() {
       if (!state.selected) return;
       const button = document.getElementById('check');
-      button.disabled = true;
-      out('Saving and checking...');
-      try {
+      await withBusyButton(button, 'Checking...', async () => {
+        out('Saving and checking...');
         const saved = await persistExperiment();
         const result = await api(`/api/experiments/${encodeURIComponent(state.selected)}/check`, { method: 'POST' });
         renderCheckResult(result, saved);
@@ -4933,16 +4964,13 @@ HTML = r"""<!doctype html>
         } catch (err) {
           out(`Algorithm refresh failed after check: ${String(err)}`);
         }
-      } finally {
-        button.disabled = false;
-      }
+      });
     }
     async function probeExperiment() {
       if (!state.selected) return;
-      setActionButtons(['probe-run'], true);
-      document.getElementById('probe-summary').textContent = 'Running mkexp2 probe...';
-      document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Running mkexp2 probe...</div>';
-      try {
+      await withBusyButton('probe-run', 'Running...', async () => {
+        document.getElementById('probe-summary').textContent = 'Running mkexp2 probe...';
+        document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Running mkexp2 probe...</div>';
         const listing = await api(`/api/experiments/${encodeURIComponent(state.selected)}/probe`, {
           method: 'POST',
           body: JSON.stringify({})
@@ -4957,9 +4985,7 @@ HTML = r"""<!doctype html>
         }
         renderProbeResult(results, null);
         await loadAlgorithms();
-      } finally {
-        setActionButtons(['probe-run'], false);
-      }
+      });
     }
     async function loadAlgorithms() {
       state.algorithms = [];
@@ -5031,16 +5057,9 @@ HTML = r"""<!doctype html>
       await refreshSubmitLock();
       await loadProgress({ quiet: true }).catch(() => {});
     }
-    function setActionButtons(ids, disabled) {
-      for (const id of ids) {
-        const button = document.getElementById(id);
-        if (button) button.disabled = disabled;
-      }
-    }
     async function parseExperiment() {
       if (!state.selected) return;
-      setActionButtons(['parse-results'], true);
-      try {
+      await withBusyButton('parse-results', 'Parsing...', async () => {
         const action = await api(`/api/experiments/${encodeURIComponent(state.selected)}/parse`, {
           method: 'POST',
           body: JSON.stringify({})
@@ -5050,9 +5069,7 @@ HTML = r"""<!doctype html>
           await loadResults();
           await loadStats();
         }
-      } finally {
-        setActionButtons(['parse-results'], false);
-      }
+      });
     }
     function renderPlotPanel(action = null) {
       const summary = document.getElementById('plots-summary');
@@ -5150,10 +5167,9 @@ HTML = r"""<!doctype html>
     }
     async function plotExperiment() {
       if (!state.selected) return;
-      setView('plots-view');
+      setView('plots-view').catch(err => out(String(err)));
       applyPlotBackendStatus();
-      setActionButtons(['plot-results'], true);
-      try {
+      await withBusyButton('plot-results', 'Generating...', async () => {
         const noDocker = document.getElementById('plot-no-docker')?.checked || false;
         const action = await api(`/api/experiments/${encodeURIComponent(state.selected)}/plot`, {
           method: 'POST',
@@ -5164,9 +5180,7 @@ HTML = r"""<!doctype html>
         if (completed?.status === 'completed' && completed.result?.plotted) {
           await loadPlotInfo();
         }
-      } finally {
-        setActionButtons(['plot-results'], false);
-      }
+      });
     }
     async function watchAction(id, onUpdate = null) {
       let action = null;
@@ -5248,20 +5262,20 @@ HTML = r"""<!doctype html>
       }).join('');
       box.innerHTML = rows;
     }
-    document.getElementById('refresh-status').onclick = refreshStatus;
-    document.getElementById('queue-open').onclick = openQueueDialog;
+    document.getElementById('refresh-status').onclick = () => withBusyButton('refresh-status', '', refreshStatus).catch(err => out(String(err)));
+    document.getElementById('queue-open').onclick = () => withBusyButton('queue-open', '', openQueueDialog).catch(err => out(String(err)));
     document.getElementById('queue-close').onclick = closeQueueDialog;
-    document.getElementById('queue-refresh').onclick = () => loadQueue().catch(err => out(String(err)));
-    document.getElementById('create-open').onclick = openCreateDialog;
+    document.getElementById('queue-refresh').onclick = () => withBusyButton('queue-refresh', '', loadQueue).catch(err => out(String(err)));
+    document.getElementById('create-open').onclick = () => withBusyButton('create-open', '', openCreateDialog).catch(err => out(String(err)));
     document.getElementById('create-close').onclick = closeCreateDialog;
     document.getElementById('create-cancel').onclick = closeCreateDialog;
     document.getElementById('create-submit').onclick = createExperiment;
     document.getElementById('create-name').oninput = updateCreatePreview;
     document.getElementById('create-template').oninput = updateCreatePreview;
     document.getElementById('create-template-override').onchange = updateCreatePreview;
-    document.getElementById('git-open').onclick = openGitDialog;
+    document.getElementById('git-open').onclick = () => withBusyButton('git-open', '', openGitDialog).catch(err => out(String(err)));
     document.getElementById('git-close').onclick = closeGitDialog;
-    document.getElementById('git-refresh').onclick = () => loadGitStatus().catch(err => out(String(err)));
+    document.getElementById('git-refresh').onclick = () => withBusyButton('git-refresh', '', loadGitStatus).catch(err => out(String(err)));
     document.getElementById('git-push').onclick = pushGitChanges;
     document.getElementById('settings-open').onclick = openSettingsDialog;
     document.getElementById('settings-close').onclick = closeSettingsDialog;
@@ -5271,18 +5285,18 @@ HTML = r"""<!doctype html>
     document.getElementById('submit').onclick = submitExperiment;
     document.getElementById('clear-submit-lock').onclick = clearSubmitLock;
     document.getElementById('delete-experiment').onclick = deleteExperiment;
-    document.getElementById('refresh-progress').onclick = () => loadProgress();
+    document.getElementById('refresh-progress').onclick = () => withBusyButton('refresh-progress', '', () => loadProgress()).catch(err => out(String(err)));
     document.getElementById('parse-results').onclick = parseExperiment;
     document.getElementById('plot-results').onclick = plotExperiment;
     document.getElementById('plot-no-docker').onchange = () => {
       state.plotNoDockerTouched = true;
     };
-    document.getElementById('load-results').onclick = loadResults;
-    document.getElementById('load-stats').onclick = loadStats;
-    document.getElementById('load-install-log').onclick = loadInstallLog;
-    document.getElementById('reload-logs').onclick = () => loadLogs(state.logsDir || '');
+    document.getElementById('load-results').onclick = () => withBusyButton('load-results', '', loadResults).catch(err => out(String(err)));
+    document.getElementById('load-stats').onclick = () => withBusyButton('load-stats', '', loadStats).catch(err => out(String(err)));
+    document.getElementById('load-install-log').onclick = () => withBusyButton('load-install-log', '', loadInstallLog).catch(err => out(String(err)));
+    document.getElementById('reload-logs').onclick = () => withBusyButton('reload-logs', '', () => loadLogs(state.logsDir || '')).catch(err => out(String(err)));
     document.querySelectorAll('.view-tab').forEach(button => {
-      button.onclick = () => setView(button.dataset.view);
+      button.onclick = () => withBusyButton(button, 'Loading...', () => setView(button.dataset.view)).catch(err => out(String(err)));
     });
     if (token() || allowEmptyToken) {
       refreshConfig().catch(err => out(String(err)));
