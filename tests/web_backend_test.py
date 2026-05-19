@@ -204,6 +204,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="clear-submit-lock"', mkexp2_web.HTML)
         self.assertIn('id="delete-experiment"', mkexp2_web.HTML)
         self.assertIn('Danger Zone', mkexp2_web.HTML)
+        self.assertIn("margin-top: 14px;", mkexp2_web.HTML)
         self.assertIn("Type the full experiment name to delete it", mkexp2_web.HTML)
         self.assertIn("function renderSubmitButton", mkexp2_web.HTML)
         self.assertIn("state.submitBusy", mkexp2_web.HTML)

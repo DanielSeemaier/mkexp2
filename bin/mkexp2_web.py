@@ -1685,6 +1685,7 @@ HTML = r"""<!doctype html>
     }
     .danger-zone {
       border-color: #f1b7b1;
+      margin-top: 14px;
     }
     .danger-actions {
       display: grid;
