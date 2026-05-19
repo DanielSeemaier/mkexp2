@@ -2217,6 +2217,18 @@ HTML = r"""<!doctype html>
       background: #fbfcfd;
       padding: 10px;
     }
+    .git-status-column.added {
+      border-color: #bbf7d0;
+      background: #f0fdf4;
+    }
+    .git-status-column.modified {
+      border-color: #fed7aa;
+      background: #fff7ed;
+    }
+    .git-status-column.deleted {
+      border-color: #fecaca;
+      background: #fff1f2;
+    }
     .git-status-title {
       margin-bottom: 8px;
       color: var(--muted);
@@ -2224,18 +2236,31 @@ HTML = r"""<!doctype html>
       font-weight: 750;
       text-transform: uppercase;
     }
+    .git-status-title.added { color: #166534; }
+    .git-status-title.modified { color: #9a3412; }
+    .git-status-title.deleted { color: #991b1b; }
     .git-file-list {
       display: grid;
       gap: 5px;
-      max-height: 190px;
-      overflow: auto;
     }
     .git-file {
       min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow-wrap: anywhere;
+      border-radius: 5px;
+      padding: 4px 6px;
       font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .git-file.added {
+      background: #dcfce7;
+      color: #14532d;
+    }
+    .git-file.modified {
+      background: #ffedd5;
+      color: #7c2d12;
+    }
+    .git-file.deleted {
+      background: #fee2e2;
+      color: #7f1d1d;
     }
     .git-message {
       display: grid;
@@ -3166,9 +3191,9 @@ HTML = r"""<!doctype html>
       const groups = status.groups || {};
       for (const [key, label] of [['added', 'Added'], ['modified', 'Modified'], ['deleted', 'Deleted']]) {
         const column = document.createElement('section');
-        column.className = 'git-status-column';
+        column.className = `git-status-column ${key}`;
         const title = document.createElement('div');
-        title.className = 'git-status-title';
+        title.className = `git-status-title ${key}`;
         const files = groups[key] || [];
         title.textContent = `${label} (${files.length})`;
         const list = document.createElement('div');
@@ -3181,7 +3206,7 @@ HTML = r"""<!doctype html>
         }
         for (const file of files) {
           const item = document.createElement('div');
-          item.className = 'git-file';
+          item.className = `git-file ${key}`;
           item.textContent = file.path;
           item.title = `${file.status} ${file.path}`;
           list.appendChild(item);
