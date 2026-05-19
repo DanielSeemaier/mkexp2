@@ -44,6 +44,8 @@ Options:
   --running-time             With `plot`, include running time and graph-grid plots
   --threads T|NxMxT          With `plot`, only include data for this Threads topology
   --no-docker                With `plot`, force native R instead of Docker
+  --resolve-spack-r-libs     With `plot`, warm native-R Spack library cache and exit
+  --refresh-spack-r-libs     With `plot`, force-refresh native-R Spack library cache and exit
   --repo DIR                 With `web`, Git repository containing experiment dirs
   --host HOST                With `web`, bind host (default: 127.0.0.1)
   --port PORT                With `web`, bind port (default: 8765)
@@ -512,6 +514,15 @@ ParseCli() {
         MKEXP2_PLOT_NO_DOCKER=1
         shift
         ;;
+      --resolve-spack-r-libs)
+        MKEXP2_PLOT_RESOLVE_SPACK_R_LIBS=1
+        shift
+        ;;
+      --refresh-spack-r-libs)
+        MKEXP2_PLOT_RESOLVE_SPACK_R_LIBS=1
+        MKEXP2_PLOT_REFRESH_SPACK_R_LIBS=1
+        shift
+        ;;
       --threads)
         shift
         if [[ $# -eq 0 ]]; then
@@ -731,6 +742,10 @@ ParseCli() {
   fi
   if (( MKEXP2_PLOT_NO_DOCKER )) && [[ "$MKEXP2_MODE" != "plot" ]]; then
     EchoFatal "--no-docker can only be used with plot"
+    exit 1
+  fi
+  if (( MKEXP2_PLOT_RESOLVE_SPACK_R_LIBS || MKEXP2_PLOT_REFRESH_SPACK_R_LIBS )) && [[ "$MKEXP2_MODE" != "plot" ]]; then
+    EchoFatal "--resolve-spack-r-libs/--refresh-spack-r-libs can only be used with plot"
     exit 1
   fi
   if [[ -n "$MKEXP2_PLOT_THREADS" ]]; then

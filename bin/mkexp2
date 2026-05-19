@@ -71,6 +71,11 @@ if [[ "$MKEXP2_MODE" == "probe" && "$MKEXP2_PROBE_PRESETS" -eq 1 ]]; then
   exit 0
 fi
 
+if [[ "$MKEXP2_MODE" == "plot" && "$MKEXP2_PLOT_RESOLVE_SPACK_R_LIBS" -eq 1 ]]; then
+  ResolveSpackPlotRLibs "$MKEXP2_PLOT_REFRESH_SPACK_R_LIBS"
+  exit $?
+fi
+
 if [[ ! -f "$PWD/Experiment" ]]; then
   EchoFatal "no Experiment file in current directory"
   exit 1

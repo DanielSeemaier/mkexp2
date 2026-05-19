@@ -544,6 +544,10 @@ class Mkexp2WebApp:
         self._plot_backend_cache_at = 0.0
         self._experiments_cache = None
         self._experiments_cache_at = 0.0
+        self._startup_spack_cache_action = None
+
+    def mkexp2_root(self):
+        return self.mkexp2.parent.parent
 
     def experiment_path(self, experiment_id):
         parts = str(experiment_id or "").split("/")
@@ -918,6 +922,54 @@ class Mkexp2WebApp:
             return {"plotted": plot["returncode"] == 0, "plot": plot}
 
         return self.actions.start_unique(f"plot:{experiment_id}", f"plot {experiment_id}", action)
+
+    def spack_plot_cache_path(self):
+        return self.mkexp2_root() / "plots" / ".cache-native" / "spack-r-libs.txt"
+
+    def spack_plot_cache_info(self):
+        cache = self.spack_plot_cache_path()
+        exists = cache.is_file() and cache.stat().st_size > 0
+        entries = []
+        modified_at = None
+        size = 0
+        if exists:
+            stat = cache.stat()
+            size = stat.st_size
+            modified_at = _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")
+            entries = [item for item in cache.read_text(encoding="utf-8").strip().split(":") if item]
+        return {
+            "exists": exists,
+            "path": str(cache),
+            "size": size,
+            "modified_at": modified_at,
+            "entries": entries,
+            "entry_count": len(entries),
+            "startup_action": self._startup_spack_cache_action,
+        }
+
+    def resolve_spack_plot_cache_action(self, force=False, label=None):
+        argv = ["plot", "--resolve-spack-r-libs"]
+        if force:
+            argv.append("--refresh-spack-r-libs")
+
+        def action():
+            resolve = run_command([str(self.mkexp2)] + argv, cwd=self.mkexp2_root(), timeout=180)
+            return {
+                "resolved": resolve["returncode"] == 0,
+                "force": bool(force),
+                "cache": self.spack_plot_cache_info(),
+                "resolve": resolve,
+            }
+
+        key = "plot-spack-r-libs-refresh" if force else "plot-spack-r-libs"
+        return self.actions.start_unique(key, label or "resolve Spack R library cache", action)
+
+    def warm_spack_plot_cache(self):
+        self._startup_spack_cache_action = self.resolve_spack_plot_cache_action(
+            force=False,
+            label="warm Spack R library cache",
+        )["id"]
+        return self._startup_spack_cache_action
 
     def git_commit_submission(self, experiment_id, algorithms, force):
         rel = experiment_id
@@ -2418,6 +2470,25 @@ HTML = r"""<!doctype html>
       font-weight: 750;
       font-size: 12px;
     }
+    .settings-tool {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px;
+      margin-bottom: 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fbfcfd;
+    }
+    .settings-tool-title {
+      font-weight: 750;
+      font-size: 12px;
+      margin-bottom: 3px;
+    }
+    .settings-tool button {
+      flex: 0 0 auto;
+    }
     .console-log {
       display: grid;
       gap: 10px;
@@ -2788,6 +2859,13 @@ HTML = r"""<!doctype html>
             <label for="token">Session token</label>
             <input id="token" type="password" placeholder="Session token">
           </div>
+          <div class="settings-tool">
+            <div>
+              <div class="settings-tool-title">Spack R library cache</div>
+              <div id="spack-cache-summary" class="csv-summary">Not loaded.</div>
+            </div>
+            <button id="spack-cache-refresh">Refresh Spack R library cache</button>
+          </div>
           <div id="console-log" class="console-log"></div>
         </div>
         <div class="modal-footer">
@@ -3014,6 +3092,7 @@ HTML = r"""<!doctype html>
       plotPdfUrlFor: null,
       plotPdfVersion: '',
       plotNoDockerTouched: false,
+      spackCache: null,
       consoleEntries: [],
       consoleOpen: false,
       progressTimer: null,
@@ -3671,6 +3750,7 @@ HTML = r"""<!doctype html>
     function openSettingsDialog() {
       state.consoleOpen = true;
       document.getElementById('settings-modal').classList.remove('hidden');
+      loadSpackCacheInfo().catch(err => out(String(err)));
       renderConsoleLog();
     }
     function closeSettingsDialog() {
@@ -3680,6 +3760,39 @@ HTML = r"""<!doctype html>
     function clearConsoleLog() {
       state.consoleEntries = [];
       renderConsoleLog();
+    }
+    function renderSpackCacheInfo() {
+      const summary = document.getElementById('spack-cache-summary');
+      if (!summary) return;
+      const info = state.spackCache;
+      if (!info) {
+        summary.textContent = 'Not loaded.';
+        return;
+      }
+      summary.textContent = info.exists
+        ? `${info.entry_count || 0} R library paths, ${formatBytes(info.size || 0)}, modified ${info.modified_at || 'unknown time'}`
+        : `No cache file at ${info.path || 'the mkexp2 plots cache'}.`;
+    }
+    async function loadSpackCacheInfo() {
+      state.spackCache = await api('/api/plot/spack-r-libs');
+      renderSpackCacheInfo();
+      return state.spackCache;
+    }
+    async function refreshSpackCache() {
+      const button = document.getElementById('spack-cache-refresh');
+      await withBusyButton(button, 'Resolving...', async () => {
+        const action = await api('/api/plot/spack-r-libs/resolve', {
+          method: 'POST',
+          body: JSON.stringify({ force: true })
+        });
+        const completed = await watchAction(action.id);
+        if (completed?.status === 'completed' && completed.result?.cache) {
+          state.spackCache = completed.result.cache;
+        } else {
+          await loadSpackCacheInfo();
+        }
+        renderSpackCacheInfo();
+      });
     }
     async function pushGitChanges() {
       const message = document.getElementById('git-message').value.trim();
@@ -5301,6 +5414,7 @@ HTML = r"""<!doctype html>
     document.getElementById('git-push').onclick = pushGitChanges;
     document.getElementById('settings-open').onclick = openSettingsDialog;
     document.getElementById('settings-close').onclick = closeSettingsDialog;
+    document.getElementById('spack-cache-refresh').onclick = () => refreshSpackCache().catch(err => out(String(err)));
     document.getElementById('console-clear').onclick = clearConsoleLog;
     document.getElementById('check').onclick = checkExperiment;
     document.getElementById('probe-run').onclick = probeExperiment;
@@ -5378,6 +5492,9 @@ def make_handler(app):
                     return
                 if path == "/api/plot/backend":
                     json_response(self, 200, app.plot_backend_status())
+                    return
+                if path == "/api/plot/spack-r-libs":
+                    json_response(self, 200, app.spack_plot_cache_info())
                     return
                 if path == "/api/experiments":
                     query = urllib.parse.parse_qs(parsed.query)
@@ -5480,6 +5597,10 @@ def make_handler(app):
                     return
                 if path == "/api/status/squeue/cancel":
                     json_response(self, 200, app.slurm.cancel_job(payload))
+                    return
+                if path == "/api/plot/spack-r-libs/resolve":
+                    force = bool(payload.get("force", False))
+                    json_response(self, 202, app.resolve_spack_plot_cache_action(force=force))
                     return
                 if path == "/api/pins":
                     json_response(self, 200, app.write_pins(payload.get("pinned") or []))
@@ -5606,6 +5727,7 @@ def main():
     if args.allow_empty_token:
         print("empty token bypass: enabled", flush=True)
     print(f"ssh tunnel: ssh -L {args.port}:{args.host}:{args.port} <user>@<cluster-login>", flush=True)
+    print(f"spack R library cache warmup action: {app.warm_spack_plot_cache()}", flush=True)
     server.serve_forever()
 
 

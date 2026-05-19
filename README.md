@@ -324,10 +324,14 @@ into `plots/.r-libs-native`, and native plot cache files go to
 `plots/.cache-native`. The native runner prepends this cache to
 `R_LIBS` and `R_LIBS_USER`, preserves existing R library paths, and tries
 `spack load --sh` for known plotting packages when Spack is available so
-Spack-installed R packages can satisfy plotting dependencies. The resolved Spack `R_LIBS` value is cached in `plots/.cache-native/spack-r-libs.txt` so repeated native plot runs do not repeatedly invoke slow Spack environment resolution. Native package
-installation is guarded by a filesystem lock so overlapping plot runs wait
-instead of racing on R's `00LOCK-*` directories. To force the native backend
-even when Docker works, run:
+Spack-installed R packages can satisfy plotting dependencies. The resolved
+Spack `R_LIBS` value is cached in `plots/.cache-native/spack-r-libs.txt` so
+repeated native plot runs do not repeatedly invoke slow Spack environment
+resolution. `mkexp2 web` warms this cache at startup; use
+`mkexp2 plot --refresh-spack-r-libs` to force-refresh it after Spack
+environment changes. Native package installation is guarded by a filesystem
+lock so overlapping plot runs wait instead of racing on R's `00LOCK-*`
+directories. To force the native backend even when Docker works, run:
 
 ```bash
 mkexp2 plot --no-docker

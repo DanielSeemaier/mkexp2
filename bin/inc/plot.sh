@@ -221,6 +221,33 @@ _MaybeLoadSpackPlotPackages() {
   fi
 }
 
+ResolveSpackPlotRLibs() {
+  local force="${1:-0}"
+  local native_cache="$MKEXP2_HOME/plots/.cache-native"
+  local cache_file="$native_cache/spack-r-libs.txt"
+  local cached_r_libs=""
+  local -a cached_entries=()
+
+  mkdir -p "$native_cache"
+  if (( force )); then
+    rm -f "$cache_file"
+  fi
+
+  _PLOT_SPACK_PACKAGES_LOADED=0
+  _MaybeLoadSpackPlotPackages "$native_cache" || true
+
+  if [[ -s "$cache_file" ]]; then
+    cached_r_libs="$(<"$cache_file")"
+    cached_entries=("${(@s.:.)cached_r_libs}")
+    EchoStep "Spack R library cache: $cache_file"
+    EchoStep "Spack R library entries: ${#cached_entries}"
+    return 0
+  fi
+
+  EchoWarn "No Spack R library cache was written; native plotting will use the regular R library paths"
+  return 0
+}
+
 _RunNativeRscript() {
   local plots_dir="$1"
   local results_dir="$2"

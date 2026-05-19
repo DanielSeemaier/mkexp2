@@ -267,6 +267,10 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="settings-modal"', mkexp2_web.HTML)
         self.assertIn('id="settings-close"', mkexp2_web.HTML)
         self.assertIn('<label for="token">Session token</label>', mkexp2_web.HTML)
+        self.assertIn('id="spack-cache-refresh"', mkexp2_web.HTML)
+        self.assertIn("Refresh Spack R library cache", mkexp2_web.HTML)
+        self.assertIn("/api/plot/spack-r-libs", mkexp2_web.HTML)
+        self.assertIn("/api/plot/spack-r-libs/resolve", mkexp2_web.HTML)
         self.assertIn('id="console-log"', mkexp2_web.HTML)
         self.assertIn("function setButtonBusy", mkexp2_web.HTML)
         self.assertIn("async function withBusyButton", mkexp2_web.HTML)
@@ -834,6 +838,51 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
         self.assertTrue(result["ok"])
         self.assertEqual(result["job"]["user"], "owner")
         self.assertIn((["scancel", "123"], 30), calls)
+
+    def test_spack_plot_cache_action_uses_fixed_argv(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            calls.append((list(argv), str(cwd) if cwd else None, timeout))
+            return {"returncode": 0, "stdout": "resolved", "stderr": ""}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            mkexp2 = root / "bin" / "mkexp2"
+            cache = root / "plots" / ".cache-native"
+            repo.mkdir()
+            mkexp2.parent.mkdir()
+            mkexp2.write_text("#!/usr/bin/env zsh\n")
+            cache.mkdir(parents=True)
+            (cache / "spack-r-libs.txt").write_text("/spack/a:/spack/b\n")
+
+            app = mkexp2_web.Mkexp2WebApp(repo, mkexp2, "x-<name>", "token")
+            mkexp2_web.run_command = fake_run_command
+            try:
+                action = app.resolve_spack_plot_cache_action(force=True)
+                for _ in range(100):
+                    current = app.actions.get(action["id"])
+                    if current["status"] != "running":
+                        break
+                    time.sleep(0.02)
+                result = app.actions.get(action["id"])["result"]
+            finally:
+                mkexp2_web.run_command = original_run_command
+
+        self.assertTrue(result["resolved"])
+        self.assertEqual(result["cache"]["entry_count"], 2)
+        self.assertEqual(
+            calls,
+            [
+                (
+                    [str(mkexp2.resolve()), "plot", "--resolve-spack-r-libs", "--refresh-spack-r-libs"],
+                    str(root.resolve()),
+                    180,
+                )
+            ],
+        )
 
 
 if __name__ == "__main__":
