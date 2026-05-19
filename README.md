@@ -354,9 +354,9 @@ The UI can:
 - inspect the configured experiment Git repo from the header Git button, review
   added/modified/deleted files, enter a commit message, and run `git add -A`,
   `git commit`, and `git push`
-- open the header console-log button to inspect the full browser-session
-  command log, including argv/cwd/stdout/stderr payloads returned by web API
-  actions
+- open the header settings button to manage the session token and inspect the
+  full browser-session command log, including argv/cwd/stdout/stderr payloads
+  returned by web API actions
 - create a new directory from the header `+` dialog, selecting a preset and
   optionally overriding the configured name template for that experiment
 - edit the raw `Experiment` file with lightweight syntax highlighting

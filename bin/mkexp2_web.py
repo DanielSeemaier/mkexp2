@@ -2389,8 +2389,17 @@ HTML = r"""<!doctype html>
     .git-message textarea {
       min-height: 82px;
     }
-    .console-modal {
+    .settings-modal {
       width: min(1040px, 100%);
+    }
+    .settings-token {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .settings-token label {
+      font-weight: 750;
+      font-size: 12px;
     }
     .console-log {
       display: grid;
@@ -2636,19 +2645,13 @@ HTML = r"""<!doctype html>
           <button id="create-open" class="icon-button" aria-label="Create experiment" title="Create experiment">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
           </button>
-          <button id="refresh" class="icon-button" aria-label="Refresh experiments" title="Refresh experiments">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
-          </button>
           <button id="git-open" class="icon-button" aria-label="Git status" title="Git status">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M8.5 7.5 16 15"/></svg>
           </button>
-          <button id="console-open" class="icon-button" aria-label="Console log" title="Console log">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg>
+          <button id="settings-open" class="icon-button" aria-label="Settings" title="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.35 1.05V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 8.6 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.05-.35H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 8.6a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .35-1.05V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15.4 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 .6 1 1.65 1.65 0 0 0 1.05.35H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"/></svg>
           </button>
         </div>
-      </div>
-      <div class="stack">
-        <input id="token" type="password" placeholder="Session token">
       </div>
       <div id="experiments" class="experiment-list"></div>
       <section class="sidebar-nodes">
@@ -2754,16 +2757,20 @@ HTML = r"""<!doctype html>
         </div>
       </div>
     </div>
-    <div id="console-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="console-modal-title">
-      <div class="modal console-modal">
+    <div id="settings-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+      <div class="modal settings-modal">
         <div class="modal-header">
           <div>
-            <div id="console-modal-title" class="modal-title">Console Log</div>
+            <div id="settings-modal-title" class="modal-title">Settings</div>
             <div id="console-summary" class="csv-summary">No commands logged yet.</div>
           </div>
-          <button id="console-close" class="icon-button" aria-label="Close console log" title="Close">x</button>
+          <button id="settings-close" class="icon-button" aria-label="Close settings" title="Close">x</button>
         </div>
         <div class="modal-body">
+          <div class="settings-token">
+            <label for="token">Session token</label>
+            <input id="token" type="password" placeholder="Session token">
+          </div>
           <div id="console-log" class="console-log"></div>
         </div>
         <div class="modal-footer">
@@ -3607,14 +3614,14 @@ HTML = r"""<!doctype html>
       await loadQueue();
       await refreshStatus().catch(err => out(String(err)));
     }
-    function openConsoleDialog() {
+    function openSettingsDialog() {
       state.consoleOpen = true;
-      document.getElementById('console-modal').classList.remove('hidden');
+      document.getElementById('settings-modal').classList.remove('hidden');
       renderConsoleLog();
     }
-    function closeConsoleDialog() {
+    function closeSettingsDialog() {
       state.consoleOpen = false;
-      document.getElementById('console-modal').classList.add('hidden');
+      document.getElementById('settings-modal').classList.add('hidden');
     }
     function clearConsoleLog() {
       state.consoleEntries = [];
@@ -5241,10 +5248,6 @@ HTML = r"""<!doctype html>
       }).join('');
       box.innerHTML = rows;
     }
-    document.getElementById('refresh').onclick = () => {
-      refreshPresets().catch(err => out(String(err)));
-      refreshExperiments({ force: true }).catch(err => out(String(err)));
-    };
     document.getElementById('refresh-status').onclick = refreshStatus;
     document.getElementById('queue-open').onclick = openQueueDialog;
     document.getElementById('queue-close').onclick = closeQueueDialog;
@@ -5260,8 +5263,8 @@ HTML = r"""<!doctype html>
     document.getElementById('git-close').onclick = closeGitDialog;
     document.getElementById('git-refresh').onclick = () => loadGitStatus().catch(err => out(String(err)));
     document.getElementById('git-push').onclick = pushGitChanges;
-    document.getElementById('console-open').onclick = openConsoleDialog;
-    document.getElementById('console-close').onclick = closeConsoleDialog;
+    document.getElementById('settings-open').onclick = openSettingsDialog;
+    document.getElementById('settings-close').onclick = closeSettingsDialog;
     document.getElementById('console-clear').onclick = clearConsoleLog;
     document.getElementById('check').onclick = checkExperiment;
     document.getElementById('probe-run').onclick = probeExperiment;
