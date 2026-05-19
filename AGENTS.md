@@ -130,6 +130,8 @@ There is no linting configuration or CI setup.
 
 - **Docker/native R for plots.** `mkexp2 plot` prefers Docker (tested with Colima on macOS). If using Colima, set `DOCKER_HOST="unix://${HOME}/.colima/default/docker.sock"` in your shell profile. If Docker is not available but `Rscript` is on `PATH`, mkexp2 falls back to native R and installs any missing R packages into `plots/.r-libs-native`.
 
+- **Deployment on login.ae.iti.kit.edu.** Do not hotpatch or hotdeploy files on the server. For server updates, commit and push locally first, then SSH to `seemaier@login.ae.iti.kit.edu`, `cd ~/mkexp2`, pull/fast-forward from `origin/main`, and restart the `mkexp2-web` tmux session from the checked-out code. Start tmux through interactive zsh so Spack's `.zshrc` setup is loaded: `zsh -ic 'tmux ...'`. The server web command uses `./bin/mkexp2 web --repo ~/i10-experiments --host 127.0.0.1 --port 8765`.
+
 ## Instructions for Codex
 
 - **Always update `AGENTS.md`** after completing any non-trivial task — add new commands, modules, conventions, or environmental notes so the file stays accurate.

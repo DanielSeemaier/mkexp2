@@ -2682,6 +2682,9 @@ HTML = r"""<!doctype html>
       plotBackend: null,
       plotInfo: null,
       plotInfoFor: null,
+      plotPdfUrl: '',
+      plotPdfUrlFor: null,
+      plotPdfVersion: '',
       plotNoDockerTouched: false,
       consoleEntries: [],
       consoleOpen: false,
@@ -3090,6 +3093,21 @@ HTML = r"""<!doctype html>
       const data = await payload;
       logApiCommands(method, path, data);
       return data;
+    }
+    async function fetchBlob(path) {
+      const response = await fetch(path, { headers: { 'X-MKEXP2-Token': token() } });
+      if (!response.ok) {
+        const text = await response.text();
+        appendConsoleLog(`GET ${path} failed`, text);
+        throw new Error(text);
+      }
+      return await response.blob();
+    }
+    function clearPlotPdfUrl() {
+      if (state.plotPdfUrl) URL.revokeObjectURL(state.plotPdfUrl);
+      state.plotPdfUrl = '';
+      state.plotPdfUrlFor = null;
+      state.plotPdfVersion = '';
     }
     function esc(value) {
       return String(value ?? '').replace(/[&<>"']/g, char => ({
@@ -4353,6 +4371,7 @@ HTML = r"""<!doctype html>
       state.submitLock = null;
       state.plotInfo = null;
       state.plotInfoFor = null;
+      clearPlotPdfUrl();
       setView('experiment-view');
       renderResultsWorkspace();
       renderStatsWorkspace();
@@ -4539,11 +4558,20 @@ HTML = r"""<!doctype html>
       const pdfUrl = `/api/experiments/${encodeURIComponent(state.selected)}/plots.pdf`;
       if (state.plotInfoFor === state.selected && state.plotInfo?.exists) {
         const version = encodeURIComponent(`${state.plotInfo.modified_at || ''}-${state.plotInfo.size || ''}`);
-        file.className = 'plot-preview';
-        file.innerHTML = `
-          <iframe class="plot-pdf" src="${esc(pdfUrl)}?v=${version}" title="plots.pdf"></iframe>
-          <div class="csv-summary"><a href="${esc(pdfUrl)}?v=${version}" target="_blank" rel="noreferrer">Open plots.pdf</a></div>
-        `;
+        if (state.plotPdfUrlFor === state.selected && state.plotPdfVersion === version && state.plotPdfUrl) {
+          file.className = 'plot-preview';
+          file.innerHTML = `
+            <iframe class="plot-pdf" src="${esc(state.plotPdfUrl)}" title="plots.pdf"></iframe>
+            <div class="csv-summary"><a href="${esc(state.plotPdfUrl)}" target="_blank" rel="noreferrer">Open plots.pdf</a></div>
+          `;
+        } else {
+          file.className = 'csv-empty';
+          file.textContent = 'Loading plots.pdf...';
+          loadPlotPdf(pdfUrl, version).catch(err => {
+            file.className = 'csv-empty status-bad';
+            file.textContent = `Could not load plots.pdf: ${err.message || err}`;
+          });
+        }
       } else {
         file.className = 'csv-empty';
         file.textContent = state.plotInfoFor === state.selected
@@ -4587,6 +4615,18 @@ HTML = r"""<!doctype html>
       state.plotInfoFor = state.selected;
       renderPlotPanel();
       return state.plotInfo;
+    }
+    async function loadPlotPdf(pdfUrl, version) {
+      if (!state.selected) return null;
+      const selected = state.selected;
+      const blob = await fetchBlob(`${pdfUrl}?v=${version}`);
+      if (state.selected !== selected) return null;
+      clearPlotPdfUrl();
+      state.plotPdfUrl = URL.createObjectURL(blob);
+      state.plotPdfUrlFor = selected;
+      state.plotPdfVersion = version;
+      renderPlotPanel();
+      return state.plotPdfUrl;
     }
     async function plotExperiment() {
       if (!state.selected) return;
