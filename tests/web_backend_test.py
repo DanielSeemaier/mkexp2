@@ -152,7 +152,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="parse-results"', mkexp2_web.HTML)
         self.assertIn('id="plot-results"', mkexp2_web.HTML)
         self.assertIn('data-view="plots-view"', mkexp2_web.HTML)
-        self.assertIn('data-view="stats-view"', mkexp2_web.HTML)
+        self.assertNotIn('data-view="stats-view"', mkexp2_web.HTML)
         self.assertIn('id="stats-output"', mkexp2_web.HTML)
         self.assertIn('aria-label="Reload stats"', mkexp2_web.HTML)
         self.assertIn("function renderStatsWorkspace", mkexp2_web.HTML)
@@ -173,6 +173,12 @@ class WebBackendTest(unittest.TestCase):
         self.assertNotIn('data-view="install-log-view">Install Log</button>', mkexp2_web.HTML)
         self.assertIn("setView('experiment-view');", mkexp2_web.HTML)
         self.assertIn('id="plot-action-output"', mkexp2_web.HTML)
+        self.assertIn('id="plot-no-docker"', mkexp2_web.HTML)
+        self.assertIn("No docker", mkexp2_web.HTML)
+        self.assertIn("async function loadPlotBackendStatus", mkexp2_web.HTML)
+        self.assertIn("function applyPlotBackendStatus", mkexp2_web.HTML)
+        self.assertIn("/api/plot/backend", mkexp2_web.HTML)
+        self.assertIn("body: JSON.stringify({ no_docker: noDocker })", mkexp2_web.HTML)
         self.assertIn('id="submit-lock-status"', mkexp2_web.HTML)
         self.assertIn('id="clear-submit-lock"', mkexp2_web.HTML)
         self.assertIn('id="refresh-progress"', mkexp2_web.HTML)
@@ -184,6 +190,10 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("}, 2000)", mkexp2_web.HTML)
         self.assertIn("async function clearSubmitLock", mkexp2_web.HTML)
         self.assertIn("function renderPlotPanel", mkexp2_web.HTML)
+        self.assertIn("async function loadPlotInfo", mkexp2_web.HTML)
+        self.assertIn("/plots", mkexp2_web.HTML)
+        self.assertIn('class="plot-pdf"', mkexp2_web.HTML)
+        self.assertIn("plots.pdf does not exist yet.", mkexp2_web.HTML)
         self.assertIn('id="git-open"', mkexp2_web.HTML)
         self.assertIn('aria-label="Git status"', mkexp2_web.HTML)
         self.assertIn('id="console-open"', mkexp2_web.HTML)
@@ -236,11 +246,11 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('data-view="results-view"', mkexp2_web.HTML)
         self.assertNotIn('data-view="compare-view"', mkexp2_web.HTML)
         self.assertIn('id="result-file-tabs"', mkexp2_web.HTML)
-        self.assertIn('id="add-compare"', mkexp2_web.HTML)
-        self.assertIn('id="clear-compare"', mkexp2_web.HTML)
-        self.assertIn('id="compare-controls"', mkexp2_web.HTML)
+        self.assertNotIn('id="add-compare"', mkexp2_web.HTML)
+        self.assertNotIn('id="clear-compare"', mkexp2_web.HTML)
+        self.assertNotIn('id="compare-controls"', mkexp2_web.HTML)
         self.assertNotIn('id="compare-left"', mkexp2_web.HTML)
-        self.assertIn('id="compare-right"', mkexp2_web.HTML)
+        self.assertNotIn('id="compare-right"', mkexp2_web.HTML)
         self.assertIn('aria-label="Reload CSVs"', mkexp2_web.HTML)
         self.assertNotIn(">Load CSVs</button>", mkexp2_web.HTML)
         self.assertIn("function parseCsv", mkexp2_web.HTML)
@@ -249,10 +259,14 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("function cycleCompareColumn", mkexp2_web.HTML)
         self.assertIn("compare-good", mkexp2_web.HTML)
         self.assertIn("compare-equal", mkexp2_web.HTML)
+        self.assertIn("compare-mid", mkexp2_web.HTML)
         self.assertIn("Cannot compare: row counts differ", mkexp2_web.HTML)
         self.assertIn("mkexp2-columns:", mkexp2_web.HTML)
         self.assertIn("renderCsvTable", mkexp2_web.HTML)
-        self.assertIn("state.compareEnabled", mkexp2_web.HTML)
+        self.assertIn("selectedResults", mkexp2_web.HTML)
+        self.assertIn("aria-pressed", mkexp2_web.HTML)
+        self.assertIn("results-stats", mkexp2_web.HTML)
+        self.assertNotIn("state.compareEnabled", mkexp2_web.HTML)
 
     def test_html_contains_install_log_view(self):
         self.assertIn('data-view="install-log-view"', mkexp2_web.HTML)
@@ -285,6 +299,24 @@ class WebBackendTest(unittest.TestCase):
             self.assertTrue(existing["exists"])
             self.assertIn("# mkexp2 install log", existing["content"])
             self.assertFalse(existing["truncated"])
+
+    def test_plots_info_handles_missing_and_existing_pdf(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            exp.mkdir()
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            missing = app.plots_info("exp")
+            self.assertFalse(missing["exists"])
+            self.assertTrue(missing["path"].endswith("plots.pdf"))
+
+            (exp / "plots.pdf").write_bytes(b"%PDF-1.4\n")
+            existing = app.plots_info("exp")
+            self.assertTrue(existing["exists"])
+            self.assertEqual(existing["size"], len(b"%PDF-1.4\n"))
+            self.assertIn("modified_at", existing)
 
     def test_logs_are_listed_and_loaded_on_demand(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -512,6 +544,38 @@ class WebBackendTest(unittest.TestCase):
 
         self.assertTrue(result["parsed"])
         self.assertEqual(calls, [(["/fake/mkexp2", "parse"], str((repo / "exp").resolve()), 600)])
+
+    def test_plot_action_can_force_native_r_with_argv_array(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            self.assertIsInstance(argv, list)
+            calls.append((list(argv), str(cwd) if cwd else None, timeout))
+            return {"returncode": 0, "stdout": "", "stderr": ""}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "exp").mkdir()
+            (repo / "exp" / "Experiment").write_text("ExperimentX() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+            mkexp2_web.run_command = fake_run_command
+            try:
+                action = app.plot_action("exp", {"no_docker": True, "flags": ["--running-time"], "algorithms": ["MockA"]})
+                for _ in range(100):
+                    current = app.actions.get(action["id"])
+                    if current["status"] != "running":
+                        break
+                    time.sleep(0.02)
+                result = app.actions.get(action["id"])["result"]
+            finally:
+                mkexp2_web.run_command = original_run_command
+
+        self.assertTrue(result["plotted"])
+        self.assertEqual(
+            calls,
+            [(["/fake/mkexp2", "plot", "--no-docker", "--running-time", "MockA"], str((repo / "exp").resolve()), 600)],
+        )
 
     def test_slurm_parsers(self):
         scontrol = """NodeName=node01 Arch=x86_64 CPUTot=64 RealMemory=257000 State=ALLOCATED

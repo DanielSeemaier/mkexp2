@@ -446,6 +446,8 @@ class Mkexp2WebApp:
         self.allow_empty_token = allow_empty_token
         self.actions = ActionStore()
         self.slurm = SlurmStatus()
+        self._plot_backend_cache = None
+        self._plot_backend_cache_at = 0.0
 
     def experiment_path(self, experiment_id):
         parts = str(experiment_id or "").split("/")
@@ -578,6 +580,36 @@ class Mkexp2WebApp:
     def command(self, experiment_id, argv, timeout=60):
         return run_command([str(self.mkexp2), *argv], cwd=self.experiment_path(experiment_id), timeout=timeout)
 
+    def plot_backend_status(self):
+        now = time.time()
+        if self._plot_backend_cache and now - self._plot_backend_cache_at < 15:
+            return self._plot_backend_cache
+
+        docker_command = shutil.which("docker")
+        compose_command = shutil.which("docker-compose")
+        docker_info = None
+        docker_compose = None
+        docker_available = False
+        if docker_command:
+            docker_info = run_command(["docker", "info"], timeout=5)
+            if docker_info["returncode"] == 0:
+                docker_compose = run_command(["docker", "compose", "version"], timeout=5)
+                if docker_compose["returncode"] != 0 and compose_command:
+                    docker_compose = run_command(["docker-compose", "version"], timeout=5)
+                docker_available = docker_compose is not None and docker_compose["returncode"] == 0
+
+        payload = {
+            "docker_available": docker_available,
+            "native_r_available": shutil.which("Rscript") is not None,
+            "default_no_docker": not docker_available,
+            "docker_command": docker_command or "",
+            "docker_info": docker_info,
+            "docker_compose": docker_compose,
+        }
+        self._plot_backend_cache = payload
+        self._plot_backend_cache_at = now
+        return payload
+
     def submit_lock_path(self, experiment_id):
         return self.experiment_path(experiment_id) / ".mkexp2" / "submit.lock"
 
@@ -701,6 +733,8 @@ class Mkexp2WebApp:
         flags = payload.get("flags") or []
         allowed_flags = {"--performance-profile", "--speedup", "--running-time"}
         argv = ["plot"]
+        if payload.get("no_docker"):
+            argv.append("--no-docker")
         for flag in flags:
             if flag not in allowed_flags:
                 raise ValueError(f"unsupported plot flag: {flag}")
@@ -813,6 +847,19 @@ class Mkexp2WebApp:
             "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
             "content": content[:MAX_TEXT_RESPONSE],
             "truncated": len(content) > MAX_TEXT_RESPONSE,
+        }
+
+    def plots_info(self, experiment_id):
+        path = self.experiment_path(experiment_id)
+        pdf = path / "plots.pdf"
+        if not pdf.is_file():
+            return {"exists": False, "path": str(pdf)}
+        stat = pdf.stat()
+        return {
+            "exists": True,
+            "path": str(pdf),
+            "size": stat.st_size,
+            "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
         }
 
     def logs_root(self, experiment_id):
@@ -1957,19 +2004,56 @@ HTML = r"""<!doctype html>
     .csv-table td.compare-equal {
       background: #dbeafe;
     }
+    .csv-table td.compare-mid {
+      background: #ffedd5;
+    }
     .csv-summary {
       color: var(--muted);
       font-size: 12px;
     }
+    .plot-actions {
+      justify-content: flex-end;
+    }
+    .plot-option {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      height: 34px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: white;
+      color: var(--text);
+      font-size: 12px;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .plot-option input {
+      margin: 0;
+    }
+    .plot-option.disabled {
+      color: var(--muted);
+      background: #f2f4f7;
+      cursor: not-allowed;
+    }
+    .plot-pdf {
+      width: 100%;
+      min-height: min(78vh, 900px);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: white;
+    }
     .compare-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      display: flex;
       gap: 12px;
       align-items: start;
+      overflow-x: auto;
+      padding-bottom: 4px;
     }
     .compare-pane {
       display: grid;
       gap: 8px;
+      flex: 1 0 min(520px, 100%);
       min-width: 0;
     }
     .compare-pane-title {
@@ -1977,6 +2061,20 @@ HTML = r"""<!doctype html>
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .results-stats {
+      display: grid;
+      gap: 10px;
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+    .stats-inline-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
     }
     .csv-empty {
       color: var(--muted);
@@ -2332,7 +2430,6 @@ HTML = r"""<!doctype html>
         <button class="view-tab icon-tab" data-view="install-log-view" aria-label="Install Log" title="Install Log">?</button>
         <button class="view-tab active" data-view="experiment-view">Experiment</button>
         <button class="view-tab" data-view="results-view">Results</button>
-        <button class="view-tab" data-view="stats-view">Stats</button>
         <button class="view-tab" data-view="logs-view">Logs</button>
         <button class="view-tab" data-view="plots-view">Plots</button>
       </div>
@@ -2417,37 +2514,25 @@ HTML = r"""<!doctype html>
               <div class="result-toolbar">
                 <div id="result-file-tabs" class="result-file-tabs"></div>
                 <div class="column-actions">
-                  <button id="add-compare">Add comparison</button>
-                  <button id="clear-compare" class="hidden">Single CSV</button>
                   <button id="columns-all">All columns</button>
                   <button id="columns-none">No columns</button>
                 </div>
               </div>
-              <div id="compare-controls" class="csv-selectors hidden">
-                <label class="compare-select">
-                  <span>Compare against</span>
-                  <select id="compare-right"></select>
-                </label>
-              </div>
               <div id="column-selector" class="column-selector"></div>
             </div>
             <div id="results" class="csv-empty">Select an experiment, then load CSV results.</div>
-          </div>
-        </section>
-      </section>
-      <section id="stats-view" class="view-panel">
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <div class="panel-title">Stats</div>
-              <div id="stats-summary" class="csv-summary">No stats loaded.</div>
-            </div>
-            <button id="load-stats" class="icon-button" aria-label="Reload stats" title="Reload stats">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
-            </button>
-          </div>
-          <div class="panel-body">
-            <div id="stats-output" class="csv-empty">Open the Stats tab to summarize parsed CSV results.</div>
+            <section class="results-stats">
+              <div class="stats-inline-header">
+                <div>
+                  <div class="panel-title">Stats</div>
+                  <div id="stats-summary" class="csv-summary">No stats loaded.</div>
+                </div>
+                <button id="load-stats" class="icon-button" aria-label="Reload stats" title="Reload stats">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+                </button>
+              </div>
+              <div id="stats-output" class="csv-empty">Load results to summarize parsed CSV results.</div>
+            </section>
           </div>
         </section>
       </section>
@@ -2500,7 +2585,13 @@ HTML = r"""<!doctype html>
               <div class="panel-title">Plots</div>
               <div id="plots-summary" class="csv-summary">No plot action started.</div>
             </div>
-            <button id="plot-results">Generate Plots</button>
+            <div class="actions plot-actions">
+              <label class="plot-option" id="plot-no-docker-label" title="Use host R instead of Docker">
+                <input id="plot-no-docker" type="checkbox">
+                <span>No docker</span>
+              </label>
+              <button id="plot-results">Generate Plots</button>
+            </div>
           </div>
           <div class="panel-body">
             <div id="plot-action-output" class="action-output"></div>
@@ -2522,9 +2613,7 @@ HTML = r"""<!doctype html>
       resultsFor: null,
       stats: null,
       statsFor: null,
-      activeResult: '',
-      compareRight: '',
-      compareEnabled: false,
+      selectedResults: [],
       compareColumnModes: {},
       installLog: null,
       installLogFor: null,
@@ -2534,6 +2623,10 @@ HTML = r"""<!doctype html>
       selectedLog: '',
       logContent: null,
       submitLock: null,
+      plotBackend: null,
+      plotInfo: null,
+      plotInfoFor: null,
+      plotNoDockerTouched: false,
       consoleEntries: [],
       consoleOpen: false,
       progressTimer: null,
@@ -3352,14 +3445,26 @@ HTML = r"""<!doctype html>
       const parsed = Number(text);
       return Number.isFinite(parsed) ? parsed : null;
     }
-    function compareCellClass(value, peerValue, mode) {
+    function compareCellClass(value, peerValues, mode) {
       if (!mode) return '';
       const current = numericCsvValue(value);
-      const peer = numericCsvValue(peerValue);
-      if (current === null || peer === null) return '';
-      if (current === peer) return 'compare-equal';
-      const isGood = mode === 1 ? current < peer : current > peer;
-      return isGood ? 'compare-good' : 'compare-bad';
+      if (current === null) return '';
+      const peers = (Array.isArray(peerValues) ? peerValues : [peerValues])
+        .map(numericCsvValue)
+        .filter(item => item !== null);
+      if (!peers.length) return '';
+      const values = [current, ...peers];
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      if (min === max) return 'compare-equal';
+      if (mode === 1) {
+        if (current === min) return 'compare-good';
+        if (current === max) return 'compare-bad';
+      } else if (mode === 2) {
+        if (current === max) return 'compare-good';
+        if (current === min) return 'compare-bad';
+      }
+      return values.length > 2 ? 'compare-mid' : '';
     }
     function cycleCompareColumn(header) {
       const current = state.compareColumnModes[header] || 0;
@@ -3371,19 +3476,23 @@ HTML = r"""<!doctype html>
       }
       setTimeout(renderResultsWorkspace, 0);
     }
-    function syncCompareScroll(leftBox, rightBox) {
+    function syncCompareScroll(...boxes) {
       let syncing = false;
       const sync = (source, target) => {
         if (syncing) return;
         syncing = true;
-        target.scrollTop = source.scrollTop;
-        target.scrollLeft = source.scrollLeft;
+        for (const box of boxes) {
+          if (box === source) continue;
+          box.scrollTop = source.scrollTop;
+          box.scrollLeft = source.scrollLeft;
+        }
         requestAnimationFrame(() => {
           syncing = false;
         });
       };
-      leftBox.onscroll = () => sync(leftBox, rightBox);
-      rightBox.onscroll = () => sync(rightBox, leftBox);
+      for (const box of boxes) {
+        box.onscroll = () => sync(box);
+      }
     }
     function renderColumnSelector(container, headers, onChange) {
       const all = uniqueHeaders(headers);
@@ -3441,12 +3550,14 @@ HTML = r"""<!doctype html>
       file.headers.forEach((header, index) => {
         if (!headerIndex.has(header)) headerIndex.set(header, index);
       });
-      const peerHeaderIndex = new Map();
-      if (options.peer) {
-        options.peer.headers.forEach((header, index) => {
-          if (!peerHeaderIndex.has(header)) peerHeaderIndex.set(header, index);
+      const peers = options.peers || (options.peer ? [options.peer] : []);
+      const peerHeaderIndexes = peers.map(peer => {
+        const indexMap = new Map();
+        peer.headers.forEach((header, index) => {
+          if (!indexMap.has(header)) indexMap.set(header, index);
         });
-      }
+        return indexMap;
+      });
       const table = document.createElement('table');
       table.className = 'csv-table';
       const thead = document.createElement('thead');
@@ -3485,11 +3596,14 @@ HTML = r"""<!doctype html>
           const td = document.createElement('td');
           const index = headerIndex.has(header) ? headerIndex.get(header) : -1;
           const value = index >= 0 ? (row[index] ?? '') : '';
-          if (options.compare && options.peer) {
-            const peerIndex = peerHeaderIndex.has(header) ? peerHeaderIndex.get(header) : -1;
-            const peerRow = options.peer.rows[rowIndex] || [];
-            const peerValue = peerIndex >= 0 ? (peerRow[peerIndex] ?? '') : '';
-            const cellClass = compareCellClass(value, peerValue, state.compareColumnModes[header] || 0);
+          if (options.compare && peers.length) {
+            const peerValues = peers.map((peer, peerNumber) => {
+              const peerHeaderIndex = peerHeaderIndexes[peerNumber];
+              const peerIndex = peerHeaderIndex.has(header) ? peerHeaderIndex.get(header) : -1;
+              const peerRow = peer.rows[rowIndex] || [];
+              return peerIndex >= 0 ? (peerRow[peerIndex] ?? '') : '';
+            });
+            const cellClass = compareCellClass(value, peerValues, state.compareColumnModes[header] || 0);
             if (cellClass) td.classList.add(cellClass);
           }
           td.textContent = value;
@@ -3510,13 +3624,23 @@ HTML = r"""<!doctype html>
     function renderResultFileTabs() {
       const tabs = document.getElementById('result-file-tabs');
       tabs.innerHTML = '';
+      const selected = new Set(state.selectedResults || []);
       for (const file of state.results) {
         const button = document.createElement('button');
-        button.className = 'csv-file-tab' + (file.name === state.activeResult ? ' active' : '');
+        button.className = 'csv-file-tab' + (selected.has(file.name) ? ' active' : '');
+        button.setAttribute('aria-pressed', selected.has(file.name) ? 'true' : 'false');
         button.textContent = csvLabel(file.name);
         button.title = csvLabel(file.name);
         button.onclick = () => {
-          state.activeResult = file.name;
+          const current = new Set(state.selectedResults || []);
+          if (current.has(file.name)) {
+            current.delete(file.name);
+          } else {
+            current.add(file.name);
+          }
+          state.selectedResults = state.results
+            .map(item => item.name)
+            .filter(name => current.has(name));
           renderResultsWorkspace();
         };
         tabs.appendChild(button);
@@ -3526,17 +3650,10 @@ HTML = r"""<!doctype html>
       const summary = document.getElementById('results-summary');
       const box = document.getElementById('results');
       const selector = document.getElementById('column-selector');
-      const addCompareButton = document.getElementById('add-compare');
-      const clearCompareButton = document.getElementById('clear-compare');
-      const compareControls = document.getElementById('compare-controls');
-      const compareRightSelect = document.getElementById('compare-right');
       const allButton = document.getElementById('columns-all');
       const noneButton = document.getElementById('columns-none');
+      state.selectedResults = (state.selectedResults || []).filter(name => findResult(name));
       renderResultFileTabs();
-      addCompareButton.disabled = true;
-      addCompareButton.classList.remove('hidden');
-      clearCompareButton.classList.add('hidden');
-      compareControls.classList.add('hidden');
       allButton.disabled = true;
       noneButton.disabled = true;
       if (!state.selected) {
@@ -3555,19 +3672,21 @@ HTML = r"""<!doctype html>
         selector.innerHTML = '';
         return;
       }
-      if (!findResult(state.activeResult)) state.activeResult = state.results[0].name;
-      const file = findResult(state.activeResult);
-      addCompareButton.disabled = state.results.length < 2;
-      addCompareButton.onclick = () => {
-        state.compareEnabled = true;
-        if (!findResult(state.compareRight) || state.compareRight === state.activeResult) {
-          state.compareRight = state.results.find(item => item.name !== state.activeResult)?.name || state.activeResult;
-        }
-        renderResultsWorkspace();
-      };
-
-      if (!state.compareEnabled) {
+      const selectedFiles = state.selectedResults.map(findResult).filter(Boolean);
+      if (!selectedFiles.length) {
         state.compareColumnModes = {};
+        summary.textContent = `${state.results.length} CSV file(s) loaded.`;
+        box.onscroll = null;
+        box.className = 'csv-empty';
+        box.textContent = 'Select one or more algorithms above.';
+        selector.className = 'column-selector';
+        selector.innerHTML = '';
+        return;
+      }
+
+      if (selectedFiles.length === 1) {
+        state.compareColumnModes = {};
+        const file = selectedFiles[0];
         summary.textContent = `${state.results.length} CSV file(s), ${file.rows.length} row(s) in ${csvLabel(file.name)}`;
         renderColumnSelector(selector, file.headers, renderResultsWorkspace);
         allButton.disabled = false;
@@ -3578,38 +3697,16 @@ HTML = r"""<!doctype html>
         return;
       }
 
-      clearCompareButton.classList.remove('hidden');
-      addCompareButton.classList.add('hidden');
-      clearCompareButton.onclick = () => {
-        state.compareEnabled = false;
-        state.compareColumnModes = {};
-        renderResultsWorkspace();
-      };
-      compareControls.classList.remove('hidden');
-      compareRightSelect.innerHTML = '';
-      for (const item of state.results) {
-        const option = document.createElement('option');
-        option.value = item.name;
-        option.textContent = csvLabel(item.name);
-        compareRightSelect.appendChild(option);
-      }
-      if (!findResult(state.compareRight) || state.compareRight === state.activeResult) {
-        state.compareRight = state.results.find(item => item.name !== state.activeResult)?.name || state.activeResult;
-      }
-      compareRightSelect.value = state.compareRight;
-      compareRightSelect.onchange = () => {
-        state.compareRight = compareRightSelect.value;
-        renderResultsWorkspace();
-      };
-
-      const rightFile = findResult(state.compareRight);
-      const headers = headersForFiles([file, rightFile]);
-      summary.textContent = `${csvLabel(file?.name)} vs ${csvLabel(rightFile?.name)}`;
-      if (file && rightFile && file.rows.length !== rightFile.rows.length) {
-        const message = `Cannot compare: row counts differ (${csvLabel(file.name)} has ${file.rows.length}, ${csvLabel(rightFile.name)} has ${rightFile.rows.length}).`;
+      const headers = headersForFiles(selectedFiles);
+      summary.textContent = `${selectedFiles.length}-way comparison: ${selectedFiles.map(file => csvLabel(file.name)).join(' vs ')}`;
+      const rowCount = selectedFiles[0].rows.length;
+      const mismatch = selectedFiles.find(file => file.rows.length !== rowCount);
+      if (mismatch) {
+        const details = selectedFiles.map(file => `${csvLabel(file.name)} has ${file.rows.length}`).join(', ');
+        const message = `Cannot compare: row counts differ (${details}).`;
         summary.textContent = message;
         selector.className = 'csv-empty status-bad';
-        selector.textContent = 'Row-wise comparison is disabled until both CSV files have the same number of rows.';
+        selector.textContent = 'Row-wise comparison is disabled until all selected CSV files have the same number of rows.';
         box.onscroll = null;
         box.className = 'csv-empty status-bad';
         box.textContent = message;
@@ -3624,31 +3721,26 @@ HTML = r"""<!doctype html>
       box.onscroll = null;
       box.className = 'compare-grid';
       box.innerHTML = '';
-      const leftPane = document.createElement('div');
-      leftPane.className = 'compare-pane';
-      const leftTitle = document.createElement('div');
-      leftTitle.className = 'compare-pane-title';
-      leftTitle.textContent = file ? csvLabel(file.name) : 'Selected CSV';
-      const leftBox = document.createElement('div');
-      leftBox.className = 'csv-empty';
-      leftPane.appendChild(leftTitle);
-      leftPane.appendChild(leftBox);
-
-      const rightPane = document.createElement('div');
-      rightPane.className = 'compare-pane';
-      const rightTitle = document.createElement('div');
-      rightTitle.className = 'compare-pane-title';
-      rightTitle.textContent = rightFile ? csvLabel(rightFile.name) : 'Comparison CSV';
-      const rightBox = document.createElement('div');
-      rightBox.className = 'csv-empty';
-      rightPane.appendChild(rightTitle);
-      rightPane.appendChild(rightBox);
-
-      box.appendChild(leftPane);
-      box.appendChild(rightPane);
-      renderCsvTable(file, leftBox, headers, { compare: true, peer: rightFile });
-      renderCsvTable(rightFile, rightBox, headers, { compare: true, peer: file });
-      syncCompareScroll(leftBox, rightBox);
+      const scrollBoxes = [];
+      for (const file of selectedFiles) {
+        const pane = document.createElement('div');
+        pane.className = 'compare-pane';
+        const title = document.createElement('div');
+        title.className = 'compare-pane-title';
+        title.textContent = csvLabel(file.name);
+        title.title = csvLabel(file.name);
+        const tableBox = document.createElement('div');
+        tableBox.className = 'csv-empty';
+        pane.appendChild(title);
+        pane.appendChild(tableBox);
+        box.appendChild(pane);
+        renderCsvTable(file, tableBox, headers, {
+          compare: true,
+          peers: selectedFiles.filter(peer => peer !== file),
+        });
+        scrollBoxes.push(tableBox);
+      }
+      syncCompareScroll(...scrollBoxes);
     }
     function formatStatNumber(value) {
       const parsed = Number(value);
@@ -3668,7 +3760,7 @@ HTML = r"""<!doctype html>
       if (state.statsFor !== state.selected || !state.stats) {
         summary.textContent = 'No stats loaded.';
         box.className = 'csv-empty';
-        box.textContent = 'Open the Stats tab to summarize parsed CSV results.';
+        box.textContent = 'Reload stats to summarize parsed CSV results.';
         return;
       }
       const stats = state.stats.stats_json || null;
@@ -3871,7 +3963,11 @@ HTML = r"""<!doctype html>
     }
     async function activateCsvView(viewId) {
       await ensureResultsLoaded();
-      if (viewId === 'results-view') renderResultsWorkspace();
+      await ensureStatsLoaded();
+      if (viewId === 'results-view') {
+        renderResultsWorkspace();
+        renderStatsWorkspace();
+      }
     }
     function setView(viewId) {
       state.activeView = viewId;
@@ -3884,9 +3980,6 @@ HTML = r"""<!doctype html>
       if (viewId === 'results-view') {
         activateCsvView(viewId).catch(err => out(String(err)));
       }
-      if (viewId === 'stats-view') {
-        ensureStatsLoaded().catch(err => out(String(err)));
-      }
       if (viewId === 'install-log-view') {
         ensureInstallLogLoaded().catch(err => out(String(err)));
       }
@@ -3894,6 +3987,8 @@ HTML = r"""<!doctype html>
         ensureLogsLoaded().catch(err => out(String(err)));
       }
       if (viewId === 'plots-view') {
+        loadPlotBackendStatus().catch(err => out(String(err)));
+        loadPlotInfo().catch(err => out(String(err)));
         renderPlotPanel();
       }
     }
@@ -4189,9 +4284,7 @@ HTML = r"""<!doctype html>
       state.resultsFor = null;
       state.stats = null;
       state.statsFor = null;
-      state.activeResult = '';
-      state.compareRight = '';
-      state.compareEnabled = false;
+      state.selectedResults = [];
       state.compareColumnModes = {};
       state.installLog = null;
       state.installLogFor = null;
@@ -4201,6 +4294,8 @@ HTML = r"""<!doctype html>
       state.selectedLog = '';
       state.logContent = null;
       state.submitLock = null;
+      state.plotInfo = null;
+      state.plotInfoFor = null;
       setView('experiment-view');
       renderResultsWorkspace();
       renderStatsWorkspace();
@@ -4367,6 +4462,7 @@ HTML = r"""<!doctype html>
       const summary = document.getElementById('plots-summary');
       const file = document.getElementById('plot-file');
       if (!summary || !file) return;
+      applyPlotBackendStatus();
       if (!state.selected) {
         summary.textContent = 'No experiment selected.';
         file.className = 'csv-empty';
@@ -4380,22 +4476,77 @@ HTML = r"""<!doctype html>
         ? 'Plot generation is running.'
         : action?.status === 'completed'
           ? (actionSucceeded(action, 'plot') ? 'Plot generation completed.' : 'Plot generation failed.')
-          : 'Generate plots for the selected experiment.';
+          : (state.plotInfoFor === state.selected && state.plotInfo?.exists
+              ? `plots.pdf, ${formatBytes(state.plotInfo.size || 0)}, modified ${state.plotInfo.modified_at || 'unknown time'}`
+              : 'Generate plots for the selected experiment.');
       const pdfUrl = `/api/experiments/${encodeURIComponent(state.selected)}/plots.pdf`;
-      file.className = 'csv-empty';
-      file.innerHTML = `plots.pdf will be available at <a href="${esc(pdfUrl)}" target="_blank" rel="noreferrer">plots.pdf</a> after generation.`;
+      if (state.plotInfoFor === state.selected && state.plotInfo?.exists) {
+        const version = encodeURIComponent(`${state.plotInfo.modified_at || ''}-${state.plotInfo.size || ''}`);
+        file.className = 'plot-preview';
+        file.innerHTML = `
+          <iframe class="plot-pdf" src="${esc(pdfUrl)}?v=${version}" title="plots.pdf"></iframe>
+          <div class="csv-summary"><a href="${esc(pdfUrl)}?v=${version}" target="_blank" rel="noreferrer">Open plots.pdf</a></div>
+        `;
+      } else {
+        file.className = 'csv-empty';
+        file.textContent = state.plotInfoFor === state.selected
+          ? 'plots.pdf does not exist yet.'
+          : 'Checking for plots.pdf...';
+      }
+    }
+    function applyPlotBackendStatus() {
+      const checkbox = document.getElementById('plot-no-docker');
+      const label = document.getElementById('plot-no-docker-label');
+      if (!checkbox || !label) return;
+      const backend = state.plotBackend;
+      if (!backend) {
+        checkbox.disabled = false;
+        label.classList.remove('disabled');
+        label.title = 'Use host R instead of Docker';
+        return;
+      }
+      if (!backend.docker_available) {
+        checkbox.checked = true;
+        checkbox.disabled = true;
+        label.classList.add('disabled');
+        label.title = backend.native_r_available
+          ? 'Docker is not available; native R will be used.'
+          : 'Docker is not available, and Rscript was not found.';
+        return;
+      }
+      checkbox.disabled = false;
+      label.classList.remove('disabled');
+      if (!state.plotNoDockerTouched) checkbox.checked = false;
+      label.title = 'Use host R instead of Docker';
+    }
+    async function loadPlotBackendStatus() {
+      state.plotBackend = await api('/api/plot/backend');
+      applyPlotBackendStatus();
+      return state.plotBackend;
+    }
+    async function loadPlotInfo() {
+      if (!state.selected) return null;
+      state.plotInfo = await api(`/api/experiments/${encodeURIComponent(state.selected)}/plots`);
+      state.plotInfoFor = state.selected;
+      renderPlotPanel();
+      return state.plotInfo;
     }
     async function plotExperiment() {
       if (!state.selected) return;
       setView('plots-view');
+      applyPlotBackendStatus();
       setActionButtons(['plot-results'], true);
       try {
+        const noDocker = document.getElementById('plot-no-docker')?.checked || false;
         const action = await api(`/api/experiments/${encodeURIComponent(state.selected)}/plot`, {
           method: 'POST',
-          body: JSON.stringify({})
+          body: JSON.stringify({ no_docker: noDocker })
         });
         renderPlotPanel({ status: 'running', id: action.id });
-        await watchAction(action.id, current => renderPlotPanel(current));
+        const completed = await watchAction(action.id, current => renderPlotPanel(current));
+        if (completed?.status === 'completed' && completed.result?.plotted) {
+          await loadPlotInfo();
+        }
       } finally {
         setActionButtons(['plot-results'], false);
       }
@@ -4417,9 +4568,7 @@ HTML = r"""<!doctype html>
       clearTransientOutput();
       state.results = (data.files || []).map(prepareCsvFile);
       state.resultsFor = state.selected;
-      state.activeResult = state.results[0]?.name || '';
-      state.compareRight = state.results[1]?.name || state.results[0]?.name || '';
-      state.compareEnabled = false;
+      state.selectedResults = state.results[0] ? [state.results[0].name] : [];
       state.compareColumnModes = {};
       renderResultsWorkspace();
     }
@@ -4502,6 +4651,9 @@ HTML = r"""<!doctype html>
     document.getElementById('refresh-progress').onclick = () => loadProgress();
     document.getElementById('parse-results').onclick = parseExperiment;
     document.getElementById('plot-results').onclick = plotExperiment;
+    document.getElementById('plot-no-docker').onchange = () => {
+      state.plotNoDockerTouched = true;
+    };
     document.getElementById('load-results').onclick = loadResults;
     document.getElementById('load-stats').onclick = loadStats;
     document.getElementById('load-install-log').onclick = loadInstallLog;
@@ -4558,6 +4710,9 @@ def make_handler(app):
                 if path == "/api/pins":
                     json_response(self, 200, app.read_pins())
                     return
+                if path == "/api/plot/backend":
+                    json_response(self, 200, app.plot_backend_status())
+                    return
                 if path == "/api/experiments":
                     json_response(self, 200, {"experiments": app.list_experiments()})
                     return
@@ -4588,6 +4743,10 @@ def make_handler(app):
                         json_response(self, 200, app.submit_lock(experiment_id))
                     else:
                         json_response(self, 200, app.progress(experiment_id))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/plots$", path)
+                if match:
+                    json_response(self, 200, app.plots_info(urllib.parse.unquote(match.group(1))))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/stats$", path)
                 if match:

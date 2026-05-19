@@ -311,6 +311,25 @@ Example:
   - `--property <Algorithm>.<property>` prints a single resolved algorithm property as JSON
 - `mkexp2 init` adds `.mkexp2/`, `logs/*`, `!logs/install.md`, and `slurm/` to `.gitignore`; CSV results, `plots.pdf`, and the install log are intentionally not ignored.
 
+## Plotting backend
+
+`mkexp2 plot` prefers Docker when the Docker daemon and Docker Compose are
+available. If Docker is not available, it falls back to native `Rscript` on the
+host. The native path runs the same `plots/install.R` and `plots/mkplots.R`
+entrypoints, but passes host paths through environment variables instead of
+using the container's `/data`, `/cache`, and `/output` mounts.
+
+Native R fallback requires `Rscript` on `PATH`. Missing R packages are installed
+into `plots/.r-libs-native`, and native plot cache files go to
+`plots/.cache-native`. To force the native backend even when Docker works, run:
+
+```bash
+mkexp2 plot --no-docker
+```
+
+The web UI exposes the same choice with the Plots tab's "No docker" checkbox. If
+the backend cannot use Docker, the checkbox is checked and disabled automatically.
+
 ## Web UI
 
 `mkexp2 web` serves a single-user management UI for a Git repository containing
@@ -353,7 +372,7 @@ The UI can:
 - commit submitted state to Git after submission
 - run `mkexp2 parse` from the Results tab and reload CSV results when parsing
   succeeds
-- view a Stats tab backed by `mkexp2 stats --json`, currently showing
+- view stats below Results, backed by `mkexp2 stats --json`, currently showing
   geometric-mean cut and geometric-mean time per algorithm from parsed CSV files
 - refresh run progress from the Experiment page by running `mkexp2 progress
   --json`; after progress has been loaded, incomplete runs auto-refresh every 2
@@ -367,10 +386,11 @@ The UI can:
   is hidden because it has its own tab, and file contents are read only after
   selecting a specific log file
 - display CSV results in the Results tab with parsed tables, remembered column
-  visibility, and an Add comparison control that dynamically adds a second CSV
-  side by side; comparison tables lock scrolling, require matching row counts,
-  and support header-click numeric coloring for lower-is-better or
-  higher-is-better columns
+  visibility, and multi-select algorithm buttons; selecting two or more CSVs
+  automatically shows them side by side, locks scrolling across every selected
+  table, requires matching row counts, and supports header-click numeric
+  coloring for lower-is-better or higher-is-better columns, including orange
+  middle values in three-way-or-larger comparisons
 - serve `plots.pdf`
 - run `mkexp2 plot` on demand from the Plots tab and show plot action status
   there

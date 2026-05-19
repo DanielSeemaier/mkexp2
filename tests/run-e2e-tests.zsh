@@ -16,6 +16,7 @@ test_parser_mt_kahypar_example
 test_parser_kaminpar_example
 test_plot_compose_uses_keyed_image_and_small_context
 test_plot_threads_filter_builds_r_args
+test_native_r_env_paths_are_passed
 test_topology_validation_for_plot_threads
 
 echo "1..$TEST_COUNT"

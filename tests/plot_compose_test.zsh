@@ -37,12 +37,34 @@ EOF
 test_plot_threads_filter_builds_r_args() {
   MKEXP2_PLOT_THREADS="$(NormalizeTopology 4)"
 
-  _BuildPlotRArgs 0 0 1 KaMinPar-FM KaMinPar-LP
+  _BuildPlotRArgs 0 0 1 /tmp/plots.pdf KaMinPar-FM KaMinPar-LP
 
-  assert_eq "${(j: :)PLOT_R_ARGS}" "--running-time --threads 1x1x4 --output /output/plots.pdf KaMinPar-FM KaMinPar-LP" "plot passes normalized thread filter to R"
+  assert_eq "${(j: :)PLOT_R_ARGS}" "--running-time --threads 1x1x4 --output /tmp/plots.pdf KaMinPar-FM KaMinPar-LP" "plot passes normalized thread filter to R"
 
   MKEXP2_PLOT_THREADS=""
   pass "plot threads filter R arguments"
+}
+
+test_native_r_env_paths_are_passed() {
+  local tmp=""
+  tmp=$(mktemp -d)
+  local plots_dir="$tmp/plots"
+  local results_dir="$tmp/results"
+  local script="$tmp/check-env.R"
+
+  mkdir -p "$plots_dir" "$results_dir"
+  cat > "$script" <<'EOF'
+stopifnot(Sys.getenv("MKEXP2_PLOTS_DATA_DIR") == Sys.getenv("EXPECTED_RESULTS"))
+stopifnot(Sys.getenv("MKEXP2_PLOTS_DATA_OUTPUT_DIR") == Sys.getenv("EXPECTED_RESULTS"))
+stopifnot(nzchar(Sys.getenv("MKEXP2_PLOTS_CACHE_DIR")))
+stopifnot(grepl(".r-libs-native", Sys.getenv("R_LIBS_USER"), fixed = TRUE))
+EOF
+
+  export EXPECTED_RESULTS="$results_dir"
+  _RunNativeRscript "$plots_dir" "$results_dir" "$script"
+  unset EXPECTED_RESULTS
+
+  pass "native R receives mkexp2 plot paths"
 }
 
 test_topology_validation_for_plot_threads() {

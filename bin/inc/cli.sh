@@ -10,7 +10,7 @@ Commands:
   generate  Only generate job files and submit script
   parse     Parse logs into CSV files under ./results
   stats     Summarize parsed CSV results
-  plot      Generate plots from parsed CSV results (requires Docker)
+  plot      Generate plots from parsed CSV results
   progress  Show run completion progress for each experiment / algorithm
   check     Validate Experiment configuration without generating jobs
   probe     Inspect Experiment definitions and print JSON
@@ -43,6 +43,7 @@ Options:
   --speedup                  With `plot`, include speedup plot (first algorithm is baseline)
   --running-time             With `plot`, include running time and graph-grid plots
   --threads T|NxMxT          With `plot`, only include data for this Threads topology
+  --no-docker                With `plot`, force native R instead of Docker
   --repo DIR                 With `web`, Git repository containing experiment dirs
   --host HOST                With `web`, bind host (default: 127.0.0.1)
   --port PORT                With `web`, bind port (default: 8765)
@@ -507,6 +508,10 @@ ParseCli() {
         MKEXP2_PLOT_EXPLICIT_SELECTION=1
         shift
         ;;
+      --no-docker)
+        MKEXP2_PLOT_NO_DOCKER=1
+        shift
+        ;;
       --threads)
         shift
         if [[ $# -eq 0 ]]; then
@@ -722,6 +727,10 @@ ParseCli() {
 
   if (( MKEXP2_PLOT_EXPLICIT_SELECTION )) && [[ "$MKEXP2_MODE" != "plot" ]]; then
     EchoFatal "--performance-profile/--speedup/--running-time can only be used with plot"
+    exit 1
+  fi
+  if (( MKEXP2_PLOT_NO_DOCKER )) && [[ "$MKEXP2_MODE" != "plot" ]]; then
+    EchoFatal "--no-docker can only be used with plot"
     exit 1
   fi
   if [[ -n "$MKEXP2_PLOT_THREADS" ]]; then

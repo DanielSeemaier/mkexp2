@@ -21,6 +21,16 @@ _CheckDockerCompose() {
   return 1
 }
 
+_CheckDockerAvailable() {
+  command -v docker >/dev/null 2>&1 || return 1
+  docker info >/dev/null 2>&1 || return 1
+  _CheckDockerCompose
+}
+
+_CheckNativeR() {
+  command -v Rscript >/dev/null 2>&1
+}
+
 _DockerImageExists() {
   local image="$1"
   docker image inspect "$image" >/dev/null 2>&1
@@ -98,7 +108,13 @@ _BuildPlotRArgs() {
   local do_pp="$1"
   local do_speedup="$2"
   local do_rt="$3"
-  shift 3
+  local output_file="/output/plots.pdf"
+  if (( $# >= 4 )); then
+    output_file="$4"
+    shift 4
+  else
+    shift 3
+  fi
 
   PLOT_R_ARGS=()
   (( do_pp ))      && PLOT_R_ARGS+=("--performance-profile")
@@ -107,8 +123,107 @@ _BuildPlotRArgs() {
   if [[ -n "$MKEXP2_PLOT_THREADS" ]]; then
     PLOT_R_ARGS+=("--threads" "$MKEXP2_PLOT_THREADS")
   fi
-  PLOT_R_ARGS+=("--output" "/output/plots.pdf")
+  PLOT_R_ARGS+=("--output" "$output_file")
   PLOT_R_ARGS+=("$@")
+}
+
+_RunNativeRscript() {
+  local plots_dir="$1"
+  local results_dir="$2"
+  local script="$3"
+  shift 3
+
+  local native_lib="$plots_dir/.r-libs-native"
+  local native_cache="$plots_dir/.cache-native"
+  mkdir -p "$native_lib" "$native_cache"
+
+  (
+    cd "$plots_dir" || exit 1
+    env \
+      R_LIBS_USER="$native_lib" \
+      MKEXP2_PLOTS_NATIVE=1 \
+      MKEXP2_PLOTS_DATA_DIR="$results_dir" \
+      MKEXP2_PLOTS_CACHE_DIR="$native_cache" \
+      MKEXP2_PLOTS_DATA_OUTPUT_DIR="$results_dir" \
+      Rscript "$script" "$@"
+  )
+}
+
+_InstallNativeRPackages() {
+  local plots_dir="$1"
+  local results_dir="$2"
+
+  EchoStep "Checking native R packages"
+  if ! _RunNativeRscript "$plots_dir" "$results_dir" "$plots_dir/install.R"; then
+    EchoFatal "native R package installation failed"
+    return 1
+  fi
+}
+
+_GeneratePlotsWithDocker() {
+  local plots_dir="$1"
+  local results_dir="$2"
+  local experiment_dir="$3"
+  shift 3
+
+  mkdir -p "$experiment_dir/.mkexp2"
+  local compose_file="$experiment_dir/.mkexp2/plots-compose.yml"
+  local build_context="$experiment_dir/.mkexp2/plots-image"
+  local image=""
+
+  image=$(_PlotsDockerImage "$plots_dir") || return 1
+  _PreparePlotsBuildContext "$plots_dir" "$build_context"
+  _WritePlotsComposeFile "$plots_dir" "$results_dir" "$experiment_dir" "$image" "$build_context" "$compose_file"
+
+  if _DockerImageExists "$image"; then
+    EchoStep "Using cached plots Docker image: $image"
+  else
+    EchoStep "Building plots Docker image: $image (first run for this Dockerfile)"
+    if ! _DockerCompose -f "$compose_file" build plot; then
+      EchoFatal "failed to build plots Docker image"
+      return 1
+    fi
+  fi
+
+  mkdir -p "$plots_dir/.r-libs"
+  if [[ -z "$(ls -A "$plots_dir/.r-libs" 2>/dev/null)" ]]; then
+    EchoStep "Installing R packages into $plots_dir/.r-libs (first run, this takes a while)"
+    if ! _DockerCompose -f "$compose_file" run --rm plot \
+        Rscript /work/install.R; then
+      EchoFatal "R package installation failed"
+      return 1
+    fi
+  fi
+
+  _BuildPlotRArgs "$1" "$2" "$3" "/output/plots.pdf" "${@:4}"
+
+  EchoStep "Generating plots with Docker"
+  if ! _DockerCompose -f "$compose_file" run --rm plot \
+      Rscript /work/mkplots.R "${PLOT_R_ARGS[@]}"; then
+    EchoFatal "plot generation failed"
+    return 1
+  fi
+}
+
+_GeneratePlotsWithNativeR() {
+  local plots_dir="$1"
+  local results_dir="$2"
+  local experiment_dir="$3"
+  shift 3
+
+  if ! _CheckNativeR; then
+    EchoFatal "Docker is unavailable and Rscript was not found"
+    return 1
+  fi
+
+  _InstallNativeRPackages "$plots_dir" "$results_dir" || return 1
+  _BuildPlotRArgs "$1" "$2" "$3" "$experiment_dir/plots.pdf" "${@:4}"
+
+  EchoStep "Generating plots with native R"
+  if ! _RunNativeRscript "$plots_dir" "$results_dir" "$plots_dir/mkplots.R" "${PLOT_R_ARGS[@]}"; then
+    EchoFatal "native plot generation failed"
+    return 1
+  fi
 }
 
 GeneratePlots() {
@@ -121,11 +236,6 @@ GeneratePlots() {
   if [[ ! -f "$plots_dir/common.R" ]]; then
     EchoFatal "plots submodule not initialized at $plots_dir"
     EchoFatal "Run: git submodule update --init plots"
-    return 1
-  fi
-
-  if ! _CheckDockerCompose; then
-    EchoFatal "docker compose not found; please install Docker Desktop or docker-compose"
     return 1
   fi
 
@@ -187,52 +297,19 @@ GeneratePlots() {
     do_rt=1
   fi
 
-  # ── Generate docker-compose file ────────────────────────────────────────────
+  # ── Generate plots ─────────────────────────────────────────────────────────
 
-  mkdir -p "$PWD/.mkexp2"
-  local compose_file="$PWD/.mkexp2/plots-compose.yml"
-  local build_context="$PWD/.mkexp2/plots-image"
-  local image=""
-
-  image=$(_PlotsDockerImage "$plots_dir") || return 1
-  _PreparePlotsBuildContext "$plots_dir" "$build_context"
-  _WritePlotsComposeFile "$plots_dir" "$results_dir" "$experiment_dir" "$image" "$build_context" "$compose_file"
-
-  # ── Build Docker image ──────────────────────────────────────────────────────
-
-  if _DockerImageExists "$image"; then
-    EchoStep "Using cached plots Docker image: $image"
+  if (( MKEXP2_PLOT_NO_DOCKER )); then
+    EchoStep "Docker disabled; using native R"
+    _GeneratePlotsWithNativeR "$plots_dir" "$results_dir" "$experiment_dir" \
+      "$do_pp" "$do_speedup" "$do_rt" "${active_algos[@]}" || return 1
+  elif _CheckDockerAvailable; then
+    _GeneratePlotsWithDocker "$plots_dir" "$results_dir" "$experiment_dir" \
+      "$do_pp" "$do_speedup" "$do_rt" "${active_algos[@]}" || return 1
   else
-    EchoStep "Building plots Docker image: $image (first run for this Dockerfile)"
-    if ! _DockerCompose -f "$compose_file" build plot; then
-      EchoFatal "failed to build plots Docker image"
-      return 1
-    fi
-  fi
-
-  # ── Install R packages (cached in plots/.r-libs) ───────────────────────────
-
-  mkdir -p "$plots_dir/.r-libs"
-  if [[ -z "$(ls -A "$plots_dir/.r-libs" 2>/dev/null)" ]]; then
-    EchoStep "Installing R packages into $plots_dir/.r-libs (first run, this takes a while)"
-    if ! _DockerCompose -f "$compose_file" run --rm plot \
-        Rscript /work/install.R; then
-      EchoFatal "R package installation failed"
-      return 1
-    fi
-  fi
-
-  # ── Build Rscript argument list ─────────────────────────────────────────────
-
-  _BuildPlotRArgs "$do_pp" "$do_speedup" "$do_rt" "${active_algos[@]}"
-
-  # ── Run mkplots.R inside the container ─────────────────────────────────────
-
-  EchoStep "Generating plots"
-  if ! _DockerCompose -f "$compose_file" run --rm plot \
-      Rscript /work/mkplots.R "${PLOT_R_ARGS[@]}"; then
-    EchoFatal "plot generation failed"
-    return 1
+    EchoWarn "Docker is not available; falling back to native R"
+    _GeneratePlotsWithNativeR "$plots_dir" "$results_dir" "$experiment_dir" \
+      "$do_pp" "$do_speedup" "$do_rt" "${active_algos[@]}" || return 1
   fi
 
   # ── Ensure plots.pdf is ignored by git ─────────────────────────────────────
