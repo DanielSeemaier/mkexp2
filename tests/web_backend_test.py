@@ -201,8 +201,13 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("function applyPlotBackendStatus", mkexp2_web.HTML)
         self.assertIn("/api/plot/backend", mkexp2_web.HTML)
         self.assertIn("body: JSON.stringify({ no_docker: noDocker })", mkexp2_web.HTML)
-        self.assertIn('id="submit-lock-status"', mkexp2_web.HTML)
         self.assertIn('id="clear-submit-lock"', mkexp2_web.HTML)
+        self.assertIn('id="delete-experiment"', mkexp2_web.HTML)
+        self.assertIn('Danger Zone', mkexp2_web.HTML)
+        self.assertIn("Type the full experiment name to delete it", mkexp2_web.HTML)
+        self.assertIn("function renderSubmitButton", mkexp2_web.HTML)
+        self.assertIn("state.submitBusy", mkexp2_web.HTML)
+        self.assertIn("button.is-busy", mkexp2_web.HTML)
         self.assertIn('id="refresh-progress"', mkexp2_web.HTML)
         self.assertIn('id="progress-output"', mkexp2_web.HTML)
         self.assertIn("async function parseExperiment", mkexp2_web.HTML)
@@ -250,8 +255,9 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("/api/git/push", mkexp2_web.HTML)
         self.assertNotIn('id="plot"', mkexp2_web.HTML)
         self.assertIn("Select at least one algorithm.", mkexp2_web.HTML)
-        self.assertIn("Submit is locked for this experiment", mkexp2_web.HTML)
+        self.assertIn("Submit locked", mkexp2_web.HTML)
         self.assertNotIn("Submit is unlocked", mkexp2_web.HTML)
+        self.assertNotIn('id="submit-lock-status"', mkexp2_web.HTML)
         self.assertIn("mkexp2 check failed. Submit anyway?", mkexp2_web.HTML)
 
     def test_empty_token_bypass_is_explicitly_opt_in(self):
@@ -411,6 +417,28 @@ class WebBackendTest(unittest.TestCase):
             cleared = app.clear_submit_lock("exp")
             self.assertTrue(cleared["cleared"])
             self.assertFalse(cleared["submit_lock"]["locked"])
+
+    def test_delete_experiment_removes_directory_and_pins(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "2026" / "exp"
+            exp.mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            (exp / "logs").mkdir()
+            (exp / "logs" / "run.log").write_text("done\n")
+            other = repo / "other"
+            other.mkdir()
+            (other / "Experiment").write_text("ExperimentY() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+            app.write_pins(["2026/exp", "other"])
+
+            deleted = app.delete_experiment("2026/exp")
+            self.assertTrue(deleted["deleted"])
+            self.assertFalse(exp.exists())
+            self.assertEqual(app.read_pins()["pinned"], ["other"])
+
+            with self.assertRaises(ValueError):
+                app.delete_experiment("2026/exp")
 
     def test_progress_uses_json_argv_array_and_strips_ansi(self):
         calls = []

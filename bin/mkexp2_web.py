@@ -694,6 +694,20 @@ class Mkexp2WebApp:
         path.unlink(missing_ok=True)
         return {"cleared": existed, "submit_lock": self.submit_lock(experiment_id)}
 
+    def delete_experiment(self, experiment_id):
+        path = self.experiment_path(experiment_id)
+        known = {experiment["id"] for experiment in self.list_experiments(force=True)}
+        if experiment_id not in known:
+            raise ValueError(f"experiment not found: {experiment_id}")
+        if not path.is_dir() or not (path / "Experiment").is_file():
+            raise ValueError(f"experiment not found: {experiment_id}")
+        shutil.rmtree(path)
+        self.invalidate_experiments_cache()
+        pins = self.read_pins().get("pinned") or []
+        if experiment_id in pins:
+            self.write_pins([item for item in pins if item != experiment_id])
+        return {"deleted": True, "id": experiment_id, "path": str(path)}
+
     def progress(self, experiment_id):
         result = self.command(experiment_id, ["progress", "--json"], timeout=60)
         result["stdout"] = strip_ansi(result.get("stdout", ""))
@@ -1087,10 +1101,37 @@ HTML = r"""<!doctype html>
       border-radius: 6px;
       cursor: pointer;
     }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.58;
+    }
     button.primary {
       background: var(--accent);
       color: white;
       border-color: var(--accent);
+    }
+    button.primary:disabled {
+      background: #9fb8b4;
+      border-color: #9fb8b4;
+      color: #f8fbfb;
+    }
+    button.is-busy {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    button.is-busy::before {
+      content: "";
+      width: 13px;
+      height: 13px;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 999px;
+      animation: spin 0.75s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
     }
     button.danger {
       color: var(--danger);
@@ -1591,28 +1632,13 @@ HTML = r"""<!doctype html>
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
-    .submit-lock {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+    .danger-zone {
+      border-color: #f1b7b1;
+    }
+    .danger-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 8px 10px;
-      background: #fbfcfd;
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .submit-lock.locked {
-      background: #fff7ed;
-      border-color: #fed7aa;
-      color: #9a3412;
-    }
-    .submit-lock-text {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
     }
     .progress-output {
       overflow: auto;
@@ -2515,10 +2541,6 @@ HTML = r"""<!doctype html>
               </div>
               <div class="panel-body stack">
                 <div id="algorithm-list" class="chips"></div>
-                <div id="submit-lock-status" class="submit-lock hidden">
-                  <span class="submit-lock-text"></span>
-                  <button id="clear-submit-lock" class="hidden">Unlock</button>
-                </div>
                 <button class="primary" id="submit">Submit Selected</button>
               </div>
             </section>
@@ -2547,6 +2569,20 @@ HTML = r"""<!doctype html>
           <div class="panel-body">
             <div id="probe-output" class="probe-output">
               <div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>
+            </div>
+          </div>
+        </section>
+        <section class="panel danger-zone">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Danger Zone</div>
+              <div id="danger-summary" class="csv-summary">Manual recovery and deletion actions.</div>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="danger-actions">
+              <button id="clear-submit-lock">Unlock submit</button>
+              <button id="delete-experiment" class="danger">Delete Experiment</button>
             </div>
           </div>
         </section>
@@ -2679,6 +2715,7 @@ HTML = r"""<!doctype html>
       selectedLog: '',
       logContent: null,
       submitLock: null,
+      submitBusy: false,
       plotBackend: null,
       plotInfo: null,
       plotInfoFor: null,
@@ -4219,24 +4256,41 @@ HTML = r"""<!doctype html>
     }
     function renderSubmitLock(lock) {
       state.submitLock = lock || { locked: false };
-      const status = document.getElementById('submit-lock-status');
-      const text = status.querySelector('.submit-lock-text');
       const clearButton = document.getElementById('clear-submit-lock');
       const submitButton = document.getElementById('submit');
       const locked = Boolean(state.submitLock.locked);
-      status.classList.toggle('hidden', !locked);
-      status.classList.toggle('locked', locked);
-      clearButton.classList.toggle('hidden', !locked);
-      submitButton.disabled = locked;
-      if (locked) {
-        const fields = state.submitLock.fields || {};
-        const started = fields.started_at ? ` since ${fields.started_at}` : '';
-        const algorithms = fields.algorithms ? ` (${fields.algorithms})` : '';
-        text.textContent = `Submit locked${started}${algorithms}`;
-        text.title = state.submitLock.content || state.submitLock.path || '';
+      clearButton.disabled = !locked || !state.selected;
+      renderSubmitButton();
+    }
+    function submitLockMessage() {
+      if (!state.submitLock?.locked) return '';
+      const fields = state.submitLock.fields || {};
+      const started = fields.started_at ? ` since ${fields.started_at}` : '';
+      const algorithms = fields.algorithms ? ` (${fields.algorithms})` : '';
+      return `Submit locked${started}${algorithms}`;
+    }
+    function renderSubmitButton() {
+      const submitButton = document.getElementById('submit');
+      if (!submitButton) return;
+      const locked = Boolean(state.submitLock?.locked);
+      submitButton.disabled = state.submitBusy || locked || !state.selected;
+      submitButton.classList.toggle('is-busy', state.submitBusy);
+      if (state.submitBusy) {
+        submitButton.textContent = 'Submitting...';
+        submitButton.title = 'Submitting experiment...';
       } else {
-        text.textContent = '';
-        text.title = '';
+        submitButton.textContent = 'Submit Selected';
+        submitButton.title = locked ? submitLockMessage() : '';
+      }
+      const clearButton = document.getElementById('clear-submit-lock');
+      if (clearButton) clearButton.disabled = !locked || !state.selected;
+      const dangerSummary = document.getElementById('danger-summary');
+      if (dangerSummary) {
+        if (locked) {
+          dangerSummary.textContent = `${submitLockMessage()}.`;
+        } else {
+          dangerSummary.textContent = 'Manual recovery and deletion actions.';
+        }
       }
     }
     async function refreshSubmitLock() {
@@ -4251,6 +4305,29 @@ HTML = r"""<!doctype html>
       if (!state.selected) return;
       const result = await api(`/api/experiments/${encodeURIComponent(state.selected)}/submit-lock`, { method: 'DELETE' });
       renderSubmitLock(result.submit_lock);
+    }
+    async function deleteExperiment() {
+      if (!state.selected) return;
+      const id = state.selected;
+      const typed = prompt(`Type the full experiment name to delete it:\n${id}`);
+      if (typed !== id) return;
+      if (!confirm(`Delete experiment "${id}" and all files in its directory?`)) return;
+      const button = document.getElementById('delete-experiment');
+      button.disabled = true;
+      try {
+        await api(`/api/experiments/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        state.selected = null;
+        state.submitLock = null;
+        clearPlotPdfUrl();
+        document.getElementById('selected-title').textContent = 'Experiment';
+        document.getElementById('selected-path').textContent = '';
+        setEditorValue('');
+        renderSubmitLock({ locked: false });
+        renderProgress(null);
+        await refreshExperiments({ force: true });
+      } finally {
+        button.disabled = false;
+      }
     }
     function startProgressPolling() {
       if (state.progressTimer) return;
@@ -4489,7 +4566,7 @@ HTML = r"""<!doctype html>
     async function submitExperiment(force = false) {
       if (!state.selected) return;
       if (state.submitLock?.locked) {
-        out('Submit is locked for this experiment. Clear the lock only if the previous run is gone.');
+        renderSubmitButton();
         return;
       }
       const selectedAlgorithms = Array.from(document.querySelectorAll('#algorithm-list input:checked')).map(item => item.value);
@@ -4498,15 +4575,25 @@ HTML = r"""<!doctype html>
         return;
       }
       const algorithms = selectedAlgorithms.length === state.algorithms.length ? [] : selectedAlgorithms;
-      const action = await api(`/api/experiments/${encodeURIComponent(state.selected)}/submit`, {
-        method: 'POST',
-        body: JSON.stringify({ algorithms, force })
-      });
-      const completed = await watchAction(action.id);
-      if (!force && completed?.status === 'completed' && completed.result?.blocked === 'check failed') {
-        if (confirm('mkexp2 check failed. Submit anyway?')) {
-          await submitExperiment(true);
+      state.submitBusy = true;
+      renderSubmitButton();
+      try {
+        const action = await api(`/api/experiments/${encodeURIComponent(state.selected)}/submit`, {
+          method: 'POST',
+          body: JSON.stringify({ algorithms, force })
+        });
+        const completed = await watchAction(action.id);
+        if (!force && completed?.status === 'completed' && completed.result?.blocked === 'check failed') {
+          state.submitBusy = false;
+          renderSubmitButton();
+          if (confirm('mkexp2 check failed. Submit anyway?')) {
+            await submitExperiment(true);
+          }
+          return;
         }
+      } finally {
+        state.submitBusy = false;
+        renderSubmitButton();
       }
       await refreshSubmitLock();
       await loadProgress({ quiet: true }).catch(() => {});
@@ -4745,6 +4832,7 @@ HTML = r"""<!doctype html>
     document.getElementById('probe-run').onclick = probeExperiment;
     document.getElementById('submit').onclick = submitExperiment;
     document.getElementById('clear-submit-lock').onclick = clearSubmitLock;
+    document.getElementById('delete-experiment').onclick = deleteExperiment;
     document.getElementById('refresh-progress').onclick = () => loadProgress();
     document.getElementById('parse-results').onclick = parseExperiment;
     document.getElementById('plot-results').onclick = plotExperiment;
@@ -4991,11 +5079,16 @@ def make_handler(app):
                     json_response(self, 401, {"error": "missing or invalid token"})
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/submit-lock$", path)
-                if not match:
-                    json_response(self, 404, {"error": "not found"})
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    json_response(self, 200, app.clear_submit_lock(experiment_id))
                     return
-                experiment_id = urllib.parse.unquote(match.group(1))
-                json_response(self, 200, app.clear_submit_lock(experiment_id))
+                match = re.match(r"^/api/experiments/([^/]+)$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    json_response(self, 200, app.delete_experiment(experiment_id))
+                    return
+                json_response(self, 404, {"error": "not found"})
             except Exception as exc:
                 json_response(self, 400, {"error": str(exc)})
 
