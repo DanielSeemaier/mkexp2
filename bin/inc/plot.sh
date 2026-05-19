@@ -31,10 +31,15 @@ _CheckNativeR() {
   command -v Rscript >/dev/null 2>&1
 }
 
+_NowSeconds() {
+  date +%s
+}
+
 _AcquireDirLock() {
   local lock_dir="$1"
   local timeout="${2:-900}"
-  local start=$EPOCHSECONDS
+  local start=$(_NowSeconds)
+  local now="$start"
   local pid_file="$lock_dir/pid"
   local lock_pid="" lock_host="" current_host=""
 
@@ -51,7 +56,8 @@ _AcquireDirLock() {
       fi
     fi
 
-    if (( EPOCHSECONDS - start >= timeout )); then
+    now=$(_NowSeconds)
+    if (( now - start >= timeout )); then
       EchoFatal "timed out waiting for plot lock: $lock_dir"
       return 1
     fi
