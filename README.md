@@ -398,6 +398,9 @@ The UI can:
 - show compact Slurm node status in the sidebar, sorted by CPU count, from
   `sinfo -lN -p all` while the status API also attaches live job/user data from
   `squeue`; displayed CPU counts are divided by two and labeled as cores
+- open the Slurm queue popup from the Nodes header, render `squeue` as a table,
+  and show compact cancel buttons that `scancel` only jobs owned by the user
+  running the web server after backend ownership revalidation
 
 The web backend uses Python's standard library only. It rejects experiment ids
 that would escape the configured repo root and invokes commands with argv arrays

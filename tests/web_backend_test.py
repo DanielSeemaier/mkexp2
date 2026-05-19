@@ -259,6 +259,11 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="queue-modal"', mkexp2_web.HTML)
         self.assertIn('id="queue-refresh" class="icon-button" aria-label="Reload Slurm queue"', mkexp2_web.HTML)
         self.assertIn("function renderQueue", mkexp2_web.HTML)
+        self.assertIn("function cancelQueueJob", mkexp2_web.HTML)
+        self.assertIn("api('/api/status/squeue/cancel'", mkexp2_web.HTML)
+        self.assertIn("row.user === data.server_user", mkexp2_web.HTML)
+        self.assertIn("button.textContent = 'x'", mkexp2_web.HTML)
+        self.assertIn("button.setAttribute('aria-label'", mkexp2_web.HTML)
         self.assertIn("/api/status/squeue", mkexp2_web.HTML)
         self.assertIn('id="git-refresh" class="icon-button" aria-label="Reload Git status"', mkexp2_web.HTML)
         self.assertIn('id="refresh-progress" class="icon-button" aria-label="Reload progress"', mkexp2_web.HTML)
@@ -749,6 +754,43 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
         self.assertEqual(queue["source"], "fallback sample: squeue not installed")
         self.assertEqual(len(queue["rows"]), 3)
         self.assertEqual(queue["rows"][1]["partition"], "diffie")
+
+    def test_squeue_cancel_requires_server_user_ownership(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+        original_getuser = mkexp2_web.getpass.getuser
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            calls.append((list(argv), timeout))
+            if argv == ["squeue"]:
+                return {
+                    "returncode": 0,
+                    "stdout": (
+                        "JOBID PARTITION NAME USER ST TIME NODES NODELIST(REASON)\n"
+                        "123 all mine owner R 0:10 1 node01\n"
+                        "124 all other alice R 0:20 1 node02\n"
+                    ),
+                    "stderr": "",
+                }
+            if argv == ["scancel", "123"]:
+                return {"returncode": 0, "stdout": "", "stderr": ""}
+            return {"returncode": 99, "stdout": "", "stderr": "unexpected"}
+
+        mkexp2_web.run_command = fake_run_command
+        mkexp2_web.getpass.getuser = lambda: "owner"
+        try:
+            queue = mkexp2_web.SlurmStatus().queue()
+            result = mkexp2_web.SlurmStatus().cancel_job({"job_id": "123"})
+            with self.assertRaises(ValueError):
+                mkexp2_web.SlurmStatus().cancel_job({"job_id": "124"})
+        finally:
+            mkexp2_web.run_command = original_run_command
+            mkexp2_web.getpass.getuser = original_getuser
+
+        self.assertEqual(queue["server_user"], "owner")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["job"]["user"], "owner")
+        self.assertIn((["scancel", "123"], 30), calls)
 
 
 if __name__ == "__main__":

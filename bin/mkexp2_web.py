@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import datetime as _dt
+import getpass
 import html
 import json
 import mimetypes
@@ -439,7 +440,36 @@ class SlurmStatus:
             "source": source,
             "raw": raw,
             "rows": parse_squeue_table(raw),
+            "server_user": getpass.getuser(),
             "command": command,
+        }
+
+    def cancel_job(self, payload):
+        job_id = str((payload or {}).get("job_id") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.+-]+", job_id):
+            raise ValueError("invalid Slurm job id")
+
+        owner = getpass.getuser()
+        squeue = run_command(["squeue"], timeout=8)
+        if squeue["returncode"] != 0:
+            raise ValueError("cannot verify Slurm job ownership before scancel")
+        rows = parse_squeue_table(squeue["stdout"])
+        job = next((row for row in rows if row["job_id"] == job_id), None)
+        if not job:
+            raise ValueError(f"Slurm job not found: {job_id}")
+        if job.get("user") != owner:
+            raise ValueError(f"refusing to cancel job {job_id}: owner is {job.get('user')}, server user is {owner}")
+
+        scancel = run_command(["scancel", job_id], timeout=30)
+        self._cache_until = 0
+        if scancel["returncode"] != 0:
+            raise ValueError(scancel["stderr"] or scancel["stdout"] or f"scancel failed for job {job_id}")
+        return {
+            "ok": scancel["returncode"] == 0,
+            "job": job,
+            "server_user": owner,
+            "verify": squeue,
+            "scancel": scancel,
         }
 
 
@@ -2344,6 +2374,14 @@ HTML = r"""<!doctype html>
     .queue-state-running { color: var(--ok); }
     .queue-state-pending { color: #9a3412; }
     .queue-state-other { color: var(--muted); }
+    .queue-cancel {
+      min-width: 26px;
+      height: 26px;
+      padding: 0 8px;
+      color: var(--danger);
+      border-color: #f1b7b1;
+      font-size: 12px;
+    }
     .git-message {
       display: grid;
       gap: 6px;
@@ -3506,7 +3544,7 @@ HTML = r"""<!doctype html>
       table.className = 'queue-table';
       const thead = document.createElement('thead');
       const headRow = document.createElement('tr');
-      for (const label of ['Job ID', 'Partition', 'Name', 'User', 'State', 'Time', 'Nodes', 'Node list / reason']) {
+      for (const label of ['Job ID', 'Partition', 'Name', 'User', 'State', 'Time', 'Nodes', 'Node list / reason', 'Action']) {
         const th = document.createElement('th');
         th.textContent = label;
         headRow.appendChild(th);
@@ -3522,6 +3560,20 @@ HTML = r"""<!doctype html>
           if (key === 'state') td.className = `queue-state ${queueStateClass(row[key])}`;
           tr.appendChild(td);
         }
+        const action = document.createElement('td');
+        if (row.user === data.server_user) {
+          const button = document.createElement('button');
+          button.className = 'queue-cancel';
+          button.textContent = 'x';
+          button.setAttribute('aria-label', `Cancel Slurm job ${row.job_id}`);
+          button.title = `Cancel Slurm job ${row.job_id}`;
+          button.onclick = () => cancelQueueJob(row.job_id);
+          action.appendChild(button);
+        } else {
+          action.className = 'csv-summary';
+          action.textContent = '';
+        }
+        tr.appendChild(action);
         tbody.appendChild(tr);
       }
       table.appendChild(tbody);
@@ -3545,6 +3597,15 @@ HTML = r"""<!doctype html>
     }
     function closeQueueDialog() {
       document.getElementById('queue-modal').classList.add('hidden');
+    }
+    async function cancelQueueJob(jobId) {
+      if (!confirm(`Cancel Slurm job ${jobId}?`)) return;
+      await api('/api/status/squeue/cancel', {
+        method: 'POST',
+        body: JSON.stringify({ job_id: jobId })
+      });
+      await loadQueue();
+      await refreshStatus().catch(err => out(String(err)));
     }
     function openConsoleDialog() {
       state.consoleOpen = true;
@@ -5377,6 +5438,9 @@ def make_handler(app):
                     return
                 if path == "/api/git/push":
                     json_response(self, 200, app.git_commit_push(payload.get("message", "")))
+                    return
+                if path == "/api/status/squeue/cancel":
+                    json_response(self, 200, app.slurm.cancel_job(payload))
                     return
                 if path == "/api/pins":
                     json_response(self, 200, app.write_pins(payload.get("pinned") or []))
