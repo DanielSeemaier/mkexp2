@@ -357,7 +357,8 @@ The UI can:
 - open the header console-log button to inspect the full browser-session
   command log, including argv/cwd/stdout/stderr payloads returned by web API
   actions
-- create a new directory from the name template
+- create a new directory from the header `+` dialog, selecting a preset and
+  optionally overriding the configured name template for that experiment
 - edit the raw `Experiment` file with lightweight syntax highlighting
 - save the current editor contents before running `mkexp2 check --json`, then
   render per-experiment errors, warnings, and summary counts with clear

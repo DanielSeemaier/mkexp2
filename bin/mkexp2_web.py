@@ -651,6 +651,12 @@ class Mkexp2WebApp:
             raise ValueError("invalid preset JSON: presets is not an array")
         return presets
 
+    def config(self):
+        return {
+            "repo": str(self.repo),
+            "name_template": self.name_template,
+        }
+
     def create_experiment(self, payload):
         name = payload.get("name") or "experiment"
         template = payload.get("name_template") or self.name_template
@@ -2521,6 +2527,57 @@ HTML = r"""<!doctype html>
       grid-template-columns: 1fr 1fr;
       gap: 10px;
     }
+    .create-form {
+      display: grid;
+      gap: 12px;
+    }
+    .create-field {
+      display: grid;
+      gap: 6px;
+    }
+    .create-field-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      text-transform: uppercase;
+    }
+    .template-name-row {
+      display: grid;
+      grid-template-columns: auto minmax(160px, 1fr) auto;
+      align-items: center;
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: white;
+      overflow: hidden;
+    }
+    .template-name-part {
+      min-width: 0;
+      padding: 0 10px;
+      color: var(--muted);
+      font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+    .template-name-row input {
+      border: 0;
+      border-left: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      border-radius: 0;
+    }
+    .template-controls {
+      display: grid;
+      gap: 8px;
+    }
+    .checkbox-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .checkbox-line input {
+      width: auto;
+    }
     .hidden { display: none; }
     @media (max-width: 980px) {
       .app { grid-template-columns: 1fr; }
@@ -2538,6 +2595,9 @@ HTML = r"""<!doctype html>
       <div class="brand">
         <h1>mkexp2</h1>
         <div class="brand-actions">
+          <button id="create-open" class="icon-button" aria-label="Create experiment" title="Create experiment">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+          </button>
           <button id="refresh" class="icon-button" aria-label="Refresh experiments" title="Refresh experiments">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
           </button>
@@ -2551,13 +2611,6 @@ HTML = r"""<!doctype html>
       </div>
       <div class="stack">
         <input id="token" type="password" placeholder="Session token">
-        <div class="form-grid">
-          <input id="new-name" placeholder="new experiment name">
-          <button id="create">Create</button>
-        </div>
-        <select id="new-preset">
-          <option value="">Loading presets...</option>
-        </select>
       </div>
       <div id="experiments" class="experiment-list"></div>
       <section class="sidebar-nodes">
@@ -2575,6 +2628,50 @@ HTML = r"""<!doctype html>
         <div id="slurm-status" class="node-list muted">No status loaded.</div>
       </section>
     </aside>
+    <div id="create-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="create-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="create-modal-title" class="modal-title">Create Experiment</div>
+            <div id="create-summary" class="csv-summary">Choose a name and preset.</div>
+          </div>
+          <button id="create-close" class="icon-button" aria-label="Close create dialog" title="Close">x</button>
+        </div>
+        <div class="modal-body">
+          <div class="create-form">
+            <label class="create-field">
+              <span class="create-field-label">Experiment name</span>
+              <div class="template-name-row">
+                <span id="create-name-prefix" class="template-name-part"></span>
+                <input id="create-name" placeholder="new experiment">
+                <span id="create-name-suffix" class="template-name-part"></span>
+              </div>
+            </label>
+            <label class="create-field">
+              <span class="create-field-label">Preset</span>
+              <select id="create-preset">
+                <option value="">Loading presets...</option>
+              </select>
+            </label>
+            <label class="checkbox-line">
+              <input id="create-template-override" type="checkbox">
+              <span>Override name template</span>
+            </label>
+            <div id="create-template-controls" class="template-controls hidden">
+              <label class="create-field">
+                <span class="create-field-label">Name template</span>
+                <input id="create-template" spellcheck="false">
+              </label>
+            </div>
+            <div id="create-preview" class="csv-summary"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="create-cancel">Cancel</button>
+          <button id="create-submit" class="primary">Create</button>
+        </div>
+      </div>
+    </div>
     <div id="git-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="git-modal-title">
       <div class="modal">
         <div class="modal-header">
@@ -2831,6 +2928,7 @@ HTML = r"""<!doctype html>
       pinnedExperiments: new Set(),
       algorithms: [],
       presets: [],
+      config: { name_template: '%Y.%m.%d-<name>' },
       openDirs: new Set(),
       results: [],
       resultsFor: null,
@@ -2868,6 +2966,7 @@ HTML = r"""<!doctype html>
       localStorage.setItem('mkexp2-token', tokenInput.value);
       out('');
       if (token() || allowEmptyToken) {
+        refreshConfig().catch(err => out(String(err)));
         refreshPresets().catch(err => out(String(err)));
         refreshExperiments().catch(err => out(String(err)));
         refreshStatus().catch(err => out(String(err)));
@@ -3281,6 +3380,50 @@ HTML = r"""<!doctype html>
       return String(value ?? '').replace(/[&<>"']/g, char => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
       }[char]));
+    }
+    function slugifyName(value) {
+      return String(value || 'experiment')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'experiment';
+    }
+    function renderTemplateForDate(template, name) {
+      const now = new Date();
+      const pad = number => String(number).padStart(2, '0');
+      return String(template ?? '%Y.%m.%d-<name>')
+        .replaceAll('%Y', String(now.getFullYear()))
+        .replaceAll('%m', pad(now.getMonth() + 1))
+        .replaceAll('%d', pad(now.getDate()))
+        .replaceAll('%H', pad(now.getHours()))
+        .replaceAll('%M', pad(now.getMinutes()))
+        .replaceAll('%S', pad(now.getSeconds()))
+        .replaceAll('<name>', slugifyName(name));
+    }
+    function activeCreateTemplate() {
+      const override = document.getElementById('create-template-override').checked;
+      const custom = document.getElementById('create-template').value.trim();
+      return override && custom ? custom : (state.config.name_template || '%Y.%m.%d-<name>');
+    }
+    function updateCreatePreview() {
+      const template = activeCreateTemplate();
+      const name = document.getElementById('create-name').value || 'experiment';
+      const renderedName = slugifyName(name);
+      const tokenIndex = template.indexOf('<name>');
+      const prefix = document.getElementById('create-name-prefix');
+      const suffix = document.getElementById('create-name-suffix');
+      if (tokenIndex >= 0) {
+        prefix.textContent = renderTemplateForDate(template.slice(0, tokenIndex), '');
+        suffix.textContent = renderTemplateForDate(template.slice(tokenIndex + '<name>'.length), '');
+      } else {
+        prefix.textContent = renderTemplateForDate(template, '');
+        suffix.textContent = '';
+      }
+      document.getElementById('create-preview').textContent = `Will create: ${renderTemplateForDate(template, renderedName)}`;
+      document.getElementById('create-template-controls').classList.toggle(
+        'hidden',
+        !document.getElementById('create-template-override').checked
+      );
     }
     function renderGitStatus(status) {
       const repoSummary = document.getElementById('git-repo-summary');
@@ -4428,11 +4571,18 @@ HTML = r"""<!doctype html>
       state.pinnedExperiments = new Set(pins.pinned || []);
       renderExperimentsList();
     }
+    async function refreshConfig() {
+      const data = await api('/api/config');
+      state.config = data || state.config;
+      document.getElementById('create-template').value = state.config.name_template || '%Y.%m.%d-<name>';
+      updateCreatePreview();
+      return state.config;
+    }
     async function refreshPresets() {
       const data = await api('/api/presets');
       clearTransientOutput();
       state.presets = data.presets || [];
-      const select = document.getElementById('new-preset');
+      const select = document.getElementById('create-preset');
       select.innerHTML = '';
       if (!state.presets.length) {
         const option = document.createElement('option');
@@ -4448,6 +4598,18 @@ HTML = r"""<!doctype html>
         option.textContent = preset.name;
         select.appendChild(option);
       }
+    }
+    async function openCreateDialog() {
+      document.getElementById('create-modal').classList.remove('hidden');
+      document.getElementById('create-name').focus();
+      await Promise.all([
+        refreshConfig().catch(err => out(String(err))),
+        refreshPresets().catch(err => out(String(err)))
+      ]);
+      updateCreatePreview();
+    }
+    function closeCreateDialog() {
+      document.getElementById('create-modal').classList.add('hidden');
     }
     function renderSubmitLock(lock) {
       state.submitLock = lock || { locked: false };
@@ -4672,14 +4834,22 @@ HTML = r"""<!doctype html>
       });
     }
     async function createExperiment() {
-      const name = document.getElementById('new-name').value || 'experiment';
-      const preset = document.getElementById('new-preset').value;
-      const data = await api('/api/experiments', {
-        method: 'POST',
-        body: JSON.stringify({ name, preset })
-      });
-      await refreshExperiments();
-      await selectExperiment(data.id);
+      const name = document.getElementById('create-name').value || 'experiment';
+      const preset = document.getElementById('create-preset').value;
+      const nameTemplate = activeCreateTemplate();
+      const button = document.getElementById('create-submit');
+      button.disabled = true;
+      try {
+        const data = await api('/api/experiments', {
+          method: 'POST',
+          body: JSON.stringify({ name, preset, name_template: nameTemplate })
+        });
+        closeCreateDialog();
+        await refreshExperiments({ force: true });
+        await selectExperiment(data.id);
+      } finally {
+        button.disabled = false;
+      }
     }
     async function checkExperiment() {
       if (!state.selected) return;
@@ -5018,6 +5188,13 @@ HTML = r"""<!doctype html>
     document.getElementById('queue-open').onclick = openQueueDialog;
     document.getElementById('queue-close').onclick = closeQueueDialog;
     document.getElementById('queue-refresh').onclick = () => loadQueue().catch(err => out(String(err)));
+    document.getElementById('create-open').onclick = openCreateDialog;
+    document.getElementById('create-close').onclick = closeCreateDialog;
+    document.getElementById('create-cancel').onclick = closeCreateDialog;
+    document.getElementById('create-submit').onclick = createExperiment;
+    document.getElementById('create-name').oninput = updateCreatePreview;
+    document.getElementById('create-template').oninput = updateCreatePreview;
+    document.getElementById('create-template-override').onchange = updateCreatePreview;
     document.getElementById('git-open').onclick = openGitDialog;
     document.getElementById('git-close').onclick = closeGitDialog;
     document.getElementById('git-refresh').onclick = () => loadGitStatus().catch(err => out(String(err)));
@@ -5025,7 +5202,6 @@ HTML = r"""<!doctype html>
     document.getElementById('console-open').onclick = openConsoleDialog;
     document.getElementById('console-close').onclick = closeConsoleDialog;
     document.getElementById('console-clear').onclick = clearConsoleLog;
-    document.getElementById('create').onclick = createExperiment;
     document.getElementById('check').onclick = checkExperiment;
     document.getElementById('probe-run').onclick = probeExperiment;
     document.getElementById('submit').onclick = submitExperiment;
@@ -5045,6 +5221,7 @@ HTML = r"""<!doctype html>
       button.onclick = () => setView(button.dataset.view);
     });
     if (token() || allowEmptyToken) {
+      refreshConfig().catch(err => out(String(err)));
       refreshPresets().catch(err => out(String(err)));
       refreshExperiments().catch(err => out(String(err)));
       refreshStatus().catch(err => out(String(err)));
@@ -5086,6 +5263,9 @@ def make_handler(app):
                     return
                 if path == "/api/status/squeue":
                     json_response(self, 200, app.slurm.queue())
+                    return
+                if path == "/api/config":
+                    json_response(self, 200, app.config())
                     return
                 if path == "/api/presets":
                     json_response(self, 200, {"presets": app.list_presets()})
