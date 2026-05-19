@@ -145,6 +145,7 @@ _WritePlotsComposeFile() {
 }
 
 typeset -a PLOT_R_ARGS=()
+typeset -gi _PLOT_SPACK_PACKAGES_LOADED=0
 
 _BuildPlotRArgs() {
   local do_pp="$1"
@@ -182,11 +183,42 @@ _MaybeLoadSpackRPackage() {
 }
 
 _MaybeLoadSpackPlotPackages() {
+  local native_cache="${1:-}"
+  local cache_file=""
+  local cached_r_libs=""
   local package=""
+  local spack_env=""
+  local before_r_libs="${R_LIBS:-}"
 
-  for package in r-tidyverse r-plyr r-cli r-rcolorbrewer; do
-    _MaybeLoadSpackRPackage "$package" >/dev/null 2>&1 || true
-  done
+  (( _PLOT_SPACK_PACKAGES_LOADED )) && return 0
+  _PLOT_SPACK_PACKAGES_LOADED=1
+
+  if [[ -n "$native_cache" ]]; then
+    mkdir -p "$native_cache"
+    cache_file="$native_cache/spack-r-libs.txt"
+    if [[ -s "$cache_file" ]]; then
+      cached_r_libs="$(<"$cache_file")"
+      if [[ -n "$cached_r_libs" ]]; then
+        export R_LIBS="$cached_r_libs${R_LIBS:+:$R_LIBS}"
+        return 0
+      fi
+    fi
+  fi
+
+  command -v spack >/dev/null 2>&1 || return 1
+
+  if spack_env="$(spack load --sh r-tidyverse r-cli r-rcolorbrewer 2>/dev/null)" && [[ -n "$spack_env" ]]; then
+    eval "$spack_env"
+  else
+    for package in r-tidyverse r-plyr r-cli r-rcolorbrewer; do
+      _MaybeLoadSpackRPackage "$package" >/dev/null 2>&1 || true
+    done
+  fi
+
+  if [[ -n "$cache_file" && -n "${R_LIBS:-}" && "${R_LIBS:-}" != "$before_r_libs" ]]; then
+    print -r -- "$R_LIBS" > "$cache_file.tmp"
+    mv -f "$cache_file.tmp" "$cache_file"
+  fi
 }
 
 _RunNativeRscript() {
@@ -200,10 +232,10 @@ _RunNativeRscript() {
   local native_user_libs=""
   local native_libs=""
   mkdir -p "$native_lib" "$native_cache"
+  _MaybeLoadSpackPlotPackages "$native_cache" || true
 
   (
     cd "$plots_dir" || exit 1
-    _MaybeLoadSpackPlotPackages
     native_user_libs="$native_lib"
     if [[ -n "${R_LIBS_USER:-}" ]]; then
       native_user_libs="$native_user_libs:$R_LIBS_USER"

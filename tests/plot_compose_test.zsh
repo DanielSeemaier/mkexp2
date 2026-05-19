@@ -93,6 +93,46 @@ EOF
   pass "native R accepts an unset R_LIBS_USER"
 }
 
+test_spack_plot_r_libs_are_cached() {
+  local tmp=""
+  tmp=$(mktemp -d)
+  local bin_dir="$tmp/bin"
+  local cache_dir="$tmp/cache"
+  local count_file="$tmp/spack-count"
+  local old_path="$PATH"
+
+  mkdir -p "$bin_dir" "$cache_dir"
+  cat > "$bin_dir/spack" <<'EOF'
+#!/usr/bin/env zsh
+print 1 >> "$SPACK_COUNT_FILE"
+if [[ "$1" == "load" && "$2" == "--sh" ]]; then
+  print "export R_LIBS='/spack/plot-r-libs'"
+  exit 0
+fi
+exit 1
+EOF
+  chmod +x "$bin_dir/spack"
+
+  export SPACK_COUNT_FILE="$count_file"
+  export PATH="$bin_dir:$PATH"
+  unset R_LIBS
+  _PLOT_SPACK_PACKAGES_LOADED=0
+  _MaybeLoadSpackPlotPackages "$cache_dir"
+  assert_eq "$R_LIBS" "/spack/plot-r-libs" "spack plot libs are loaded"
+
+  unset R_LIBS
+  _PLOT_SPACK_PACKAGES_LOADED=0
+  _MaybeLoadSpackPlotPackages "$cache_dir"
+  assert_eq "$R_LIBS" "/spack/plot-r-libs" "cached spack plot libs are reused"
+  assert_eq "$(wc -l < "$count_file" | tr -d ' ')" "1" "spack is called only once when cache is present"
+
+  PATH="$old_path"
+  unset SPACK_COUNT_FILE R_LIBS
+  _PLOT_SPACK_PACKAGES_LOADED=0
+
+  pass "spack plot R library paths are cached"
+}
+
 test_topology_validation_for_plot_threads() {
   assert_eq "$(NormalizeTopology 4)" "1x1x4" "bare thread count normalizes to local topology"
   assert_eq "$(NormalizeTopology 2x3x4)" "2x3x4" "full topology is preserved"
