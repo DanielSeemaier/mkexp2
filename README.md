@@ -321,7 +321,9 @@ using the container's `/data`, `/cache`, and `/output` mounts.
 
 Native R fallback requires `Rscript` on `PATH`. Missing R packages are installed
 into `plots/.r-libs-native`, and native plot cache files go to
-`plots/.cache-native`. To force the native backend even when Docker works, run:
+`plots/.cache-native`. Native package installation is guarded by a filesystem
+lock so overlapping plot runs wait instead of racing on R's `00LOCK-*`
+directories. To force the native backend even when Docker works, run:
 
 ```bash
 mkexp2 plot --no-docker

@@ -2,6 +2,7 @@
 import importlib.util
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -14,6 +15,31 @@ SPEC.loader.exec_module(mkexp2_web)
 
 
 class WebBackendTest(unittest.TestCase):
+    def test_action_store_reuses_running_unique_action(self):
+        store = mkexp2_web.ActionStore()
+        started = threading.Event()
+        release = threading.Event()
+
+        def target():
+            started.set()
+            release.wait(timeout=2)
+            return {"ok": True}
+
+        first = store.start_unique("plot:run", "plot run", target)
+        self.assertTrue(started.wait(timeout=1))
+        second = store.start_unique("plot:run", "plot duplicate", lambda: {"ok": False})
+        self.assertEqual(first["id"], second["id"])
+
+        release.set()
+        for _ in range(20):
+            if store.get(first["id"])["status"] == "completed":
+                break
+            time.sleep(0.05)
+        self.assertEqual(store.get(first["id"])["status"], "completed")
+
+        third = store.start_unique("plot:run", "plot run again", lambda: {"ok": True})
+        self.assertNotEqual(first["id"], third["id"])
+
     def test_name_template_and_path_guard(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)

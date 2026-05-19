@@ -31,6 +31,42 @@ _CheckNativeR() {
   command -v Rscript >/dev/null 2>&1
 }
 
+_AcquireDirLock() {
+  local lock_dir="$1"
+  local timeout="${2:-900}"
+  local start=$EPOCHSECONDS
+  local pid_file="$lock_dir/pid"
+  local lock_pid="" lock_host="" current_host=""
+
+  current_host="$(hostname 2>/dev/null || echo unknown)"
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    lock_pid=""
+    lock_host=""
+    if [[ -f "$pid_file" ]]; then
+      read -r lock_pid lock_host < "$pid_file" || true
+      if [[ -n "$lock_pid" && "$lock_host" == "$current_host" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+        EchoWarn "Removing stale plot lock: $lock_dir"
+        rm -rf "$lock_dir"
+        continue
+      fi
+    fi
+
+    if (( EPOCHSECONDS - start >= timeout )); then
+      EchoFatal "timed out waiting for plot lock: $lock_dir"
+      return 1
+    fi
+    EchoStep "Waiting for plot lock: $lock_dir"
+    sleep 2
+  done
+
+  printf '%s %s\n' "$$" "$current_host" > "$pid_file"
+}
+
+_ReleaseDirLock() {
+  local lock_dir="$1"
+  rm -rf "$lock_dir"
+}
+
 _DockerImageExists() {
   local image="$1"
   docker image inspect "$image" >/dev/null 2>&1
@@ -152,9 +188,15 @@ _RunNativeRscript() {
 _InstallNativeRPackages() {
   local plots_dir="$1"
   local results_dir="$2"
+  local lock_dir="$plots_dir/.r-libs-native.lock"
+  local rc=0
 
   EchoStep "Checking native R packages"
-  if ! _RunNativeRscript "$plots_dir" "$results_dir" "$plots_dir/install.R"; then
+  _AcquireDirLock "$lock_dir" 900 || return 1
+  _RunNativeRscript "$plots_dir" "$results_dir" "$plots_dir/install.R"
+  rc=$?
+  _ReleaseDirLock "$lock_dir"
+  if (( rc != 0 )); then
     EchoFatal "native R package installation failed"
     return 1
   fi

@@ -478,10 +478,11 @@ class ActionStore:
         self._actions = {}
         self._lock = threading.Lock()
 
-    def start(self, label, target):
+    def _new_payload(self, label, key=None):
         action_id = secrets.token_urlsafe(10)
-        payload = {
+        return {
             "id": action_id,
+            "key": key,
             "label": label,
             "status": "running",
             "started_at": _dt.datetime.now().isoformat(timespec="seconds"),
@@ -489,9 +490,8 @@ class ActionStore:
             "result": None,
             "error": None,
         }
-        with self._lock:
-            self._actions[action_id] = payload
 
+    def _run(self, payload, target):
         def runner():
             try:
                 result = target()
@@ -507,6 +507,22 @@ class ActionStore:
 
         thread = threading.Thread(target=runner, daemon=True)
         thread.start()
+
+    def start(self, label, target, key=None):
+        payload = self._new_payload(label, key=key)
+        with self._lock:
+            self._actions[payload["id"]] = payload
+        self._run(payload, target)
+        return payload
+
+    def start_unique(self, key, label, target):
+        with self._lock:
+            for payload in self._actions.values():
+                if payload.get("key") == key and payload.get("status") == "running":
+                    return payload
+            payload = self._new_payload(label, key=key)
+            self._actions[payload["id"]] = payload
+        self._run(payload, target)
         return payload
 
     def get(self, action_id):
@@ -900,7 +916,7 @@ class Mkexp2WebApp:
             plot = self.command(experiment_id, argv, timeout=600)
             return {"plotted": plot["returncode"] == 0, "plot": plot}
 
-        return self.actions.start(f"plot {experiment_id}", action)
+        return self.actions.start_unique(f"plot:{experiment_id}", f"plot {experiment_id}", action)
 
     def git_commit_submission(self, experiment_id, algorithms, force):
         rel = experiment_id
