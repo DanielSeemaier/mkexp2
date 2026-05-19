@@ -2265,28 +2265,26 @@ HTML = r"""<!doctype html>
       border: 1px solid var(--border);
       border-radius: 6px;
       background: #fbfcfd;
-      padding: 10px;
+      padding: 6px;
       display: grid;
-      gap: 5px;
+      gap: 3px;
     }
     .git-file {
       display: grid;
-      grid-template-columns: 74px minmax(0, 1fr);
+      grid-template-columns: 18px minmax(0, 1fr);
       align-items: start;
-      gap: 8px;
+      gap: 6px;
       min-width: 0;
       overflow-wrap: anywhere;
       border-radius: 5px;
-      padding: 4px 6px;
-      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      padding: 2px 5px;
+      font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     .git-file-kind {
-      font: 11px/1.45 ui-sans-serif, system-ui, sans-serif;
+      font: 11px/1.3 ui-sans-serif, system-ui, sans-serif;
       font-weight: 750;
       text-transform: uppercase;
-    }
-    .git-file-kind::after {
-      content: ":";
+      text-align: center;
     }
     .git-file-path {
       min-width: 0;
@@ -2296,8 +2294,8 @@ HTML = r"""<!doctype html>
       color: #14532d;
     }
     .git-file.modified {
-      background: #ffedd5;
-      color: #7c2d12;
+      background: #dbeafe;
+      color: #1e3a8a;
     }
     .git-file.deleted {
       background: #fee2e2;
@@ -3293,7 +3291,7 @@ HTML = r"""<!doctype html>
       const list = document.createElement('div');
       list.className = 'git-file-list';
       let total = 0;
-      for (const [key, label] of [['added', 'Added'], ['modified', 'Modified'], ['deleted', 'Deleted']]) {
+      for (const [key, label] of [['added', 'A'], ['modified', 'M'], ['deleted', 'D']]) {
         const files = groups[key] || [];
         total += files.length;
         for (const file of files) {
