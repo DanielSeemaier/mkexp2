@@ -404,6 +404,11 @@ The UI can:
 - inspect the configured experiment Git repo from the header Git button, review
   added/modified/deleted files, enter a commit message, and run `git add -A`,
   `git commit`, and `git push`
+- create tokenless share links from the Experiment page; a share link opens a
+  single-experiment view without the sidebar, editor writes, submit controls,
+  and Danger Zone, but still allows the viewer to parse logs and generate plot
+  artifacts for that shared experiment only. The share dialog shows both the
+  browser URL and the SSH tunnel command to copy/paste.
 - open the header settings button to manage the session token and inspect the
   full browser-session command log, including argv/cwd/stdout/stderr payloads
   returned by web API actions

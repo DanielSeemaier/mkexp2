@@ -273,6 +273,13 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="clear-submit-lock"', mkexp2_web.HTML)
         self.assertIn('id="rename-experiment"', mkexp2_web.HTML)
         self.assertIn('id="delete-experiment"', mkexp2_web.HTML)
+        self.assertIn('id="share-experiment"', mkexp2_web.HTML)
+        self.assertIn('id="share-modal"', mkexp2_web.HTML)
+        self.assertIn('id="share-ssh"', mkexp2_web.HTML)
+        self.assertIn('id="share-link"', mkexp2_web.HTML)
+        self.assertIn("__SHARE_ID__", mkexp2_web.HTML)
+        self.assertIn("share-mode", mkexp2_web.HTML)
+        self.assertIn("/share", mkexp2_web.HTML)
         self.assertIn('id="archive-open"', mkexp2_web.HTML)
         self.assertIn('aria-label="Archived experiments"', mkexp2_web.HTML)
         self.assertIn('id="archive-modal"', mkexp2_web.HTML)
@@ -288,7 +295,9 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("Type the full experiment name to delete it", mkexp2_web.HTML)
         self.assertIn("function renderSubmitButton", mkexp2_web.HTML)
         self.assertIn("async function renameExperiment", mkexp2_web.HTML)
+        self.assertIn("async function shareExperiment", mkexp2_web.HTML)
         self.assertIn("/rename", mkexp2_web.HTML)
+        self.assertIn("/share", mkexp2_web.HTML)
         self.assertIn("Cannot rename while submit is locked.", mkexp2_web.HTML)
         self.assertIn("Cannot archive while submit is locked.", mkexp2_web.HTML)
         self.assertIn("Cannot delete while submit is locked.", mkexp2_web.HTML)
@@ -561,6 +570,52 @@ class WebBackendTest(unittest.TestCase):
             cleared = app.clear_submit_lock("exp")
             self.assertTrue(cleared["cleared"])
             self.assertFalse(cleared["submit_lock"]["locked"])
+
+    def test_share_experiment_persists_tokenless_read_only_link(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "2026" / "exp"
+            exp.mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(
+                repo,
+                ROOT / "bin" / "mkexp2",
+                "x-<name>",
+                "token",
+                web_host="127.0.0.1",
+                web_port=9876,
+            )
+
+            result = app.share_experiment("2026/exp")
+            share_id = result["share"]["id"]
+            self.assertEqual(result["share"]["experiment_id"], "2026/exp")
+            self.assertIn(f"http://127.0.0.1:9876/share/{share_id}", result["share_url"])
+            self.assertIn("ssh -L 9876:127.0.0.1:9876", result["ssh_tunnel"])
+            self.assertEqual(app.resolve_share(share_id)["experiment_id"], "2026/exp")
+            metadata = app.share_metadata(share_id)
+            self.assertTrue(metadata["read_only"])
+            self.assertEqual(metadata["experiment"]["id"], "2026/exp")
+
+    def test_shared_plot_sources_are_limited_to_shared_experiment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            for name in ["exp", "other"]:
+                path = repo / name
+                (path / "results").mkdir(parents=True)
+                (path / "Experiment").write_text("ExperimentX() { :; }\n")
+                (path / "results" / "Algo.csv").write_text("Graph,Cores,Time\nG,1,1\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            with self.assertRaisesRegex(ValueError, "shared plot sources"):
+                app.create_shared_plot_artifacts_action(
+                    "exp",
+                    {"plots": ["running-time-box"], "sources": [{"kind": "csv", "experiment_id": "other", "file": "Algo.csv"}]},
+                )
+            with self.assertRaisesRegex(ValueError, "shared plot sources"):
+                app.create_shared_plot_artifacts_action(
+                    "exp",
+                    {"plots": ["running-time-box"], "sources": ["other/Algo.csv"]},
+                )
 
     def test_delete_experiment_removes_directory_and_pins(self):
         with tempfile.TemporaryDirectory() as tmp:

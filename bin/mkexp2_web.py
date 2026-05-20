@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -24,6 +25,7 @@ EXPERIMENT_CACHE_SECONDS = 60
 PLOT_ACTION_TIMEOUT_SECONDS = 7200
 WEB_STATE_DIR = ".mkexp2"
 WEB_PINS_FILE = "web-pins.json"
+WEB_SHARES_FILE = "web-shares.json"
 PLOT_INDEX_FILE = "index.json"
 ARCHIVE_SUFFIX = ".archived"
 EXPERIMENT_SKIP_DIRS = {".git", ".mkexp2", "jobs", "logs", "plots", "results", "slurm"}
@@ -542,12 +544,14 @@ class ActionStore:
 
 
 class Mkexp2WebApp:
-    def __init__(self, repo, mkexp2, name_template, token, allow_empty_token=False):
+    def __init__(self, repo, mkexp2, name_template, token, allow_empty_token=False, web_host="127.0.0.1", web_port=8765):
         self.repo = Path(repo).resolve()
         self.mkexp2 = Path(mkexp2).resolve()
         self.name_template = name_template
         self.token = token
         self.allow_empty_token = allow_empty_token
+        self.web_host = web_host
+        self.web_port = int(web_port)
         self.actions = ActionStore()
         self.slurm = SlurmStatus()
         self._plot_backend_cache = None
@@ -743,6 +747,106 @@ class Mkexp2WebApp:
         tmp.replace(path)
         return {"pinned": filtered, "path": str(path), "saved": True}
 
+    def shares_path(self):
+        return self.repo / WEB_STATE_DIR / WEB_SHARES_FILE
+
+    def read_shares(self):
+        path = self.shares_path()
+        if not path.is_file():
+            return {"shares": [], "path": str(path)}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8") or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid shares JSON: {exc}") from exc
+        shares = payload.get("shares") or []
+        if isinstance(shares, dict):
+            shares = [dict(value, id=key) for key, value in shares.items()]
+        if not isinstance(shares, list):
+            raise ValueError("invalid shares JSON: shares is not an array")
+        filtered = []
+        seen = set()
+        for item in shares:
+            if not isinstance(item, dict):
+                continue
+            share_id = str(item.get("id") or "")
+            experiment_id = str(item.get("experiment_id") or "")
+            if not re.match(r"^[A-Za-z0-9_-]+$", share_id) or not experiment_id or share_id in seen:
+                continue
+            filtered.append(dict(item, id=share_id, experiment_id=experiment_id))
+            seen.add(share_id)
+        return {"shares": filtered, "path": str(path)}
+
+    def write_shares(self, shares):
+        path = self.shares_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps({"shares": shares}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(path)
+        return {"shares": shares, "path": str(path), "saved": True}
+
+    def share_public_url(self, share_id):
+        host = self.web_host if self.web_host not in ("", "0.0.0.0", "::") else "127.0.0.1"
+        if host in ("localhost", "::1"):
+            host = "127.0.0.1"
+        return f"http://{host}:{self.web_port}/share/{share_id}"
+
+    def share_ssh_tunnel_command(self):
+        remote_host = socket.gethostname() or os.environ.get("HOSTNAME") or "<cluster-login>"
+        return f"ssh -L {self.web_port}:127.0.0.1:{self.web_port} {getpass.getuser()}@{remote_host}"
+
+    def share_experiment(self, experiment_id):
+        path = self.active_experiment_path(experiment_id)
+        known = {experiment["id"] for experiment in self.list_experiments(force=True)}
+        if experiment_id not in known or not path.is_dir() or not (path / "Experiment").is_file():
+            raise ValueError(f"experiment not found: {experiment_id}")
+        shares = self.read_shares().get("shares") or []
+        share_id = secrets.token_urlsafe(18)
+        while any(item.get("id") == share_id for item in shares):
+            share_id = secrets.token_urlsafe(18)
+        share = {
+            "id": share_id,
+            "experiment_id": experiment_id,
+            "created_at": _dt.datetime.now().isoformat(timespec="seconds"),
+            "created_by": getpass.getuser(),
+        }
+        shares.append(share)
+        self.write_shares(shares)
+        return {
+            "share": share,
+            "share_url": self.share_public_url(share_id),
+            "ssh_tunnel": self.share_ssh_tunnel_command(),
+        }
+
+    def resolve_share(self, share_id):
+        share_id = str(share_id or "")
+        if not re.match(r"^[A-Za-z0-9_-]+$", share_id):
+            raise ValueError("invalid share id")
+        for share in self.read_shares().get("shares") or []:
+            if share.get("id") != share_id:
+                continue
+            experiment_id = share.get("experiment_id")
+            path = self.active_experiment_path(experiment_id)
+            if not path.is_dir() or not (path / "Experiment").is_file():
+                raise ValueError("shared experiment not found")
+            return {"share": share, "experiment_id": experiment_id, "path": path}
+        raise ValueError("share not found")
+
+    def share_metadata(self, share_id):
+        context = self.resolve_share(share_id)
+        experiment_id = context["experiment_id"]
+        path = context["path"]
+        stat = (path / "Experiment").stat()
+        return {
+            "share": context["share"],
+            "experiment": {
+                "id": experiment_id,
+                "name": Path(experiment_id).name,
+                "path": str(path),
+                "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+            },
+            "read_only": True,
+        }
+
     def list_presets(self):
         result = run_command([str(self.mkexp2), "probe", "--presets"], cwd=self.repo, timeout=30)
         if result["returncode"] != 0:
@@ -761,6 +865,8 @@ class Mkexp2WebApp:
         return {
             "repo": str(self.repo),
             "name_template": self.name_template,
+            "web_host": self.web_host,
+            "web_port": self.web_port,
         }
 
     def create_experiment(self, payload):
@@ -1464,6 +1570,28 @@ class Mkexp2WebApp:
 
         return self.actions.start_unique(f"plot-artifacts:{experiment_id}", f"plot artifacts {experiment_id}", action)
 
+    def create_shared_plot_artifacts_action(self, experiment_id, payload):
+        current_sources = self.plot_sources(experiment_id, include_all=False).get("current") or []
+        allowed_names = {source.get("name") for source in current_sources}
+        allowed_files = {source.get("file") for source in current_sources}
+        for source in payload.get("sources") or []:
+            if isinstance(source, str):
+                if source not in allowed_names:
+                    raise ValueError("shared plot sources must come from the shared experiment")
+                continue
+            if not isinstance(source, dict):
+                raise ValueError("invalid shared plot source")
+            kind = source.get("kind") or source.get("type") or "algorithm"
+            if kind == "algorithm":
+                if source.get("name") not in allowed_names:
+                    raise ValueError("shared plot sources must come from the shared experiment")
+            elif kind == "csv":
+                if source.get("experiment_id") != experiment_id or source.get("file") not in allowed_files:
+                    raise ValueError("shared plot sources must come from the shared experiment")
+            else:
+                raise ValueError("invalid shared plot source")
+        return self.create_plot_artifacts_action(experiment_id, payload)
+
     def logs_root(self, experiment_id):
         return self.active_experiment_path(experiment_id) / "logs"
 
@@ -1726,6 +1854,34 @@ HTML = r"""<!doctype html>
       grid-template-columns: var(--sidebar-width) 8px minmax(0, 1fr);
       min-height: 100vh;
     }
+    .app.share-mode {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .app.share-mode .sidebar,
+    .app.share-mode .sidebar-resizer,
+    .app.share-mode .submit-panel,
+    .app.share-mode .probe-panel,
+    .app.share-mode .danger-zone,
+    .app.share-mode #check,
+    .app.share-mode #share-experiment,
+    .app.share-mode #add-plot-source {
+      display: none !important;
+    }
+    .app.share-mode .main {
+      grid-column: 1;
+    }
+    .app.share-mode #experiment-editor {
+      background: #fbfcfd;
+    }
+    .share-banner {
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      border: 1px solid #b7d6f5;
+      border-radius: 6px;
+      background: #eff6ff;
+      color: #1e3a8a;
+      font-weight: 650;
+    }
     .sidebar {
       border-right: 1px solid var(--border);
       background: #ffffff;
@@ -1815,6 +1971,24 @@ HTML = r"""<!doctype html>
       color: var(--muted);
       font-size: 12px;
       overflow-wrap: anywhere;
+    }
+    .share-fields {
+      display: grid;
+      gap: 12px;
+    }
+    .share-field {
+      display: grid;
+      gap: 6px;
+    }
+    .share-field-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      text-transform: uppercase;
+    }
+    .share-field textarea {
+      min-height: 78px;
+      resize: vertical;
     }
     .experiment-folder {
       min-width: 0;
@@ -3400,6 +3574,29 @@ HTML = r"""<!doctype html>
         </div>
       </div>
     </div>
+    <div id="share-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="share-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="share-modal-title" class="modal-title">Share Experiment</div>
+            <div id="share-summary" class="csv-summary">Create a link for viewing this experiment without a token.</div>
+          </div>
+          <button id="share-close" class="icon-button" aria-label="Close share dialog" title="Close">x</button>
+        </div>
+        <div class="modal-body">
+          <div class="share-fields">
+            <label class="share-field">
+              <span class="share-field-label">SSH tunnel</span>
+              <textarea id="share-ssh" readonly spellcheck="false"></textarea>
+            </label>
+            <label class="share-field">
+              <span class="share-field-label">Share link</span>
+              <input id="share-link" readonly spellcheck="false">
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
     <div id="queue-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="queue-modal-title">
       <div class="modal">
         <div class="modal-header">
@@ -3465,6 +3662,7 @@ HTML = r"""<!doctype html>
       </div>
     </div>
     <main class="main">
+      <div id="share-banner" class="share-banner hidden">Shared experiment view. Editing, submission, and destructive actions are disabled.</div>
       <div class="view-tabs">
         <button class="view-tab icon-tab" data-view="install-log-view" aria-label="Install Log" title="Install Log">?</button>
         <button class="view-tab active" data-view="experiment-view">Experiment</button>
@@ -3481,6 +3679,7 @@ HTML = r"""<!doctype html>
                 <div class="muted" id="selected-path"></div>
               </div>
               <div class="actions">
+                <button id="share-experiment">Share</button>
                 <button id="check">Check</button>
               </div>
             </div>
@@ -3492,7 +3691,7 @@ HTML = r"""<!doctype html>
             </div>
           </div>
           <div class="stack">
-            <section class="panel">
+            <section class="panel submit-panel">
               <div class="panel-header">
                 <div class="panel-title">Submit</div>
               </div>
@@ -3727,7 +3926,9 @@ HTML = r"""<!doctype html>
       consoleEntries: [],
       consoleOpen: false,
       progressTimer: null,
-      activeView: 'experiment-view'
+      activeView: 'experiment-view',
+      shared: false,
+      shareId: ''
     };
     const PLOT_RELOAD_DELAY_MS = 5000;
     const SIDEBAR_WIDTH_KEY = 'mkexp2-sidebar-width';
@@ -3735,6 +3936,7 @@ HTML = r"""<!doctype html>
     const MIN_SIDEBAR_WIDTH = 260;
     const MAX_SIDEBAR_WIDTH = 560;
     const allowEmptyToken = __ALLOW_EMPTY_TOKEN__;
+    const initialShareId = __SHARE_ID__;
     const tokenInput = document.getElementById('token');
     const editor = document.getElementById('experiment-editor');
     const editorHighlight = document.getElementById('experiment-highlight');
@@ -3751,6 +3953,19 @@ HTML = r"""<!doctype html>
     });
 
     function token() { return tokenInput.value; }
+    function apiPath(path) {
+      if (!state.shared) return path;
+      if (path.startsWith('/api/actions/')) {
+        return `/api/share/${encodeURIComponent(state.shareId)}/actions/${path.split('/').pop()}`;
+      }
+      if (path === '/api/plot/backend') return `/api/share/${encodeURIComponent(state.shareId)}/plot/backend`;
+      if (path === '/api/plots/catalog') return `/api/share/${encodeURIComponent(state.shareId)}/plots/catalog`;
+      const match = path.match(/^\/api\/experiments\/[^/]+(?:\/([^?]+))?(\?.*)?$/);
+      if (!match) return path;
+      const tail = match[1] || 'metadata';
+      const query = match[2] || '';
+      return `/api/share/${encodeURIComponent(state.shareId)}/${tail}${query}`;
+    }
     function clampSidebarWidth(width) {
       const viewportLimit = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, Math.round(window.innerWidth * 0.48)));
       return Math.max(MIN_SIDEBAR_WIDTH, Math.min(viewportLimit, Math.round(width)));
@@ -4210,24 +4425,26 @@ HTML = r"""<!doctype html>
       const method = options.method || 'GET';
       const headers = Object.assign({ 'X-MKEXP2-Token': token() }, options.headers || {});
       if (options.body && !(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
-      const response = await fetch(path, Object.assign({}, options, { headers }));
+      const requestPath = apiPath(path);
+      const response = await fetch(requestPath, Object.assign({}, options, { headers }));
       if (!response.ok) {
         const text = await response.text();
-        appendConsoleLog(`${method} ${path} failed`, text);
+        appendConsoleLog(`${method} ${requestPath} failed`, text);
         throw new Error(text);
       }
       const payload = response.headers.get('content-type')?.includes('application/json')
         ? response.json()
         : response.text();
       const data = await payload;
-      logApiCommands(method, path, data);
+      logApiCommands(method, requestPath, data);
       return data;
     }
     async function fetchBlob(path) {
-      const response = await fetch(path, { headers: { 'X-MKEXP2-Token': token() } });
+      const requestPath = apiPath(path);
+      const response = await fetch(requestPath, { headers: { 'X-MKEXP2-Token': token() } });
       if (!response.ok) {
         const text = await response.text();
-        appendConsoleLog(`GET ${path} failed`, text);
+        appendConsoleLog(`GET ${requestPath} failed`, text);
         throw new Error(text);
       }
       return await response.blob();
@@ -5843,6 +6060,19 @@ HTML = r"""<!doctype html>
         await selectExperiment(result.new_id);
       });
     }
+    function closeShareDialog() {
+      document.getElementById('share-modal').classList.add('hidden');
+    }
+    async function shareExperiment() {
+      if (!state.selected || state.shared) return;
+      await withBusyButton('share-experiment', 'Sharing...', async () => {
+        const result = await api(`/api/experiments/${encodeURIComponent(state.selected)}/share`, { method: 'POST' });
+        document.getElementById('share-modal').classList.remove('hidden');
+        document.getElementById('share-summary').textContent = `Shared ${result.share?.experiment_id || state.selected}.`;
+        document.getElementById('share-ssh').value = result.ssh_tunnel || '';
+        document.getElementById('share-link').value = result.share_url || '';
+      });
+    }
     async function deleteExperiment() {
       if (!state.selected) return;
       if (state.submitLock?.locked) {
@@ -6020,8 +6250,29 @@ HTML = r"""<!doctype html>
       renderSubmitLock(data.submit_lock);
       await loadAlgorithms(id);
     }
+    async function selectSharedExperiment(shareId) {
+      state.shared = true;
+      state.shareId = shareId;
+      document.querySelector('.app').classList.add('share-mode');
+      document.getElementById('share-banner').classList.remove('hidden');
+      editor.readOnly = true;
+      const metadata = await api(`/api/share/${encodeURIComponent(shareId)}/metadata`);
+      const id = metadata.experiment.id;
+      state.selected = id;
+      state.selectionSeq += 1;
+      state.algorithmLoadSeq += 1;
+      clearAlgorithmChoices();
+      setView('experiment-view').catch(err => out(String(err)));
+      const data = await api(`/api/share/${encodeURIComponent(shareId)}/experiment`);
+      document.getElementById('selected-title').textContent = id;
+      document.getElementById('selected-path').textContent = data.path;
+      setEditorValue(data.experiment);
+      renderSubmitLock(data.submit_lock);
+      renderProgress(null);
+    }
     async function persistExperiment() {
       if (!state.selected) return;
+      if (state.shared) throw new Error('Shared experiments cannot be edited.');
       const experiment = document.getElementById('experiment-editor').value;
       return await api(`/api/experiments/${encodeURIComponent(state.selected)}/experiment`, {
         method: 'PUT',
@@ -6726,6 +6977,8 @@ HTML = r"""<!doctype html>
     document.getElementById('git-close').onclick = closeGitDialog;
     document.getElementById('git-refresh').onclick = () => withBusyButton('git-refresh', '', loadGitStatus).catch(err => out(String(err)));
     document.getElementById('git-push').onclick = pushGitChanges;
+    document.getElementById('share-experiment').onclick = shareExperiment;
+    document.getElementById('share-close').onclick = closeShareDialog;
     document.getElementById('settings-open').onclick = openSettingsDialog;
     document.getElementById('settings-close').onclick = closeSettingsDialog;
     document.getElementById('spack-cache-refresh').onclick = () => refreshSpackCache().catch(err => out(String(err)));
@@ -6757,7 +7010,9 @@ HTML = r"""<!doctype html>
       button.onclick = () => withBusyButton(button, 'Loading...', () => setView(button.dataset.view)).catch(err => out(String(err)));
     });
     initSidebarResize();
-    if (token() || allowEmptyToken) {
+    if (initialShareId) {
+      selectSharedExperiment(initialShareId).catch(err => out(String(err)));
+    } else if (token() || allowEmptyToken) {
       refreshConfig().catch(err => out(String(err)));
       refreshPresets().catch(err => out(String(err)));
       refreshExperiments().catch(err => out(String(err)));
@@ -6778,19 +7033,144 @@ def make_handler(app):
         def log_message(self, fmt, *args):
             print("[%s] %s" % (self.log_date_time_string(), fmt % args))
 
+        def render_html(self, share_id=""):
+            html = HTML.replace("__ALLOW_EMPTY_TOKEN__", "true" if app.allow_empty_token else "false")
+            html = html.replace("__SHARE_ID__", json.dumps(str(share_id or "")))
+            return html
+
         def require_token(self):
             supplied = self.headers.get("X-MKEXP2-Token", "")
             if app.allow_empty_token and supplied == "":
                 return True
             return secrets.compare_digest(supplied, app.token)
 
+        def handle_share_get(self, parsed):
+            path = parsed.path
+            match = re.match(r"^/api/share/([^/]+)(?:/(.*))?$", path)
+            if not match:
+                json_response(self, 404, {"error": "not found"})
+                return
+            share_id = urllib.parse.unquote(match.group(1))
+            tail = match.group(2) or ""
+            context = app.resolve_share(share_id)
+            experiment_id = context["experiment_id"]
+            query = urllib.parse.parse_qs(parsed.query)
+            if tail in ("", "metadata"):
+                json_response(self, 200, app.share_metadata(share_id))
+                return
+            if tail == "experiment":
+                exp_path = context["path"]
+                json_response(
+                    self,
+                    200,
+                    {
+                        "id": experiment_id,
+                        "path": str(exp_path),
+                        "experiment": (exp_path / "Experiment").read_text(encoding="utf-8"),
+                        "submit_lock": app.submit_lock(experiment_id),
+                        "read_only": True,
+                    },
+                )
+                return
+            if tail == "results":
+                json_response(self, 200, app.results(experiment_id))
+                return
+            if tail == "progress":
+                json_response(self, 200, app.progress(experiment_id))
+                return
+            if tail == "plots":
+                json_response(self, 200, app.plots_info(experiment_id))
+                return
+            if tail == "plot-sources":
+                json_response(self, 200, app.plot_sources(experiment_id, include_all=False))
+                return
+            if tail == "plot-artifacts":
+                json_response(self, 200, app.list_plot_artifacts(experiment_id))
+                return
+            if tail == "stats":
+                json_response(self, 200, app.stats(experiment_id))
+                return
+            if tail == "install-log":
+                json_response(self, 200, app.install_log(experiment_id))
+                return
+            if tail == "logs":
+                limit = int((query.get("limit") or [MAX_LOG_LIST_ENTRIES])[0])
+                offset = int((query.get("offset") or [0])[0])
+                rel_dir = (query.get("dir") or [""])[0]
+                json_response(self, 200, app.list_logs(experiment_id, rel_dir, limit=limit, offset=offset))
+                return
+            if tail == "log":
+                rel_path = (query.get("path") or [""])[0]
+                json_response(self, 200, app.log_file(experiment_id, rel_path))
+                return
+            if tail == "plot/backend":
+                json_response(self, 200, app.plot_backend_status())
+                return
+            if tail == "plots/catalog":
+                json_response(self, 200, app.plot_catalog())
+                return
+            match_pdf = re.match(r"^plot-artifacts/([^/]+)\.pdf$", tail)
+            if match_pdf:
+                pdf = app.plot_artifact_pdf(experiment_id, urllib.parse.unquote(match_pdf.group(1)))
+                data = pdf.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", mimetypes.types_map.get(".pdf", "application/pdf"))
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            if tail == "plots.pdf":
+                pdf = context["path"] / "plots.pdf"
+                if not pdf.is_file():
+                    json_response(self, 404, {"error": "plots.pdf not found"})
+                    return
+                data = pdf.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", mimetypes.types_map.get(".pdf", "application/pdf"))
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            match_action = re.match(r"^actions/([^/]+)$", tail)
+            if match_action:
+                action = app.actions.get(urllib.parse.unquote(match_action.group(1)))
+                if not action:
+                    json_response(self, 404, {"error": "action not found"})
+                else:
+                    json_response(self, 200, action)
+                return
+            json_response(self, 404, {"error": "not found"})
+
+        def handle_share_post(self, parsed):
+            path = parsed.path
+            match = re.match(r"^/api/share/([^/]+)/(parse|plot-artifacts)$", path)
+            if not match:
+                json_response(self, 404, {"error": "not found"})
+                return
+            share_id = urllib.parse.unquote(match.group(1))
+            action = match.group(2)
+            experiment_id = app.resolve_share(share_id)["experiment_id"]
+            payload = read_json(self)
+            if action == "parse":
+                json_response(self, 202, app.parse_action(experiment_id))
+                return
+            json_response(self, 202, app.create_shared_plot_artifacts_action(experiment_id, payload))
+
         def do_GET(self):
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
             try:
                 if path == "/":
-                    html = HTML.replace("__ALLOW_EMPTY_TOKEN__", "true" if app.allow_empty_token else "false")
-                    text_response(self, 200, html, "text/html; charset=utf-8")
+                    text_response(self, 200, self.render_html(), "text/html; charset=utf-8")
+                    return
+                match = re.match(r"^/share/([^/]+)$", path)
+                if match:
+                    share_id = urllib.parse.unquote(match.group(1))
+                    app.resolve_share(share_id)
+                    text_response(self, 200, self.render_html(share_id), "text/html; charset=utf-8")
+                    return
+                if path.startswith("/api/share/"):
+                    self.handle_share_get(parsed)
                     return
                 if path.startswith("/api/") and not self.require_token():
                     json_response(self, 401, {"error": "missing or invalid token"})
@@ -6936,6 +7316,9 @@ def make_handler(app):
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
             try:
+                if path.startswith("/api/share/"):
+                    self.handle_share_post(parsed)
+                    return
                 if path.startswith("/api/") and not self.require_token():
                     json_response(self, 401, {"error": "missing or invalid token"})
                     return
@@ -6960,6 +7343,11 @@ def make_handler(app):
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
                     json_response(self, 200, app.rename_experiment(experiment_id, payload))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/share$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    json_response(self, 200, app.share_experiment(experiment_id))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/(archive|unarchive)$", path)
                 if match:
@@ -7027,6 +7415,9 @@ def make_handler(app):
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
             try:
+                if path.startswith("/api/share/"):
+                    json_response(self, 404, {"error": "not found"})
+                    return
                 if path.startswith("/api/") and not self.require_token():
                     json_response(self, 401, {"error": "missing or invalid token"})
                     return
@@ -7049,6 +7440,9 @@ def make_handler(app):
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
             try:
+                if path.startswith("/api/share/"):
+                    json_response(self, 404, {"error": "not found"})
+                    return
                 if path.startswith("/api/") and not self.require_token():
                     json_response(self, 401, {"error": "missing or invalid token"})
                     return
@@ -7090,7 +7484,15 @@ def main():
         raise SystemExit(f"repo is not a Git repository: {repo}")
 
     token = args.token or secrets.token_urlsafe(24)
-    app = Mkexp2WebApp(repo, args.mkexp2, args.name_template, token, allow_empty_token=args.allow_empty_token)
+    app = Mkexp2WebApp(
+        repo,
+        args.mkexp2,
+        args.name_template,
+        token,
+        allow_empty_token=args.allow_empty_token,
+        web_host=args.host,
+        web_port=args.port,
+    )
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
     print(f"mkexp2 web: http://{args.host}:{args.port}", flush=True)
     print(f"session token: {token}", flush=True)
