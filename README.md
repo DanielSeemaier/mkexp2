@@ -383,13 +383,18 @@ mkexp2 web --repo /path/to/experiment-repo \
   --name-template '%Y.%m.%d-<name>'
 ```
 
+Pass `--web-token TOKEN` to reuse a fixed session token across restarts.
+
 The UI can:
 
 - list repo-relative experiment directories containing an `Experiment` file,
-  including nested year/group folders collapsed by default in the sidebar
+  including nested year/group folders collapsed by default in the sidebar; rows
+  and folders are sorted newest-first by filesystem creation time where the
+  platform exposes it
 - pin experiments to a flat top section in the sidebar; the pinned ids are
   persisted server-side in `.mkexp2/web-pins.json` under the configured
   experiment repo
+- resize the sidebar; the chosen width is stored in browser local storage
 - archive experiments by renaming the experiment directory leaf to
   `<name>.archived`; archived experiments are hidden from the sidebar and can
   be restored from the header archive dialog

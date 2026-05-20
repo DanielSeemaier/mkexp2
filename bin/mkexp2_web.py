@@ -97,6 +97,14 @@ def strip_ansi(value):
     return ANSI_RE.sub("", str(value or ""))
 
 
+def stat_creation_time(stat):
+    return getattr(stat, "st_birthtime", None) or stat.st_ctime
+
+
+def iso_from_timestamp(timestamp):
+    return _dt.datetime.fromtimestamp(timestamp).isoformat(timespec="seconds")
+
+
 def run_command(argv, cwd=None, timeout=60):
     started = time.time()
     try:
@@ -628,7 +636,9 @@ class Mkexp2WebApp:
             if not exp_file.is_file():
                 continue
             path = exp_file.parent.resolve()
-            stat = exp_file.stat()
+            file_stat = exp_file.stat()
+            dir_stat = path.stat()
+            created_at = stat_creation_time(dir_stat)
             is_archived = parts[-1].endswith(ARCHIVE_SUFFIX)
             if is_archived != archived:
                 continue
@@ -642,7 +652,9 @@ class Mkexp2WebApp:
                     "parent": "/".join(parts[:-1]),
                     "depth": len(parts),
                     "path": str(path),
-                    "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+                    "created_at": iso_from_timestamp(created_at),
+                    "created_at_epoch": created_at,
+                    "modified_at": iso_from_timestamp(file_stat.st_mtime),
                     "has_results": (path / "results").is_dir(),
                     "has_plots_pdf": (path / "plots.pdf").is_file(),
                     "archived": is_archived,
@@ -1552,6 +1564,7 @@ HTML = r"""<!doctype html>
       --danger: #b42318;
       --ok: #127443;
       --shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
+      --sidebar-width: 320px;
     }
     * { box-sizing: border-box; }
     body {
@@ -1664,13 +1677,32 @@ HTML = r"""<!doctype html>
     }
     .app {
       display: grid;
-      grid-template-columns: 280px minmax(0, 1fr);
+      grid-template-columns: var(--sidebar-width) 8px minmax(0, 1fr);
       min-height: 100vh;
     }
     .sidebar {
       border-right: 1px solid var(--border);
       background: #ffffff;
       padding: 18px;
+      min-width: 0;
+      overflow: auto;
+    }
+    .sidebar-resizer {
+      width: 8px;
+      cursor: col-resize;
+      background: transparent;
+      border-right: 1px solid var(--border);
+      touch-action: none;
+    }
+    .sidebar-resizer:hover,
+    .sidebar-resizer:focus-visible,
+    .app.resizing .sidebar-resizer {
+      background: #dce6ea;
+      outline: none;
+    }
+    .app.resizing {
+      cursor: col-resize;
+      user-select: none;
     }
     .brand {
       display: flex;
@@ -1900,6 +1932,7 @@ HTML = r"""<!doctype html>
       color: #ffffff;
     }
     .main {
+      grid-column: 3;
       padding: 18px;
       display: grid;
       gap: 14px;
@@ -3173,6 +3206,8 @@ HTML = r"""<!doctype html>
     @media (max-width: 980px) {
       .app { grid-template-columns: 1fr; }
       .sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
+      .sidebar-resizer { display: none; }
+      .main { grid-column: auto; }
       .grid { grid-template-columns: 1fr; }
       .compare-grid { grid-template-columns: 1fr; }
       .logs-browser { grid-template-columns: 1fr; }
@@ -3216,6 +3251,7 @@ HTML = r"""<!doctype html>
         <div id="slurm-status" class="node-list muted">No status loaded.</div>
       </section>
     </aside>
+    <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" tabindex="0"></div>
     <div id="create-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="create-modal-title">
       <div class="modal">
         <div class="modal-header">
@@ -3629,6 +3665,10 @@ HTML = r"""<!doctype html>
       activeView: 'experiment-view'
     };
     const PLOT_RELOAD_DELAY_MS = 5000;
+    const SIDEBAR_WIDTH_KEY = 'mkexp2-sidebar-width';
+    const DEFAULT_SIDEBAR_WIDTH = 320;
+    const MIN_SIDEBAR_WIDTH = 260;
+    const MAX_SIDEBAR_WIDTH = 560;
     const allowEmptyToken = __ALLOW_EMPTY_TOKEN__;
     const tokenInput = document.getElementById('token');
     const editor = document.getElementById('experiment-editor');
@@ -3646,6 +3686,55 @@ HTML = r"""<!doctype html>
     });
 
     function token() { return tokenInput.value; }
+    function clampSidebarWidth(width) {
+      const viewportLimit = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, Math.round(window.innerWidth * 0.48)));
+      return Math.max(MIN_SIDEBAR_WIDTH, Math.min(viewportLimit, Math.round(width)));
+    }
+    function setSidebarWidth(width, persist = true) {
+      const clamped = clampSidebarWidth(width);
+      document.documentElement.style.setProperty('--sidebar-width', `${clamped}px`);
+      if (persist) localStorage.setItem(SIDEBAR_WIDTH_KEY, String(clamped));
+      return clamped;
+    }
+    function initSidebarResize() {
+      const saved = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+      setSidebarWidth(Number.isFinite(saved) && saved > 0 ? saved : DEFAULT_SIDEBAR_WIDTH, false);
+      const app = document.querySelector('.app');
+      const resizer = document.getElementById('sidebar-resizer');
+      let resizing = false;
+      function stopResize(event) {
+        if (!resizing) return;
+        resizing = false;
+        app.classList.remove('resizing');
+        if (event?.pointerId !== undefined && resizer.hasPointerCapture(event.pointerId)) {
+          resizer.releasePointerCapture(event.pointerId);
+        }
+      }
+      resizer.addEventListener('pointerdown', event => {
+        if (window.matchMedia('(max-width: 980px)').matches) return;
+        resizing = true;
+        app.classList.add('resizing');
+        resizer.setPointerCapture(event.pointerId);
+        setSidebarWidth(event.clientX);
+        event.preventDefault();
+      });
+      resizer.addEventListener('pointermove', event => {
+        if (!resizing) return;
+        setSidebarWidth(event.clientX);
+      });
+      resizer.addEventListener('pointerup', stopResize);
+      resizer.addEventListener('pointercancel', stopResize);
+      resizer.addEventListener('keydown', event => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        const current = Number(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-width').replace('px', '')) || DEFAULT_SIDEBAR_WIDTH;
+        setSidebarWidth(current + (event.key === 'ArrowRight' ? 24 : -24));
+        event.preventDefault();
+      });
+      window.addEventListener('resize', () => {
+        const current = Number(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-width').replace('px', '')) || DEFAULT_SIDEBAR_WIDTH;
+        setSidebarWidth(current, false);
+      });
+    }
     function consoleText(value) {
       return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
     }
@@ -5211,7 +5300,17 @@ HTML = r"""<!doctype html>
       }
     }
     function treeNode() {
-      return { folders: new Map(), experiments: [], count: 0 };
+      return { folders: new Map(), experiments: [], count: 0, latest: 0 };
+    }
+    function experimentCreationKey(exp) {
+      const epoch = Number(exp.created_at_epoch);
+      if (Number.isFinite(epoch)) return epoch * 1000;
+      const parsed = Date.parse(exp.created_at || exp.modified_at || '');
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    function compareExperimentsByCreatedDesc(left, right) {
+      return experimentCreationKey(right) - experimentCreationKey(left)
+        || String(left.label || left.id).localeCompare(String(right.label || right.id));
     }
     function experimentTree(experiments) {
       const root = treeNode();
@@ -5219,13 +5318,16 @@ HTML = r"""<!doctype html>
       for (const exp of sorted) {
         const parts = exp.id.split('/').filter(Boolean);
         if (!parts.length) continue;
+        const created = experimentCreationKey(exp);
         let node = root;
         node.count += 1;
+        node.latest = Math.max(node.latest, created);
         for (let index = 0; index < parts.length - 1; index += 1) {
           const part = parts[index];
           if (!node.folders.has(part)) node.folders.set(part, treeNode());
           node = node.folders.get(part);
           node.count += 1;
+          node.latest = Math.max(node.latest, created);
         }
         node.experiments.push(Object.assign({}, exp, { label: exp.name || parts[parts.length - 1] }));
       }
@@ -5240,7 +5342,9 @@ HTML = r"""<!doctype html>
       }
     }
     function renderExperimentTree(container, node, prefix = '') {
-      const folders = Array.from(node.folders.entries()).sort((left, right) => left[0].localeCompare(right[0]));
+      const folders = Array.from(node.folders.entries()).sort((left, right) => {
+        return (right[1].latest || 0) - (left[1].latest || 0) || left[0].localeCompare(right[0]);
+      });
       for (const [name, child] of folders) {
         const id = prefix ? `${prefix}/${name}` : name;
         const details = document.createElement('details');
@@ -5267,7 +5371,7 @@ HTML = r"""<!doctype html>
         details.appendChild(children);
         container.appendChild(details);
       }
-      const experiments = Array.from(node.experiments).sort((left, right) => left.label.localeCompare(right.label));
+      const experiments = Array.from(node.experiments).sort(compareExperimentsByCreatedDesc);
       for (const exp of experiments) {
         renderExperimentItem(container, exp, exp.label);
       }
@@ -6471,6 +6575,7 @@ HTML = r"""<!doctype html>
     document.querySelectorAll('.view-tab').forEach(button => {
       button.onclick = () => withBusyButton(button, 'Loading...', () => setView(button.dataset.view)).catch(err => out(String(err)));
     });
+    initSidebarResize();
     if (token() || allowEmptyToken) {
       refreshConfig().catch(err => out(String(err)));
       refreshPresets().catch(err => out(String(err)));
@@ -6786,6 +6891,7 @@ def main():
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--name-template", default="%Y.%m.%d-<name>")
     parser.add_argument("--allow-empty-token", action="store_true")
+    parser.add_argument("--token", default="")
     args = parser.parse_args()
 
     repo = Path(args.repo).resolve()
@@ -6797,7 +6903,7 @@ def main():
     if git_probe["returncode"] != 0:
         raise SystemExit(f"repo is not a Git repository: {repo}")
 
-    token = secrets.token_urlsafe(24)
+    token = args.token or secrets.token_urlsafe(24)
     app = Mkexp2WebApp(repo, args.mkexp2, args.name_template, token, allow_empty_token=args.allow_empty_token)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
     print(f"mkexp2 web: http://{args.host}:{args.port}", flush=True)

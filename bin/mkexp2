@@ -51,13 +51,22 @@ if [[ "$MKEXP2_MODE" == "describe" ]]; then
 fi
 
 if [[ "$MKEXP2_MODE" == "web" ]]; then
-  exec python3 "$MKEXP2_HOME/bin/mkexp2_web.py" \
-    --mkexp2 "$MKEXP2_HOME/bin/mkexp2" \
-    --repo "$MKEXP2_WEB_REPO" \
-    --host "$MKEXP2_WEB_HOST" \
-    --port "$MKEXP2_WEB_PORT" \
-    --name-template "$MKEXP2_WEB_NAME_TEMPLATE" \
-    ${${MKEXP2_WEB_ALLOW_EMPTY_TOKEN:#0}:+--allow-empty-token}
+  typeset -a web_args
+  web_args=(
+    python3 "$MKEXP2_HOME/bin/mkexp2_web.py"
+    --mkexp2 "$MKEXP2_HOME/bin/mkexp2"
+    --repo "$MKEXP2_WEB_REPO"
+    --host "$MKEXP2_WEB_HOST"
+    --port "$MKEXP2_WEB_PORT"
+    --name-template "$MKEXP2_WEB_NAME_TEMPLATE"
+  )
+  if [[ -n "$MKEXP2_WEB_TOKEN" ]]; then
+    web_args+=(--token "$MKEXP2_WEB_TOKEN")
+  fi
+  if (( MKEXP2_WEB_ALLOW_EMPTY_TOKEN )); then
+    web_args+=(--allow-empty-token)
+  fi
+  exec "${web_args[@]}"
 fi
 
 if [[ "$MKEXP2_MODE" == "mcp" ]]; then

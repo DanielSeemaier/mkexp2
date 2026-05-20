@@ -88,6 +88,8 @@ class WebBackendTest(unittest.TestCase):
             self.assertEqual(nested["name"], "run-a")
             self.assertEqual(nested["parent"], "2026")
             self.assertEqual(nested["depth"], 2)
+            self.assertIn("created_at", nested)
+            self.assertIsInstance(nested["created_at_epoch"], float)
 
     def test_list_experiments_prefers_git_index_and_caches(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -342,6 +344,12 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="queue-open" class="icon-button" aria-label="Show Slurm queue"', mkexp2_web.HTML)
         self.assertIn('id="queue-modal"', mkexp2_web.HTML)
         self.assertIn('id="queue-refresh" class="icon-button" aria-label="Reload Slurm queue"', mkexp2_web.HTML)
+        self.assertIn('id="sidebar-resizer"', mkexp2_web.HTML)
+        self.assertIn('aria-label="Resize sidebar"', mkexp2_web.HTML)
+        self.assertIn("const SIDEBAR_WIDTH_KEY = 'mkexp2-sidebar-width'", mkexp2_web.HTML)
+        self.assertIn("function initSidebarResize", mkexp2_web.HTML)
+        self.assertIn("compareExperimentsByCreatedDesc", mkexp2_web.HTML)
+        self.assertIn("latest: 0", mkexp2_web.HTML)
         self.assertIn("function renderQueue", mkexp2_web.HTML)
         self.assertIn("function cancelQueueJob", mkexp2_web.HTML)
         self.assertIn("api('/api/status/squeue/cancel'", mkexp2_web.HTML)
