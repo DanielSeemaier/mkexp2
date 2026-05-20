@@ -792,7 +792,7 @@ class Mkexp2WebApp:
 
     def share_ssh_tunnel_command(self):
         remote_host = socket.gethostname() or os.environ.get("HOSTNAME") or "<cluster-login>"
-        return f"ssh -L {self.web_port}:127.0.0.1:{self.web_port} {getpass.getuser()}@{remote_host}"
+        return f"ssh -L {self.web_port}:127.0.0.1:{self.web_port} <user>@{remote_host}"
 
     def share_experiment(self, experiment_id):
         path = self.active_experiment_path(experiment_id)
@@ -1872,15 +1872,6 @@ HTML = r"""<!doctype html>
     }
     .app.share-mode #experiment-editor {
       background: #fbfcfd;
-    }
-    .share-banner {
-      margin-bottom: 12px;
-      padding: 10px 12px;
-      border: 1px solid #b7d6f5;
-      border-radius: 6px;
-      background: #eff6ff;
-      color: #1e3a8a;
-      font-weight: 650;
     }
     .sidebar {
       border-right: 1px solid var(--border);
@@ -3662,7 +3653,6 @@ HTML = r"""<!doctype html>
       </div>
     </div>
     <main class="main">
-      <div id="share-banner" class="share-banner hidden">Shared experiment view. Editing, submission, and destructive actions are disabled.</div>
       <div class="view-tabs">
         <button class="view-tab icon-tab" data-view="install-log-view" aria-label="Install Log" title="Install Log">?</button>
         <button class="view-tab active" data-view="experiment-view">Experiment</button>
@@ -6254,16 +6244,14 @@ HTML = r"""<!doctype html>
       state.shared = true;
       state.shareId = shareId;
       document.querySelector('.app').classList.add('share-mode');
-      document.getElementById('share-banner').classList.remove('hidden');
       editor.readOnly = true;
-      const metadata = await api(`/api/share/${encodeURIComponent(shareId)}/metadata`);
-      const id = metadata.experiment.id;
+      const data = await api(`/api/share/${encodeURIComponent(shareId)}/experiment`);
+      const id = data.id;
       state.selected = id;
       state.selectionSeq += 1;
       state.algorithmLoadSeq += 1;
       clearAlgorithmChoices();
       setView('experiment-view').catch(err => out(String(err)));
-      const data = await api(`/api/share/${encodeURIComponent(shareId)}/experiment`);
       document.getElementById('selected-title').textContent = id;
       document.getElementById('selected-path').textContent = data.path;
       setEditorValue(data.experiment);

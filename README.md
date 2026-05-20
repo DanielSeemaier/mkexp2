@@ -408,7 +408,8 @@ The UI can:
   single-experiment view without the sidebar, editor writes, submit controls,
   and Danger Zone, but still allows the viewer to parse logs and generate plot
   artifacts for that shared experiment only. The share dialog shows both the
-  browser URL and the SSH tunnel command to copy/paste.
+  browser URL and a copy/paste SSH tunnel command with a generic `<user>`
+  placeholder.
 - open the header settings button to manage the session token and inspect the
   full browser-session command log, including argv/cwd/stdout/stderr payloads
   returned by web API actions
