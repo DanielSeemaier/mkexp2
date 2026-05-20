@@ -853,6 +853,10 @@ class Mkexp2WebApp:
         path.unlink(missing_ok=True)
         return {"cleared": existed, "submit_lock": self.submit_lock(experiment_id)}
 
+    def require_submit_unlocked(self, experiment_id, action):
+        if self.submit_lock(experiment_id).get("locked"):
+            raise ValueError(f"cannot {action} an experiment while submit is locked")
+
     def delete_experiment(self, experiment_id):
         path = self.active_experiment_path(experiment_id)
         known = {experiment["id"] for experiment in self.list_experiments(force=True)}
@@ -860,6 +864,7 @@ class Mkexp2WebApp:
             raise ValueError(f"experiment not found: {experiment_id}")
         if not path.is_dir() or not (path / "Experiment").is_file():
             raise ValueError(f"experiment not found: {experiment_id}")
+        self.require_submit_unlocked(experiment_id, "delete")
         shutil.rmtree(path)
         self.invalidate_experiments_cache()
         pins = self.read_pins().get("pinned") or []
@@ -874,8 +879,7 @@ class Mkexp2WebApp:
             raise ValueError(f"experiment not found: {experiment_id}")
         if not path.is_dir() or not (path / "Experiment").is_file():
             raise ValueError(f"experiment not found: {experiment_id}")
-        if self.submit_lock(experiment_id).get("locked"):
-            raise ValueError("cannot rename an experiment while submit is locked")
+        self.require_submit_unlocked(experiment_id, "rename")
 
         new_id = str(payload.get("new_id") or payload.get("id") or "").strip().strip("/")
         if not new_id:
@@ -911,6 +915,7 @@ class Mkexp2WebApp:
             raise ValueError(f"experiment not found: {experiment_id}")
         if not path.is_dir() or not (path / "Experiment").is_file():
             raise ValueError(f"experiment not found: {experiment_id}")
+        self.require_submit_unlocked(experiment_id, "archive")
         archived_path = path.with_name(path.name + ARCHIVE_SUFFIX)
         if archived_path.exists():
             raise ValueError(f"archive target already exists: {archived_path.relative_to(self.repo).as_posix()}")
@@ -5669,13 +5674,21 @@ HTML = r"""<!doctype html>
         renameButton.title = locked ? 'Cannot rename while submit is locked.' : '';
       }
       const archiveButton = document.getElementById('archive-experiment');
-      if (archiveButton) archiveButton.disabled = !state.selected;
+      if (archiveButton) {
+        archiveButton.disabled = locked || !state.selected;
+        archiveButton.title = locked ? 'Cannot archive while submit is locked.' : '';
+      }
+      const deleteButton = document.getElementById('delete-experiment');
+      if (deleteButton) {
+        deleteButton.disabled = locked || !state.selected;
+        deleteButton.title = locked ? 'Cannot delete while submit is locked.' : '';
+      }
       const dangerSummary = document.getElementById('danger-summary');
       if (dangerSummary) {
         if (locked) {
           dangerSummary.textContent = `${submitLockMessage()}.`;
         } else {
-          dangerSummary.textContent = 'Manual recovery, rename, and deletion actions.';
+          dangerSummary.textContent = 'Manual recovery, rename, archive, and deletion actions.';
         }
       }
     }
@@ -5791,6 +5804,11 @@ HTML = r"""<!doctype html>
     }
     async function archiveExperiment() {
       if (!state.selected) return;
+      if (state.submitLock?.locked) {
+        alert('Cannot archive while submit is locked.');
+        renderSubmitButton();
+        return;
+      }
       const id = state.selected;
       if (!confirm(`Archive experiment "${id}"? It will be renamed to "${id}.archived" and hidden from the sidebar.`)) return;
       const button = document.getElementById('archive-experiment');
@@ -5827,6 +5845,11 @@ HTML = r"""<!doctype html>
     }
     async function deleteExperiment() {
       if (!state.selected) return;
+      if (state.submitLock?.locked) {
+        alert('Cannot delete while submit is locked.');
+        renderSubmitButton();
+        return;
+      }
       const id = state.selected;
       const typed = prompt(`Type the full experiment name to delete it:\n${id}`);
       if (typed !== id) return;

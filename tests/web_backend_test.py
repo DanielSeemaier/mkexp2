@@ -290,6 +290,8 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("async function renameExperiment", mkexp2_web.HTML)
         self.assertIn("/rename", mkexp2_web.HTML)
         self.assertIn("Cannot rename while submit is locked.", mkexp2_web.HTML)
+        self.assertIn("Cannot archive while submit is locked.", mkexp2_web.HTML)
+        self.assertIn("Cannot delete while submit is locked.", mkexp2_web.HTML)
         self.assertIn("state.submitBusy", mkexp2_web.HTML)
         self.assertIn("algorithmLoading", mkexp2_web.HTML)
         self.assertIn("selectionSeq", mkexp2_web.HTML)
@@ -582,6 +584,20 @@ class WebBackendTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 app.delete_experiment("2026/exp")
 
+    def test_delete_experiment_rejects_submit_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            exp.mkdir()
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            (exp / ".mkexp2").mkdir()
+            (exp / ".mkexp2" / "submit.lock").write_text("started_at=now\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            with self.assertRaisesRegex(ValueError, "submit is locked"):
+                app.delete_experiment("exp")
+            self.assertTrue((exp / "Experiment").is_file())
+
     def test_rename_experiment_moves_directory_and_updates_pins(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -652,6 +668,21 @@ class WebBackendTest(unittest.TestCase):
             self.assertEqual(restored["active_id"], "2026/exp")
             self.assertTrue((repo / "2026" / "exp" / "Experiment").is_file())
             self.assertEqual([item["id"] for item in app.list_archived_experiments(force=True)], [])
+
+    def test_archive_experiment_rejects_submit_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            exp.mkdir()
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            (exp / ".mkexp2").mkdir()
+            (exp / ".mkexp2" / "submit.lock").write_text("started_at=now\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            with self.assertRaisesRegex(ValueError, "submit is locked"):
+                app.archive_experiment("exp")
+            self.assertTrue((exp / "Experiment").is_file())
+            self.assertFalse((repo / "exp.archived").exists())
 
     def test_archive_and_unarchive_reject_collisions_and_bad_paths(self):
         with tempfile.TemporaryDirectory() as tmp:

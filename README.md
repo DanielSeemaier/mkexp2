@@ -399,7 +399,8 @@ The UI can:
   are rejected while the experiment has `.mkexp2/submit.lock`
 - archive experiments by renaming the experiment directory leaf to
   `<name>.archived`; archived experiments are hidden from the sidebar and can
-  be restored from the header archive dialog
+  be restored from the header archive dialog; archive/delete actions are also
+  rejected while `.mkexp2/submit.lock` exists
 - inspect the configured experiment Git repo from the header Git button, review
   added/modified/deleted files, enter a commit message, and run `git add -A`,
   `git commit`, and `git push`
