@@ -1870,8 +1870,11 @@ HTML = r"""<!doctype html>
     .app.share-mode .main {
       grid-column: 1;
     }
-    .app.share-mode #experiment-editor {
+    .app.share-mode .editor-shell {
       background: #fbfcfd;
+    }
+    .app.share-mode #experiment-editor {
+      background: transparent;
     }
     .sidebar {
       border-right: 1px solid var(--border);
