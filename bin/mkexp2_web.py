@@ -25,6 +25,7 @@ PLOT_ACTION_TIMEOUT_SECONDS = 7200
 WEB_STATE_DIR = ".mkexp2"
 WEB_PINS_FILE = "web-pins.json"
 PLOT_INDEX_FILE = "index.json"
+ARCHIVE_SUFFIX = ".archived"
 EXPERIMENT_SKIP_DIRS = {".git", ".mkexp2", "jobs", "logs", "plots", "results", "slurm"}
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 SINFO_LONG_FALLBACK = """Sat May 16 15:57:01 2026
@@ -545,6 +546,8 @@ class Mkexp2WebApp:
         self._plot_backend_cache_at = 0.0
         self._experiments_cache = None
         self._experiments_cache_at = 0.0
+        self._archived_experiments_cache = None
+        self._archived_experiments_cache_at = 0.0
         self._startup_spack_cache_action = None
 
     def mkexp2_root(self):
@@ -562,6 +565,14 @@ class Mkexp2WebApp:
         if path != self.repo and self.repo not in path.parents:
             raise ValueError("experiment path escapes repo")
         return path
+
+    def is_archived_experiment_id(self, experiment_id):
+        return Path(str(experiment_id or "")).name.endswith(ARCHIVE_SUFFIX)
+
+    def active_experiment_path(self, experiment_id):
+        if self.is_archived_experiment_id(experiment_id):
+            raise ValueError(f"experiment is archived: {experiment_id}")
+        return self.experiment_path(experiment_id)
 
     def _git_experiment_files(self):
         tracked = run_command(
@@ -600,7 +611,7 @@ class Mkexp2WebApp:
             files.append((Path(root) / "Experiment").resolve().relative_to(self.repo).as_posix())
         return files
 
-    def _discover_experiments(self):
+    def _discover_experiments(self, archived=False):
         experiments = []
         experiment_files = self._git_experiment_files()
         if experiment_files is None:
@@ -614,18 +625,27 @@ class Mkexp2WebApp:
                 continue
             self.experiment_path(rel_dir)
             exp_file = self.repo / rel_file
+            if not exp_file.is_file():
+                continue
             path = exp_file.parent.resolve()
             stat = exp_file.stat()
+            is_archived = parts[-1].endswith(ARCHIVE_SUFFIX)
+            if is_archived != archived:
+                continue
+            name = parts[-1]
+            if is_archived:
+                name = name[: -len(ARCHIVE_SUFFIX)]
             experiments.append(
                 {
                     "id": rel_dir,
-                    "name": parts[-1],
+                    "name": name,
                     "parent": "/".join(parts[:-1]),
                     "depth": len(parts),
                     "path": str(path),
                     "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
                     "has_results": (path / "results").is_dir(),
                     "has_plots_pdf": (path / "plots.pdf").is_file(),
+                    "archived": is_archived,
                 }
             )
         experiments.sort(key=lambda item: item["id"])
@@ -639,14 +659,29 @@ class Mkexp2WebApp:
             and now - self._experiments_cache_at < EXPERIMENT_CACHE_SECONDS
         ):
             return self._experiments_cache
-        experiments = self._discover_experiments()
+        experiments = self._discover_experiments(archived=False)
         self._experiments_cache = experiments
         self._experiments_cache_at = now
+        return experiments
+
+    def list_archived_experiments(self, force=False):
+        now = time.time()
+        if (
+            not force
+            and self._archived_experiments_cache is not None
+            and now - self._archived_experiments_cache_at < EXPERIMENT_CACHE_SECONDS
+        ):
+            return self._archived_experiments_cache
+        experiments = self._discover_experiments(archived=True)
+        self._archived_experiments_cache = experiments
+        self._archived_experiments_cache_at = now
         return experiments
 
     def invalidate_experiments_cache(self):
         self._experiments_cache = None
         self._experiments_cache_at = 0.0
+        self._archived_experiments_cache = None
+        self._archived_experiments_cache_at = 0.0
 
     def pins_path(self):
         return self.repo / WEB_STATE_DIR / WEB_PINS_FILE
@@ -713,6 +748,8 @@ class Mkexp2WebApp:
         name = payload.get("name") or "experiment"
         template = payload.get("name_template") or self.name_template
         experiment_id = render_name_template(template, name)
+        if self.is_archived_experiment_id(experiment_id):
+            raise ValueError(f"experiment name cannot end with {ARCHIVE_SUFFIX}")
         path = self.experiment_path(experiment_id)
         if path.exists():
             raise ValueError(f"experiment already exists: {experiment_id}")
@@ -738,7 +775,7 @@ class Mkexp2WebApp:
             raise
 
     def command(self, experiment_id, argv, timeout=60):
-        return run_command([str(self.mkexp2), *argv], cwd=self.experiment_path(experiment_id), timeout=timeout)
+        return run_command([str(self.mkexp2), *argv], cwd=self.active_experiment_path(experiment_id), timeout=timeout)
 
     def plot_backend_status(self):
         now = time.time()
@@ -771,7 +808,7 @@ class Mkexp2WebApp:
         return payload
 
     def submit_lock_path(self, experiment_id):
-        return self.experiment_path(experiment_id) / ".mkexp2" / "submit.lock"
+        return self.active_experiment_path(experiment_id) / ".mkexp2" / "submit.lock"
 
     def submit_lock(self, experiment_id):
         path = self.submit_lock_path(experiment_id)
@@ -799,7 +836,7 @@ class Mkexp2WebApp:
         return {"cleared": existed, "submit_lock": self.submit_lock(experiment_id)}
 
     def delete_experiment(self, experiment_id):
-        path = self.experiment_path(experiment_id)
+        path = self.active_experiment_path(experiment_id)
         known = {experiment["id"] for experiment in self.list_experiments(force=True)}
         if experiment_id not in known:
             raise ValueError(f"experiment not found: {experiment_id}")
@@ -811,6 +848,55 @@ class Mkexp2WebApp:
         if experiment_id in pins:
             self.write_pins([item for item in pins if item != experiment_id])
         return {"deleted": True, "id": experiment_id, "path": str(path)}
+
+    def archive_experiment(self, experiment_id):
+        path = self.experiment_path(experiment_id)
+        if path.name.endswith(ARCHIVE_SUFFIX):
+            raise ValueError(f"experiment is already archived: {experiment_id}")
+        known = {experiment["id"] for experiment in self.list_experiments(force=True)}
+        if experiment_id not in known:
+            raise ValueError(f"experiment not found: {experiment_id}")
+        if not path.is_dir() or not (path / "Experiment").is_file():
+            raise ValueError(f"experiment not found: {experiment_id}")
+        archived_path = path.with_name(path.name + ARCHIVE_SUFFIX)
+        if archived_path.exists():
+            raise ValueError(f"archive target already exists: {archived_path.relative_to(self.repo).as_posix()}")
+        archived_id = archived_path.relative_to(self.repo).as_posix()
+        path.rename(archived_path)
+        self.invalidate_experiments_cache()
+        pins = self.read_pins().get("pinned") or []
+        if experiment_id in pins:
+            self.write_pins([item for item in pins if item != experiment_id])
+        return {
+            "archived": True,
+            "id": experiment_id,
+            "archived_id": archived_id,
+            "path": str(path),
+            "archived_path": str(archived_path),
+        }
+
+    def unarchive_experiment(self, experiment_id):
+        path = self.experiment_path(experiment_id)
+        if not path.name.endswith(ARCHIVE_SUFFIX):
+            raise ValueError(f"experiment is not archived: {experiment_id}")
+        if not path.is_dir() or not (path / "Experiment").is_file():
+            raise ValueError(f"archived experiment not found: {experiment_id}")
+        target_name = path.name[: -len(ARCHIVE_SUFFIX)]
+        if not target_name:
+            raise ValueError("invalid archived experiment name")
+        target_path = path.with_name(target_name)
+        if target_path.exists():
+            raise ValueError(f"unarchive target already exists: {target_path.relative_to(self.repo).as_posix()}")
+        target_id = target_path.relative_to(self.repo).as_posix()
+        path.rename(target_path)
+        self.invalidate_experiments_cache()
+        return {
+            "unarchived": True,
+            "id": experiment_id,
+            "active_id": target_id,
+            "path": str(path),
+            "active_path": str(target_path),
+        }
 
     def progress(self, experiment_id):
         result = self.command(experiment_id, ["progress", "--json"], timeout=60)
@@ -874,7 +960,7 @@ class Mkexp2WebApp:
 
             submit = run_command(
                 ["zsh", "./submit.sh", "--install", *algorithms],
-                cwd=self.experiment_path(experiment_id),
+                cwd=self.active_experiment_path(experiment_id),
                 timeout=120,
             )
             if submit["returncode"] == 0:
@@ -1037,7 +1123,7 @@ class Mkexp2WebApp:
         }
 
     def results(self, experiment_id):
-        path = self.experiment_path(experiment_id)
+        path = self.active_experiment_path(experiment_id)
         results_dir = path / "results"
         files = []
         if results_dir.is_dir():
@@ -1056,7 +1142,7 @@ class Mkexp2WebApp:
         return {"files": files}
 
     def install_log(self, experiment_id):
-        path = self.experiment_path(experiment_id)
+        path = self.active_experiment_path(experiment_id)
         log_file = path / "logs" / "install.md"
         if not log_file.is_file():
             return {"exists": False, "path": str(log_file), "content": ""}
@@ -1072,7 +1158,7 @@ class Mkexp2WebApp:
         }
 
     def plots_info(self, experiment_id):
-        path = self.experiment_path(experiment_id)
+        path = self.active_experiment_path(experiment_id)
         pdf = path / "plots.pdf"
         if not pdf.is_file():
             return {"exists": False, "path": str(pdf)}
@@ -1111,7 +1197,7 @@ class Mkexp2WebApp:
                 "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
             }
 
-        current_path = self.experiment_path(experiment_id)
+        current_path = self.active_experiment_path(experiment_id)
         current = []
         results_dir = current_path / "results"
         if results_dir.is_dir():
@@ -1124,7 +1210,7 @@ class Mkexp2WebApp:
         if include_all:
             experiments = []
             for exp in self.list_experiments():
-                exp_results = self.experiment_path(exp["id"]) / "results"
+                exp_results = self.active_experiment_path(exp["id"]) / "results"
                 files = []
                 if exp_results.is_dir():
                     files = [csv_entry(exp["id"], csv_file) for csv_file in sorted(exp_results.glob("*.csv"))]
@@ -1134,7 +1220,7 @@ class Mkexp2WebApp:
         return payload
 
     def plot_artifacts_dir(self, experiment_id):
-        return self.experiment_path(experiment_id) / "plots"
+        return self.active_experiment_path(experiment_id) / "plots"
 
     def plot_artifacts_index_path(self, experiment_id):
         return self.plot_artifacts_dir(experiment_id) / PLOT_INDEX_FILE
@@ -1166,7 +1252,7 @@ class Mkexp2WebApp:
         artifacts = []
         for artifact in index.get("artifacts", []):
             rel_path = str(artifact.get("path") or "")
-            pdf = (self.experiment_path(experiment_id) / rel_path).resolve()
+            pdf = (self.active_experiment_path(experiment_id) / rel_path).resolve()
             if not rel_path.startswith("plots/") or not pdf.is_file():
                 continue
             stat = pdf.stat()
@@ -1187,8 +1273,8 @@ class Mkexp2WebApp:
             raise ValueError("invalid plot artifact id")
         for artifact in self.list_plot_artifacts(experiment_id).get("artifacts", []):
             if artifact.get("id") == artifact_id:
-                path = (self.experiment_path(experiment_id) / artifact.get("path", "")).resolve()
-                root = self.experiment_path(experiment_id).resolve()
+                path = (self.active_experiment_path(experiment_id) / artifact.get("path", "")).resolve()
+                root = self.active_experiment_path(experiment_id).resolve()
                 if root not in path.parents:
                     raise ValueError("plot artifact path escapes experiment")
                 return path
@@ -1220,7 +1306,7 @@ class Mkexp2WebApp:
         file_name = str(source.get("file") or "").strip()
         if not file_name or Path(file_name).name != file_name or not file_name.endswith(".csv"):
             raise ValueError("CSV plot source requires a results/*.csv file name")
-        exp_path = self.experiment_path(source_experiment)
+        exp_path = self.active_experiment_path(source_experiment)
         csv_path = (exp_path / "results" / file_name).resolve()
         results_root = (exp_path / "results").resolve()
         if results_root not in csv_path.parents or not csv_path.is_file():
@@ -1293,7 +1379,7 @@ class Mkexp2WebApp:
                 argv.extend(source["token"] for source in resolved_sources)
                 command = self.command(experiment_id, argv, timeout=PLOT_ACTION_TIMEOUT_SECONDS)
                 commands.append({"plot_id": plot_id, "plot_name": entry.get("name", plot_id), "command": command})
-                pdf = self.experiment_path(experiment_id) / rel_output
+                pdf = self.active_experiment_path(experiment_id) / rel_output
                 if command["returncode"] == 0 and pdf.is_file() and pdf.stat().st_size > 0:
                     stat = pdf.stat()
                     artifact = {
@@ -1321,7 +1407,7 @@ class Mkexp2WebApp:
         return self.actions.start_unique(f"plot-artifacts:{experiment_id}", f"plot artifacts {experiment_id}", action)
 
     def logs_root(self, experiment_id):
-        return self.experiment_path(experiment_id) / "logs"
+        return self.active_experiment_path(experiment_id) / "logs"
 
     def log_path(self, experiment_id, rel_path):
         logs_root = self.logs_root(experiment_id).resolve()
@@ -1623,6 +1709,34 @@ HTML = r"""<!doctype html>
       font-weight: 750;
       letter-spacing: 0;
       text-transform: uppercase;
+    }
+    .archive-list {
+      display: grid;
+      gap: 8px;
+      max-height: 60vh;
+      overflow: auto;
+    }
+    .archive-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fbfcfd;
+    }
+    .archive-name {
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .archive-path {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
     }
     .experiment-folder {
       min-width: 0;
@@ -3075,6 +3189,9 @@ HTML = r"""<!doctype html>
           <button id="create-open" class="icon-button" aria-label="Create experiment" title="Create experiment">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
           </button>
+          <button id="archive-open" class="icon-button" aria-label="Archived experiments" title="Archived experiments">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+          </button>
           <button id="git-open" class="icon-button" aria-label="Git status" title="Git status">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M8.5 7.5 16 15"/></svg>
           </button>
@@ -3140,6 +3257,25 @@ HTML = r"""<!doctype html>
         <div class="modal-footer">
           <button id="create-cancel">Cancel</button>
           <button id="create-submit" class="primary">Create</button>
+        </div>
+      </div>
+    </div>
+    <div id="archive-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="archive-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="archive-modal-title" class="modal-title">Archived Experiments</div>
+            <div id="archive-summary" class="csv-summary">No archived experiments loaded.</div>
+          </div>
+          <button id="archive-close" class="icon-button" aria-label="Close archived experiments" title="Close">x</button>
+        </div>
+        <div class="modal-body">
+          <div id="archive-list" class="archive-list csv-empty">Open the dialog to load archived experiments.</div>
+        </div>
+        <div class="modal-footer">
+          <button id="archive-refresh" class="icon-button" aria-label="Reload archived experiments" title="Reload archived experiments">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+          </button>
         </div>
       </div>
     </div>
@@ -3309,6 +3445,7 @@ HTML = r"""<!doctype html>
           <div class="panel-body">
             <div class="danger-actions">
               <button id="clear-submit-lock">Unlock submit</button>
+              <button id="archive-experiment">Archive Experiment</button>
               <button id="delete-experiment" class="danger">Delete Experiment</button>
             </div>
           </div>
@@ -3444,12 +3581,14 @@ HTML = r"""<!doctype html>
   <script>
     const state = {
       experiments: [],
+      archivedExperiments: [],
       selected: null,
       pinnedExperiments: new Set(),
       algorithms: [],
       presets: [],
       config: { name_template: '%Y.%m.%d-<name>' },
       openDirs: new Set(),
+      archivedOpenDirs: new Set(),
       results: [],
       resultsFor: null,
       stats: null,
@@ -5176,6 +5315,91 @@ HTML = r"""<!doctype html>
       const unpinned = state.experiments.filter(exp => !state.pinnedExperiments.has(exp.id));
       renderExperimentTree(list, experimentTree(unpinned));
     }
+    function renderArchivedExperimentTree(container, node, prefix = '') {
+      const folders = Array.from(node.folders.entries()).sort((left, right) => left[0].localeCompare(right[0]));
+      for (const [name, child] of folders) {
+        const id = prefix ? `${prefix}/${name}` : name;
+        const details = document.createElement('details');
+        details.className = 'experiment-folder archive-folder';
+        details.open = state.archivedOpenDirs.has(id);
+        details.addEventListener('toggle', () => {
+          if (details.open) state.archivedOpenDirs.add(id);
+          else state.archivedOpenDirs.delete(id);
+        });
+        const summary = document.createElement('summary');
+        summary.className = 'folder-summary';
+        const label = document.createElement('span');
+        label.className = 'folder-name';
+        label.textContent = name;
+        const count = document.createElement('span');
+        count.className = 'folder-count';
+        count.textContent = `${child.count}`;
+        summary.appendChild(label);
+        summary.appendChild(count);
+        const children = document.createElement('div');
+        children.className = 'folder-children';
+        renderArchivedExperimentTree(children, child, id);
+        details.appendChild(summary);
+        details.appendChild(children);
+        container.appendChild(details);
+      }
+      const experiments = Array.from(node.experiments).sort((left, right) => left.label.localeCompare(right.label));
+      for (const exp of experiments) {
+        renderArchivedExperimentItem(container, exp);
+      }
+    }
+    function renderArchivedExperimentItem(container, exp) {
+      const item = document.createElement('div');
+      item.className = 'archive-item';
+      const text = document.createElement('div');
+      const name = document.createElement('div');
+      name.className = 'archive-name';
+      name.textContent = exp.label || exp.name || exp.id;
+      const path = document.createElement('div');
+      path.className = 'archive-path';
+      path.textContent = exp.id;
+      text.appendChild(name);
+      text.appendChild(path);
+      const button = document.createElement('button');
+      button.textContent = 'Unarchive';
+      button.title = `Unarchive ${exp.id}`;
+      button.onclick = () => unarchiveExperiment(exp.id, button).catch(err => out(String(err)));
+      item.appendChild(text);
+      item.appendChild(button);
+      container.appendChild(item);
+    }
+    function renderArchivedExperiments() {
+      const list = document.getElementById('archive-list');
+      const summary = document.getElementById('archive-summary');
+      const archived = state.archivedExperiments || [];
+      summary.textContent = `${archived.length} archived experiment${archived.length === 1 ? '' : 's'}.`;
+      list.innerHTML = '';
+      if (!archived.length) {
+        list.className = 'archive-list csv-empty';
+        list.textContent = 'No archived experiments.';
+        return;
+      }
+      list.className = 'archive-list';
+      renderArchivedExperimentTree(list, experimentTree(archived));
+    }
+    async function loadArchivedExperiments(options = {}) {
+      const query = options.force ? '?refresh=1' : '';
+      const data = await api(`/api/experiments/archived${query}`);
+      state.archivedExperiments = data.experiments || [];
+      renderArchivedExperiments();
+      return state.archivedExperiments;
+    }
+    async function openArchiveDialog() {
+      document.getElementById('archive-modal').classList.remove('hidden');
+      await loadArchivedExperiments({ force: true }).catch(err => {
+        const list = document.getElementById('archive-list');
+        list.className = 'archive-list csv-empty status-bad';
+        list.textContent = String(err);
+      });
+    }
+    function closeArchiveDialog() {
+      document.getElementById('archive-modal').classList.add('hidden');
+    }
     async function togglePinnedExperiment(id) {
       if (state.pinnedExperiments.has(id)) state.pinnedExperiments.delete(id);
       else state.pinnedExperiments.add(id);
@@ -5271,6 +5495,8 @@ HTML = r"""<!doctype html>
       }
       const clearButton = document.getElementById('clear-submit-lock');
       if (clearButton) clearButton.disabled = !locked || !state.selected;
+      const archiveButton = document.getElementById('archive-experiment');
+      if (archiveButton) archiveButton.disabled = !state.selected;
       const dangerSummary = document.getElementById('danger-summary');
       if (dangerSummary) {
         if (locked) {
@@ -5295,6 +5521,62 @@ HTML = r"""<!doctype html>
         renderSubmitLock(result.submit_lock);
       });
     }
+    function clearSelectedExperiment() {
+      state.selected = null;
+      state.algorithms = [];
+      state.results = [];
+      state.resultsFor = null;
+      state.stats = null;
+      state.statsFor = null;
+      state.selectedResults = [];
+      state.compareColumnModes = {};
+      state.installLog = null;
+      state.installLogFor = null;
+      state.logsDir = '';
+      state.logsListing = null;
+      state.logsFor = null;
+      state.selectedLog = '';
+      state.logContent = null;
+      state.submitLock = null;
+      state.plotSources = null;
+      state.plotSourcesFor = null;
+      state.plotSourcesInitializedFor = null;
+      state.selectedPlotSources = new Set();
+      state.externalPlotSources = [];
+      state.plotArtifacts = null;
+      state.plotArtifactsFor = null;
+      state.selectedPlotArtifact = '';
+      state.plotLabelTouched = false;
+      clearPlotPdfUrl();
+      setView('experiment-view').catch(err => out(String(err)));
+      document.getElementById('algorithm-list').innerHTML = '';
+      document.getElementById('selected-title').textContent = 'Experiment';
+      document.getElementById('selected-path').textContent = '';
+      setEditorValue('');
+      renderResultsWorkspace();
+      renderStatsWorkspace();
+      renderInstallLogWorkspace();
+      renderLogsWorkspace();
+      renderSubmitLock({ locked: false });
+      renderProgress(null);
+      document.getElementById('probe-summary').textContent = 'No probe loaded.';
+      document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
+      renderExperimentsList();
+    }
+    async function archiveExperiment() {
+      if (!state.selected) return;
+      const id = state.selected;
+      if (!confirm(`Archive experiment "${id}"? It will be renamed to "${id}.archived" and hidden from the sidebar.`)) return;
+      const button = document.getElementById('archive-experiment');
+      await withBusyButton(button, 'Archiving...', async () => {
+        await api(`/api/experiments/${encodeURIComponent(id)}/archive`, { method: 'POST' });
+        clearSelectedExperiment();
+        await Promise.all([
+          refreshExperiments({ force: true }),
+          loadArchivedExperiments({ force: true }).catch(err => out(String(err)))
+        ]);
+      });
+    }
     async function deleteExperiment() {
       if (!state.selected) return;
       const id = state.selected;
@@ -5304,15 +5586,17 @@ HTML = r"""<!doctype html>
       const button = document.getElementById('delete-experiment');
       await withBusyButton(button, 'Deleting...', async () => {
         await api(`/api/experiments/${encodeURIComponent(id)}`, { method: 'DELETE' });
-        state.selected = null;
-        state.submitLock = null;
-        clearPlotPdfUrl();
-        document.getElementById('selected-title').textContent = 'Experiment';
-        document.getElementById('selected-path').textContent = '';
-        setEditorValue('');
-        renderSubmitLock({ locked: false });
-        renderProgress(null);
+        clearSelectedExperiment();
         await refreshExperiments({ force: true });
+      });
+    }
+    async function unarchiveExperiment(id, button) {
+      await withBusyButton(button, 'Unarchiving...', async () => {
+        await api(`/api/experiments/${encodeURIComponent(id)}/unarchive`, { method: 'POST' });
+        await Promise.all([
+          refreshExperiments({ force: true }),
+          loadArchivedExperiments({ force: true })
+        ]);
       });
     }
     function startProgressPolling() {
@@ -6151,6 +6435,9 @@ HTML = r"""<!doctype html>
     document.getElementById('create-name').oninput = updateCreatePreview;
     document.getElementById('create-template').oninput = updateCreatePreview;
     document.getElementById('create-template-override').onchange = updateCreatePreview;
+    document.getElementById('archive-open').onclick = () => withBusyButton('archive-open', '', openArchiveDialog).catch(err => out(String(err)));
+    document.getElementById('archive-close').onclick = closeArchiveDialog;
+    document.getElementById('archive-refresh').onclick = () => withBusyButton('archive-refresh', '', () => loadArchivedExperiments({ force: true })).catch(err => out(String(err)));
     document.getElementById('git-open').onclick = () => withBusyButton('git-open', '', openGitDialog).catch(err => out(String(err)));
     document.getElementById('git-close').onclick = closeGitDialog;
     document.getElementById('git-refresh').onclick = () => withBusyButton('git-refresh', '', loadGitStatus).catch(err => out(String(err)));
@@ -6163,6 +6450,7 @@ HTML = r"""<!doctype html>
     document.getElementById('probe-run').onclick = probeExperiment;
     document.getElementById('submit').onclick = submitExperiment;
     document.getElementById('clear-submit-lock').onclick = clearSubmitLock;
+    document.getElementById('archive-experiment').onclick = archiveExperiment;
     document.getElementById('delete-experiment').onclick = deleteExperiment;
     document.getElementById('refresh-progress').onclick = () => withBusyButton('refresh-progress', '', () => loadProgress()).catch(err => out(String(err)));
     document.getElementById('parse-results').onclick = parseExperiment;
@@ -6253,10 +6541,15 @@ def make_handler(app):
                     force = (query.get("refresh") or ["0"])[0] in ("1", "true", "yes")
                     json_response(self, 200, {"experiments": app.list_experiments(force=force)})
                     return
+                if path == "/api/experiments/archived":
+                    query = urllib.parse.parse_qs(parsed.query)
+                    force = (query.get("refresh") or ["0"])[0] in ("1", "true", "yes")
+                    json_response(self, 200, {"experiments": app.list_archived_experiments(force=force)})
+                    return
                 match = re.match(r"^/api/experiments/([^/]+)/experiment$", path)
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
-                    exp_path = app.experiment_path(experiment_id)
+                    exp_path = app.active_experiment_path(experiment_id)
                     json_response(
                         self,
                         200,
@@ -6319,7 +6612,7 @@ def make_handler(app):
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/plots\.pdf$", path)
                 if match:
-                    exp_path = app.experiment_path(urllib.parse.unquote(match.group(1)))
+                    exp_path = app.active_experiment_path(urllib.parse.unquote(match.group(1)))
                     pdf = exp_path / "plots.pdf"
                     if not pdf.is_file():
                         json_response(self, 404, {"error": "plots.pdf not found"})
@@ -6376,6 +6669,15 @@ def make_handler(app):
                     return
                 if path == "/api/pins":
                     json_response(self, 200, app.write_pins(payload.get("pinned") or []))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/(archive|unarchive)$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    action = match.group(2)
+                    if action == "archive":
+                        json_response(self, 200, app.archive_experiment(experiment_id))
+                    else:
+                        json_response(self, 200, app.unarchive_experiment(experiment_id))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/(check|probe|submit|parse|plot)$", path)
                 if match:
@@ -6446,7 +6748,7 @@ def make_handler(app):
                     json_response(self, 404, {"error": "not found"})
                     return
                 experiment_id = urllib.parse.unquote(match.group(1))
-                exp_path = app.experiment_path(experiment_id)
+                exp_path = app.active_experiment_path(experiment_id)
                 (exp_path / "Experiment").write_text(payload.get("experiment", ""), encoding="utf-8")
                 json_response(self, 200, {"saved": True, "id": experiment_id})
             except Exception as exc:

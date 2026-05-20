@@ -390,6 +390,9 @@ The UI can:
 - pin experiments to a flat top section in the sidebar; the pinned ids are
   persisted server-side in `.mkexp2/web-pins.json` under the configured
   experiment repo
+- archive experiments by renaming the experiment directory leaf to
+  `<name>.archived`; archived experiments are hidden from the sidebar and can
+  be restored from the header archive dialog
 - inspect the configured experiment Git repo from the header Git button, review
   added/modified/deleted files, enter a commit message, and run `git add -A`,
   `git commit`, and `git push`

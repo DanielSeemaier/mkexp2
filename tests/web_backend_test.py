@@ -70,14 +70,20 @@ class WebBackendTest(unittest.TestCase):
             (repo / "flat" / "Experiment").write_text("ExperimentFlat() { :; }\n")
             (repo / "2026" / "run-a").mkdir(parents=True)
             (repo / "2026" / "run-a" / "Experiment").write_text("ExperimentA() { :; }\n")
+            (repo / "2026" / "old.archived").mkdir(parents=True)
+            (repo / "2026" / "old.archived" / "Experiment").write_text("ExperimentOld() { :; }\n")
             (repo / ".git" / "ignored").mkdir(parents=True)
             (repo / ".git" / "ignored" / "Experiment").write_text("ignored\n")
             app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "%Y.%m.%d-<name>", "token")
 
             experiments = app.list_experiments()
             ids = [item["id"] for item in experiments]
+            archived = app.list_archived_experiments()
 
             self.assertEqual(ids, ["2026/run-a", "flat"])
+            self.assertEqual([item["id"] for item in archived], ["2026/old.archived"])
+            self.assertEqual(archived[0]["name"], "old")
+            self.assertTrue(archived[0]["archived"])
             nested = experiments[0]
             self.assertEqual(nested["name"], "run-a")
             self.assertEqual(nested["parent"], "2026")
@@ -104,6 +110,20 @@ class WebBackendTest(unittest.TestCase):
             refreshed = app.list_experiments(force=True)
             self.assertEqual([item["id"] for item in refreshed], ["later", "tracked", "untracked"])
 
+    def test_experiment_discovery_skips_stale_git_paths_after_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.DEVNULL)
+            (repo / "tracked").mkdir()
+            (repo / "tracked" / "Experiment").write_text("ExperimentTracked() { :; }\n")
+            subprocess.run(["git", "add", "tracked/Experiment"], cwd=repo, check=True)
+            (repo / "tracked").rename(repo / "tracked.archived")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "%Y.%m.%d-<name>", "token")
+
+            self.assertEqual(app.list_experiments(force=True), [])
+            archived = app.list_archived_experiments(force=True)
+            self.assertEqual([item["id"] for item in archived], ["tracked.archived"])
+
     def test_create_experiment_uses_template(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -118,6 +138,9 @@ class WebBackendTest(unittest.TestCase):
             overridden = app.create_experiment({"name": "Other Run", "name_template": "custom/<name>"})
             self.assertEqual(overridden["id"], "custom/other-run")
             self.assertTrue((repo / "custom" / "other-run" / "Experiment").is_file())
+
+            with self.assertRaises(ValueError):
+                app.create_experiment({"name": "Hidden", "name_template": "<name>.archived"})
 
     def test_list_presets_uses_probe_json(self):
         original_run_command = mkexp2_web.run_command
@@ -247,6 +270,16 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("if (action?.status === 'running')", mkexp2_web.HTML)
         self.assertIn('id="clear-submit-lock"', mkexp2_web.HTML)
         self.assertIn('id="delete-experiment"', mkexp2_web.HTML)
+        self.assertIn('id="archive-open"', mkexp2_web.HTML)
+        self.assertIn('aria-label="Archived experiments"', mkexp2_web.HTML)
+        self.assertIn('id="archive-modal"', mkexp2_web.HTML)
+        self.assertIn('id="archive-refresh"', mkexp2_web.HTML)
+        self.assertIn('id="archive-experiment"', mkexp2_web.HTML)
+        self.assertIn("archivedOpenDirs", mkexp2_web.HTML)
+        self.assertIn("renderArchivedExperimentTree", mkexp2_web.HTML)
+        self.assertIn("/api/experiments/archived", mkexp2_web.HTML)
+        self.assertIn("/archive", mkexp2_web.HTML)
+        self.assertIn("/unarchive", mkexp2_web.HTML)
         self.assertIn('Danger Zone', mkexp2_web.HTML)
         self.assertIn("margin-top: 14px;", mkexp2_web.HTML)
         self.assertIn("Type the full experiment name to delete it", mkexp2_web.HTML)
@@ -531,6 +564,52 @@ class WebBackendTest(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 app.delete_experiment("2026/exp")
+
+    def test_archive_and_unarchive_experiment_renames_leaf_and_updates_pins(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "2026" / "exp"
+            exp.mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            other = repo / "other"
+            other.mkdir()
+            (other / "Experiment").write_text("ExperimentY() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+            app.write_pins(["2026/exp", "other"])
+
+            archived = app.archive_experiment("2026/exp")
+            self.assertTrue(archived["archived"])
+            self.assertEqual(archived["archived_id"], "2026/exp.archived")
+            self.assertFalse(exp.exists())
+            self.assertTrue((repo / "2026" / "exp.archived" / "Experiment").is_file())
+            self.assertEqual([item["id"] for item in app.list_experiments(force=True)], ["other"])
+            self.assertEqual([item["id"] for item in app.list_archived_experiments(force=True)], ["2026/exp.archived"])
+            self.assertEqual(app.read_pins()["pinned"], ["other"])
+            with self.assertRaises(ValueError):
+                app.results("2026/exp.archived")
+
+            restored = app.unarchive_experiment("2026/exp.archived")
+            self.assertTrue(restored["unarchived"])
+            self.assertEqual(restored["active_id"], "2026/exp")
+            self.assertTrue((repo / "2026" / "exp" / "Experiment").is_file())
+            self.assertEqual([item["id"] for item in app.list_archived_experiments(force=True)], [])
+
+    def test_archive_and_unarchive_reject_collisions_and_bad_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            for path in [repo / "exp", repo / "exp.archived"]:
+                path.mkdir()
+                (path / "Experiment").write_text("ExperimentX() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            with self.assertRaises(ValueError):
+                app.archive_experiment("exp")
+            with self.assertRaises(ValueError):
+                app.unarchive_experiment("exp.archived")
+            with self.assertRaises(ValueError):
+                app.archive_experiment("../escape")
+            with self.assertRaises(ValueError):
+                app.unarchive_experiment("../escape.archived")
 
     def test_progress_uses_json_argv_array_and_strips_ansi(self):
         calls = []
