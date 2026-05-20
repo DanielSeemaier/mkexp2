@@ -216,11 +216,19 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("probe-algorithm-row", mkexp2_web.HTML)
         self.assertIn("probe-primary-field", mkexp2_web.HTML)
         self.assertIn("probe-detail-row", mkexp2_web.HTML)
-        self.assertIn("function renderProbeRawJson", mkexp2_web.HTML)
-        self.assertIn("Resolved settings (", mkexp2_web.HTML)
+        self.assertNotIn("function renderProbeRawJson", mkexp2_web.HTML)
+        self.assertNotIn("Raw algorithm JSON", mkexp2_web.HTML)
+        self.assertIn("function renderProbeInputs", mkexp2_web.HTML)
+        self.assertIn("probe-input-grid", mkexp2_web.HTML)
+        self.assertIn("renderProbeInputCard('Graphs'", mkexp2_web.HTML)
+        self.assertIn("renderProbeInputCard('K'", mkexp2_web.HTML)
+        self.assertIn("renderProbeInputCard('Eps'", mkexp2_web.HTML)
+        self.assertIn("renderProbeInputCard('Seeds'", mkexp2_web.HTML)
+        self.assertIn("Resolved settings", mkexp2_web.HTML)
+        self.assertNotIn("Resolved settings (", mkexp2_web.HTML)
         self.assertIn("white-space: pre-wrap", mkexp2_web.HTML)
         self.assertNotIn("probe-algorithm-grid", mkexp2_web.HTML)
-        self.assertIn("Probe JSON", mkexp2_web.HTML)
+        self.assertNotIn("Probe JSON", mkexp2_web.HTML)
         self.assertIn("async function persistExperiment", mkexp2_web.HTML)
         self.assertIn("function renderCheckResult", mkexp2_web.HTML)
         self.assertIn("function parseCheckJson", mkexp2_web.HTML)
@@ -273,12 +281,16 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="clear-submit-lock"', mkexp2_web.HTML)
         self.assertIn('id="rename-experiment"', mkexp2_web.HTML)
         self.assertIn('id="delete-experiment"', mkexp2_web.HTML)
-        self.assertIn('id="share-experiment"', mkexp2_web.HTML)
+        self.assertIn('class="view-tabs"', mkexp2_web.HTML)
+        self.assertIn('class="view-tabs-spacer"', mkexp2_web.HTML)
+        self.assertIn('id="share-experiment" class="icon-button" aria-label="Share experiment"', mkexp2_web.HTML)
+        self.assertNotIn('<button id="share-experiment">Share</button>', mkexp2_web.HTML)
         self.assertIn('id="share-modal"', mkexp2_web.HTML)
         self.assertIn('id="share-ssh"', mkexp2_web.HTML)
         self.assertIn('id="share-link"', mkexp2_web.HTML)
         self.assertIn("__SHARE_ID__", mkexp2_web.HTML)
         self.assertIn("share-mode", mkexp2_web.HTML)
+        self.assertNotIn(".app.share-mode .probe-panel", mkexp2_web.HTML)
         self.assertIn(".app.share-mode .editor-shell", mkexp2_web.HTML)
         self.assertIn(".app.share-mode #experiment-editor", mkexp2_web.HTML)
         self.assertIn("background: transparent;", mkexp2_web.HTML)
@@ -792,6 +804,37 @@ class WebBackendTest(unittest.TestCase):
         self.assertEqual(result["progress_json"]["done"], 1)
         self.assertFalse(result["progress_json"]["complete"])
         self.assertEqual(calls, [(["/fake/mkexp2", "progress", "--json"], str((repo / "exp").resolve()), 60)])
+
+    def test_probe_payload_uses_json_argv_array_and_parses_payload(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            self.assertIsInstance(argv, list)
+            calls.append((list(argv), str(cwd) if cwd else None, timeout))
+            return {
+                "returncode": 0,
+                "stdout": '{"experiments":[{"name":"ExperimentX"}]}\n',
+                "stderr": "",
+                "elapsed_seconds": 0.1,
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "exp").mkdir()
+            (repo / "exp" / "Experiment").write_text("ExperimentX() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+            mkexp2_web.run_command = fake_run_command
+            try:
+                result = app.probe_payload("exp", {"selector": "ExperimentX", "flags": ["--algorithms"]})
+                with self.assertRaisesRegex(ValueError, "unsupported probe flag"):
+                    app.probe_payload("exp", {"flags": ["--bad"]})
+            finally:
+                mkexp2_web.run_command = original_run_command
+
+        self.assertEqual(result["experiments"][0]["name"], "ExperimentX")
+        self.assertIn("_command", result)
+        self.assertEqual(calls, [(["/fake/mkexp2", "probe", "ExperimentX", "--algorithms"], str((repo / "exp").resolve()), 60)])
 
     def test_stats_uses_json_argv_array_and_parses_payload(self):
         calls = []

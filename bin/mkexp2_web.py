@@ -901,6 +901,34 @@ class Mkexp2WebApp:
     def command(self, experiment_id, argv, timeout=60):
         return run_command([str(self.mkexp2), *argv], cwd=self.active_experiment_path(experiment_id), timeout=timeout)
 
+    def probe_payload(self, experiment_id, payload):
+        selector = payload.get("selector")
+        flags = payload.get("flags") or []
+        allowed_flags = {
+            "--algorithms",
+            "--graphs",
+            "--topologies",
+            "--run-properties",
+            "--jobs",
+            "--calls",
+        }
+        argv = ["probe"]
+        if selector:
+            argv.append(str(selector))
+        for flag in flags:
+            if flag not in allowed_flags:
+                raise ValueError(f"unsupported probe flag: {flag}")
+            argv.append(flag)
+        result = self.command(experiment_id, argv, timeout=60)
+        if result["returncode"] == 0 and result["stdout"].strip():
+            try:
+                parsed = json.loads(result["stdout"])
+            except json.JSONDecodeError:
+                parsed = {"raw": result["stdout"]}
+            parsed["_command"] = result
+            return parsed
+        return result
+
     def plot_backend_status(self):
         now = time.time()
         if self._plot_backend_cache and now - self._plot_backend_cache_at < 15:
@@ -1860,7 +1888,6 @@ HTML = r"""<!doctype html>
     .app.share-mode .sidebar,
     .app.share-mode .sidebar-resizer,
     .app.share-mode .submit-panel,
-    .app.share-mode .probe-panel,
     .app.share-mode .danger-zone,
     .app.share-mode #check,
     .app.share-mode #share-experiment,
@@ -2244,6 +2271,13 @@ HTML = r"""<!doctype html>
       align-items: center;
       flex-wrap: wrap;
     }
+    .view-tabs-spacer {
+      flex: 1 1 auto;
+      min-width: 20px;
+    }
+    .view-tabs .icon-button {
+      flex: 0 0 auto;
+    }
     .view-tab {
       height: 34px;
       min-width: 92px;
@@ -2559,6 +2593,58 @@ HTML = r"""<!doctype html>
       color: var(--muted);
       font-size: 13px;
     }
+    .probe-input-grid {
+      display: grid;
+      grid-template-columns: minmax(260px, 1.5fr) repeat(3, minmax(120px, 0.7fr));
+      gap: 8px;
+      min-width: 0;
+    }
+    .probe-input-card {
+      display: grid;
+      align-content: start;
+      gap: 6px;
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fbfcfd;
+      padding: 10px;
+    }
+    .probe-input-title,
+    .probe-settings-title {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 750;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .probe-input-values {
+      min-width: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .probe-input-values.graphs {
+      display: block;
+      max-height: 150px;
+      overflow: auto;
+      white-space: pre;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: white;
+      padding: 7px 8px;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .probe-input-chip {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: white;
+      padding: 3px 7px;
+      font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: nowrap;
+    }
     .probe-algorithm-list {
       display: grid;
       gap: 10px;
@@ -2634,17 +2720,14 @@ HTML = r"""<!doctype html>
       border-top: 1px solid var(--border);
       padding-top: 8px;
     }
-    .probe-detail-row details > summary {
-      cursor: pointer;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 650;
+    .probe-settings {
+      display: grid;
+      gap: 8px;
     }
     .probe-setting-chips {
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
-      margin-top: 8px;
     }
     .probe-setting-chip {
       display: inline-flex;
@@ -2669,22 +2752,8 @@ HTML = r"""<!doctype html>
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .probe-extra-settings {
-      margin-top: 8px;
-    }
-    .probe-extra-settings pre {
-      max-height: 220px;
-      overflow: auto;
-      overflow-wrap: anywhere;
-      white-space: pre-wrap;
-      margin: 8px 0 0;
-      padding: 8px;
-      border-radius: 6px;
-      background: #101820;
-      color: #e7eef2;
-      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    }
     @media (max-width: 1000px) {
+      .probe-input-grid,
       .probe-algorithm-main {
         grid-template-columns: 1fr;
       }
@@ -3662,6 +3731,10 @@ HTML = r"""<!doctype html>
         <button class="view-tab" data-view="results-view">Results</button>
         <button class="view-tab" data-view="logs-view">Logs</button>
         <button class="view-tab" data-view="plots-view">Plots</button>
+        <span class="view-tabs-spacer"></span>
+        <button id="share-experiment" class="icon-button" aria-label="Share experiment" title="Share experiment">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.6 6.8-4.2"/><path d="m8.6 13.4 6.8 4.2"/></svg>
+        </button>
       </div>
       <section id="experiment-view" class="view-panel active">
         <section class="grid">
@@ -3672,7 +3745,6 @@ HTML = r"""<!doctype html>
                 <div class="muted" id="selected-path"></div>
               </div>
               <div class="actions">
-                <button id="share-experiment">Share</button>
                 <button id="check">Check</button>
               </div>
             </div>
@@ -4283,11 +4355,12 @@ HTML = r"""<!doctype html>
       return pairs;
     }
     function renderProbeSettings(algorithm) {
-      const wrapper = document.createElement('details');
-      wrapper.className = 'probe-settings-details';
-      const settingsSummary = document.createElement('summary');
-      settingsSummary.textContent = `Resolved settings (${probeSettingPairs(algorithm).length})`;
-      wrapper.appendChild(settingsSummary);
+      const wrapper = document.createElement('div');
+      wrapper.className = 'probe-settings';
+      const settingsTitle = document.createElement('div');
+      settingsTitle.className = 'probe-settings-title';
+      settingsTitle.textContent = 'Resolved settings';
+      wrapper.appendChild(settingsTitle);
       const chips = document.createElement('div');
       chips.className = 'probe-setting-chips';
       const pairs = probeSettingPairs(algorithm);
@@ -4314,16 +4387,50 @@ HTML = r"""<!doctype html>
       wrapper.appendChild(chips);
       return wrapper;
     }
-    function renderProbeRawJson(algorithm) {
-      const details = document.createElement('details');
-      details.className = 'probe-extra-settings';
-      const summary = document.createElement('summary');
-      summary.textContent = 'Raw algorithm JSON';
-      const pre = document.createElement('pre');
-      pre.textContent = JSON.stringify(algorithm, null, 2);
-      details.appendChild(summary);
-      details.appendChild(pre);
-      return details;
+    function probeArrayValues(values) {
+      return Array.isArray(values)
+        ? values.filter(value => value !== null && value !== undefined && value !== '').map(value => String(value))
+        : [];
+    }
+    function probeGraphs(result) {
+      const declared = probeArrayValues(result.declared?.graphs);
+      if (declared.length) return declared;
+      return probeArrayValues((result.resolved?.graphs || []).map(graph => graph.spec || graph.basename || graph.resolved_path));
+    }
+    function renderProbeInputCard(label, values, options = {}) {
+      const card = document.createElement('div');
+      card.className = 'probe-input-card';
+      const title = document.createElement('div');
+      title.className = 'probe-input-title';
+      title.textContent = `${label} (${values.length})`;
+      card.appendChild(title);
+      const list = document.createElement('div');
+      list.className = `probe-input-values${options.graphs ? ' graphs' : ''}`;
+      if (!values.length) {
+        list.textContent = '(none)';
+        list.classList.add('probe-empty');
+      } else if (options.graphs) {
+        list.textContent = values.join('\n');
+      } else {
+        for (const value of values) {
+          const chip = document.createElement('span');
+          chip.className = 'probe-input-chip';
+          chip.title = value;
+          chip.textContent = value;
+          list.appendChild(chip);
+        }
+      }
+      card.appendChild(list);
+      return card;
+    }
+    function renderProbeInputs(result) {
+      const grid = document.createElement('div');
+      grid.className = 'probe-input-grid';
+      grid.appendChild(renderProbeInputCard('Graphs', probeGraphs(result), { graphs: true }));
+      grid.appendChild(renderProbeInputCard('K', probeArrayValues(result.declared?.ks)));
+      grid.appendChild(renderProbeInputCard('Eps', probeArrayValues(result.declared?.epsilons)));
+      grid.appendChild(renderProbeInputCard('Seeds', probeArrayValues(result.declared?.seeds)));
+      return grid;
     }
     function renderProbeResult(results, saveResult) {
       const box = document.getElementById('probe-output');
@@ -4333,10 +4440,7 @@ HTML = r"""<!doctype html>
       const root = document.createElement('div');
       root.className = 'probe-output';
 
-      const functionCount = results.length;
-      const algorithmCount = results.reduce((sum, result) => sum + (result.resolved?.algorithms?.length || 0), 0);
-      summaryBox.textContent = `Probed ${functionCount} experiment function(s), ${algorithmCount} enabled algorithm(s).`;
-      if (saveResult?.path) summaryBox.textContent += ` Source: ${saveResult.path}`;
+      summaryBox.textContent = saveResult?.path ? `Source: ${saveResult.path}` : '';
 
       for (const result of results) {
         const section = document.createElement('section');
@@ -4352,6 +4456,7 @@ HTML = r"""<!doctype html>
         details.textContent = `System ${result.experiment?.system || 'unknown'}; ${result.resolved?.algorithms?.length || 0} enabled algorithm(s).`;
         sectionHeader.appendChild(details);
         section.appendChild(sectionHeader);
+        section.appendChild(renderProbeInputs(result));
 
         const list = document.createElement('div');
         list.className = 'probe-algorithm-list';
@@ -4368,23 +4473,12 @@ HTML = r"""<!doctype html>
           const detailRow = document.createElement('div');
           detailRow.className = 'probe-detail-row';
           detailRow.appendChild(renderProbeSettings(algorithm));
-          detailRow.appendChild(renderProbeRawJson(algorithm));
           row.appendChild(detailRow);
           list.appendChild(row);
         }
         section.appendChild(list);
         root.appendChild(section);
       }
-
-      const raw = document.createElement('details');
-      raw.className = 'action-json';
-      const summary = document.createElement('summary');
-      summary.textContent = 'Probe JSON';
-      const pre = document.createElement('pre');
-      pre.textContent = JSON.stringify(results, null, 2);
-      raw.appendChild(summary);
-      raw.appendChild(pre);
-      root.appendChild(raw);
       box.appendChild(root);
     }
     function isCommandResult(value) {
@@ -6058,7 +6152,7 @@ HTML = r"""<!doctype html>
     }
     async function shareExperiment() {
       if (!state.selected || state.shared) return;
-      await withBusyButton('share-experiment', 'Sharing...', async () => {
+      await withBusyButton('share-experiment', '', async () => {
         const result = await api(`/api/experiments/${encodeURIComponent(state.selected)}/share`, { method: 'POST' });
         document.getElementById('share-modal').classList.remove('hidden');
         document.getElementById('share-summary').textContent = `Shared ${result.share?.experiment_id || state.selected}.`;
@@ -7134,7 +7228,7 @@ def make_handler(app):
 
         def handle_share_post(self, parsed):
             path = parsed.path
-            match = re.match(r"^/api/share/([^/]+)/(parse|plot-artifacts)$", path)
+            match = re.match(r"^/api/share/([^/]+)/(parse|plot-artifacts|probe)$", path)
             if not match:
                 json_response(self, 404, {"error": "not found"})
                 return
@@ -7144,6 +7238,9 @@ def make_handler(app):
             payload = read_json(self)
             if action == "parse":
                 json_response(self, 202, app.parse_action(experiment_id))
+                return
+            if action == "probe":
+                json_response(self, 200, app.probe_payload(experiment_id, payload))
                 return
             json_response(self, 202, app.create_shared_plot_artifacts_action(experiment_id, payload))
 
@@ -7357,33 +7454,7 @@ def make_handler(app):
                         json_response(self, 200, app.command(experiment_id, ["check", "--json"], timeout=60))
                         return
                     if action == "probe":
-                        selector = payload.get("selector")
-                        flags = payload.get("flags") or []
-                        allowed_flags = {
-                            "--algorithms",
-                            "--graphs",
-                            "--topologies",
-                            "--run-properties",
-                            "--jobs",
-                            "--calls",
-                        }
-                        argv = ["probe"]
-                        if selector:
-                            argv.append(str(selector))
-                        for flag in flags:
-                            if flag not in allowed_flags:
-                                raise ValueError(f"unsupported probe flag: {flag}")
-                            argv.append(flag)
-                        result = app.command(experiment_id, argv, timeout=60)
-                        if result["returncode"] == 0 and result["stdout"].strip():
-                            try:
-                                payload = json.loads(result["stdout"])
-                            except json.JSONDecodeError:
-                                payload = {"raw": result["stdout"]}
-                            payload["_command"] = result
-                            json_response(self, 200, payload)
-                        else:
-                            json_response(self, 200, result)
+                        json_response(self, 200, app.probe_payload(experiment_id, payload))
                         return
                     if action == "submit":
                         json_response(self, 202, app.submit_action(experiment_id, payload))
