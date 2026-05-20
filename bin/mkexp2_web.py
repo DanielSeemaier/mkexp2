@@ -2481,6 +2481,20 @@ HTML = r"""<!doctype html>
       gap: 8px;
       min-width: 0;
     }
+    .algorithm-loading {
+      grid-column: 1 / -1;
+      color: var(--muted);
+      justify-content: flex-start;
+    }
+    .loading-spinner {
+      width: 13px;
+      height: 13px;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 999px;
+      animation: spin 0.75s linear infinite;
+      flex: 0 0 auto;
+    }
     .chip {
       display: inline-flex;
       align-items: center;
@@ -3621,6 +3635,10 @@ HTML = r"""<!doctype html>
       selected: null,
       pinnedExperiments: new Set(),
       algorithms: [],
+      algorithmLoading: false,
+      algorithmLoadingFor: '',
+      algorithmLoadSeq: 0,
+      selectionSeq: 0,
       presets: [],
       config: { name_template: '%Y.%m.%d-<name>' },
       openDirs: new Set(),
@@ -5588,11 +5606,15 @@ HTML = r"""<!doctype html>
       const submitButton = document.getElementById('submit');
       if (!submitButton) return;
       const locked = Boolean(state.submitLock?.locked);
-      submitButton.disabled = state.submitBusy || locked || !state.selected;
-      submitButton.classList.toggle('is-busy', state.submitBusy);
+      const loadingAlgorithms = Boolean(state.algorithmLoading && state.algorithmLoadingFor === state.selected);
+      submitButton.disabled = state.submitBusy || loadingAlgorithms || locked || !state.selected;
+      submitButton.classList.toggle('is-busy', state.submitBusy || loadingAlgorithms);
       if (state.submitBusy) {
         submitButton.textContent = 'Submitting...';
         submitButton.title = 'Submitting experiment...';
+      } else if (loadingAlgorithms) {
+        submitButton.textContent = 'Loading algorithms...';
+        submitButton.title = 'Loading submit choices...';
       } else {
         submitButton.textContent = 'Submit Selected';
         submitButton.title = locked ? submitLockMessage() : '';
@@ -5609,6 +5631,60 @@ HTML = r"""<!doctype html>
           dangerSummary.textContent = 'Manual recovery and deletion actions.';
         }
       }
+    }
+    function renderAlgorithmLoading(experimentId) {
+      state.algorithms = [];
+      state.algorithmLoading = true;
+      state.algorithmLoadingFor = experimentId || '';
+      const list = document.getElementById('algorithm-list');
+      list.innerHTML = '';
+      const row = document.createElement('div');
+      row.className = 'chip algorithm-loading';
+      const spinner = document.createElement('span');
+      spinner.className = 'loading-spinner';
+      const text = document.createElement('span');
+      text.textContent = 'Loading algorithms...';
+      row.appendChild(spinner);
+      row.appendChild(text);
+      list.appendChild(row);
+      renderSubmitButton();
+    }
+    function renderAlgorithmChoices(names) {
+      state.algorithms = Array.from(names || []).sort();
+      state.algorithmLoading = false;
+      state.algorithmLoadingFor = '';
+      const list = document.getElementById('algorithm-list');
+      list.innerHTML = '';
+      for (const name of state.algorithms) {
+        const label = document.createElement('label');
+        label.className = 'chip';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = true;
+        checkbox.value = name;
+        const text = document.createElement('span');
+        text.className = 'chip-label';
+        text.textContent = name;
+        text.title = name;
+        label.appendChild(checkbox);
+        label.appendChild(text);
+        list.appendChild(label);
+      }
+      if (!state.algorithms.length) {
+        const empty = document.createElement('div');
+        empty.className = 'csv-empty';
+        empty.textContent = 'No algorithms found.';
+        list.appendChild(empty);
+      }
+      renderSubmitButton();
+    }
+    function clearAlgorithmChoices() {
+      state.algorithms = [];
+      state.algorithmLoading = false;
+      state.algorithmLoadingFor = '';
+      state.algorithmLoadSeq += 1;
+      document.getElementById('algorithm-list').innerHTML = '';
+      renderSubmitButton();
     }
     async function refreshSubmitLock() {
       if (!state.selected) {
@@ -5627,7 +5703,7 @@ HTML = r"""<!doctype html>
     }
     function clearSelectedExperiment() {
       state.selected = null;
-      state.algorithms = [];
+      clearAlgorithmChoices();
       state.results = [];
       state.resultsFor = null;
       state.stats = null;
@@ -5653,7 +5729,6 @@ HTML = r"""<!doctype html>
       state.plotLabelTouched = false;
       clearPlotPdfUrl();
       setView('experiment-view').catch(err => out(String(err)));
-      document.getElementById('algorithm-list').innerHTML = '';
       document.getElementById('selected-title').textContent = 'Experiment';
       document.getElementById('selected-path').textContent = '';
       setEditorValue('');
@@ -5805,7 +5880,9 @@ HTML = r"""<!doctype html>
       renderProgress(result);
     }
     async function selectExperiment(id) {
+      const selectionId = ++state.selectionSeq;
       state.selected = id;
+      state.algorithmLoadSeq += 1;
       state.results = [];
       state.resultsFor = null;
       state.stats = null;
@@ -5837,17 +5914,19 @@ HTML = r"""<!doctype html>
       renderLogsWorkspace();
       renderSubmitLock({ locked: false });
       renderProgress(null);
+      renderAlgorithmLoading(id);
       document.getElementById('probe-summary').textContent = 'No probe loaded.';
       document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
       openExperimentAncestors(id);
       renderExperimentsList();
       const data = await api(`/api/experiments/${encodeURIComponent(id)}/experiment`);
+      if (state.selected !== id || state.selectionSeq !== selectionId) return;
       clearTransientOutput();
       document.getElementById('selected-title').textContent = id;
       document.getElementById('selected-path').textContent = data.path;
       setEditorValue(data.experiment);
       renderSubmitLock(data.submit_lock);
-      await loadAlgorithms();
+      await loadAlgorithms(id);
     }
     async function persistExperiment() {
       if (!state.selected) return;
@@ -5874,14 +5953,17 @@ HTML = r"""<!doctype html>
     }
     async function checkExperiment() {
       if (!state.selected) return;
+      const experimentId = state.selected;
       const button = document.getElementById('check');
       await withBusyButton(button, 'Checking...', async () => {
         out('Saving and checking...');
         const saved = await persistExperiment();
-        const result = await api(`/api/experiments/${encodeURIComponent(state.selected)}/check`, { method: 'POST' });
+        if (state.selected !== experimentId) return;
+        const result = await api(`/api/experiments/${encodeURIComponent(experimentId)}/check`, { method: 'POST' });
+        if (state.selected !== experimentId) return;
         renderCheckResult(result, saved);
         try {
-          await loadAlgorithms();
+          await loadAlgorithms(experimentId);
         } catch (err) {
           out(`Algorithm refresh failed after check: ${String(err)}`);
         }
@@ -5889,62 +5971,68 @@ HTML = r"""<!doctype html>
     }
     async function probeExperiment() {
       if (!state.selected) return;
+      const experimentId = state.selected;
       await withBusyButton('probe-run', 'Running...', async () => {
         document.getElementById('probe-summary').textContent = 'Running mkexp2 probe...';
         document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Running mkexp2 probe...</div>';
-        const listing = await api(`/api/experiments/${encodeURIComponent(state.selected)}/probe`, {
+        const listing = await api(`/api/experiments/${encodeURIComponent(experimentId)}/probe`, {
           method: 'POST',
           body: JSON.stringify({})
         });
+        if (state.selected !== experimentId) return;
         const results = [];
         for (const item of listing.experiments || []) {
-          const detail = await api(`/api/experiments/${encodeURIComponent(state.selected)}/probe`, {
+          const detail = await api(`/api/experiments/${encodeURIComponent(experimentId)}/probe`, {
             method: 'POST',
             body: JSON.stringify({ selector: item.name })
           });
+          if (state.selected !== experimentId) return;
           results.push(detail);
         }
         renderProbeResult(results, null);
-        await loadAlgorithms();
+        await loadAlgorithms(experimentId);
       });
     }
-    async function loadAlgorithms() {
-      state.algorithms = [];
-      const list = document.getElementById('algorithm-list');
-      list.innerHTML = '';
-      if (!state.selected) return;
-      const probe = await api(`/api/experiments/${encodeURIComponent(state.selected)}/probe`, {
-        method: 'POST',
-        body: JSON.stringify({})
-      });
-      const experiments = probe.experiments || [];
-      const names = new Set();
-      for (const item of experiments) {
-        const details = await api(`/api/experiments/${encodeURIComponent(state.selected)}/probe`, {
+    async function loadAlgorithms(experimentId = state.selected) {
+      if (!experimentId) return;
+      const loadId = ++state.algorithmLoadSeq;
+      const isCurrent = () => state.selected === experimentId && state.algorithmLoadSeq === loadId;
+      renderAlgorithmLoading(experimentId);
+      try {
+        const probe = await api(`/api/experiments/${encodeURIComponent(experimentId)}/probe`, {
           method: 'POST',
-          body: JSON.stringify({ selector: item.name, flags: ['--algorithms'] })
+          body: JSON.stringify({})
         });
-        for (const alg of (details.resolved?.algorithms || [])) names.add(alg.name);
-      }
-      state.algorithms = Array.from(names).sort();
-      for (const name of state.algorithms) {
-        const label = document.createElement('label');
-        label.className = 'chip';
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.checked = true;
-        checkbox.value = name;
-        const text = document.createElement('span');
-        text.className = 'chip-label';
-        text.textContent = name;
-        text.title = name;
-        label.appendChild(checkbox);
-        label.appendChild(text);
-        list.appendChild(label);
+        if (!isCurrent()) return;
+        const experiments = probe.experiments || [];
+        const names = new Set();
+        for (const item of experiments) {
+          const details = await api(`/api/experiments/${encodeURIComponent(experimentId)}/probe`, {
+            method: 'POST',
+            body: JSON.stringify({ selector: item.name, flags: ['--algorithms'] })
+          });
+          if (!isCurrent()) return;
+          for (const alg of (details.resolved?.algorithms || [])) names.add(alg.name);
+        }
+        if (!isCurrent()) return;
+        renderAlgorithmChoices(names);
+      } catch (err) {
+        if (!isCurrent()) return;
+        state.algorithmLoading = false;
+        state.algorithmLoadingFor = '';
+        const list = document.getElementById('algorithm-list');
+        list.innerHTML = '<div class="csv-empty status-bad">Algorithm loading failed.</div>';
+        renderSubmitButton();
+        throw err;
       }
     }
     async function submitExperiment(force = false) {
       if (!state.selected) return;
+      if (state.algorithmLoading) {
+        out('Wait for algorithm loading to finish before submitting.');
+        renderSubmitButton();
+        return;
+      }
       if (state.submitLock?.locked) {
         renderSubmitButton();
         return;
