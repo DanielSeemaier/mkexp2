@@ -582,6 +582,13 @@ class Mkexp2WebApp:
             raise ValueError(f"experiment is archived: {experiment_id}")
         return self.experiment_path(experiment_id)
 
+    def validate_visible_experiment_id(self, experiment_id):
+        parts = str(experiment_id or "").split("/")
+        if any(part in EXPERIMENT_SKIP_DIRS or part.startswith(".") for part in parts):
+            raise ValueError("experiment id uses a reserved or hidden path component")
+        if self.is_archived_experiment_id(experiment_id):
+            raise ValueError(f"experiment name cannot end with {ARCHIVE_SUFFIX}")
+
     def _git_experiment_files(self):
         tracked = run_command(
             ["git", "ls-files", "-z", "--", "Experiment", "*/Experiment"],
@@ -760,8 +767,7 @@ class Mkexp2WebApp:
         name = payload.get("name") or "experiment"
         template = payload.get("name_template") or self.name_template
         experiment_id = render_name_template(template, name)
-        if self.is_archived_experiment_id(experiment_id):
-            raise ValueError(f"experiment name cannot end with {ARCHIVE_SUFFIX}")
+        self.validate_visible_experiment_id(experiment_id)
         path = self.experiment_path(experiment_id)
         if path.exists():
             raise ValueError(f"experiment already exists: {experiment_id}")
@@ -860,6 +866,41 @@ class Mkexp2WebApp:
         if experiment_id in pins:
             self.write_pins([item for item in pins if item != experiment_id])
         return {"deleted": True, "id": experiment_id, "path": str(path)}
+
+    def rename_experiment(self, experiment_id, payload):
+        path = self.active_experiment_path(experiment_id)
+        known = {experiment["id"] for experiment in self.list_experiments(force=True)}
+        if experiment_id not in known:
+            raise ValueError(f"experiment not found: {experiment_id}")
+        if not path.is_dir() or not (path / "Experiment").is_file():
+            raise ValueError(f"experiment not found: {experiment_id}")
+        if self.submit_lock(experiment_id).get("locked"):
+            raise ValueError("cannot rename an experiment while submit is locked")
+
+        new_id = str(payload.get("new_id") or payload.get("id") or "").strip().strip("/")
+        if not new_id:
+            raise ValueError("new_id is required")
+        self.validate_visible_experiment_id(new_id)
+        target_path = self.experiment_path(new_id)
+        if target_path == path:
+            raise ValueError("new experiment id is unchanged")
+        if path in target_path.parents:
+            raise ValueError("rename target cannot be inside the experiment directory")
+        if target_path.exists():
+            raise ValueError(f"rename target already exists: {new_id}")
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        path.rename(target_path)
+        self.invalidate_experiments_cache()
+        pins = self.read_pins().get("pinned") or []
+        if experiment_id in pins:
+            self.write_pins([new_id if item == experiment_id else item for item in pins])
+        return {
+            "renamed": True,
+            "id": experiment_id,
+            "new_id": new_id,
+            "path": str(path),
+            "new_path": str(target_path),
+        }
 
     def archive_experiment(self, experiment_id):
         path = self.experiment_path(experiment_id)
@@ -3489,12 +3530,13 @@ HTML = r"""<!doctype html>
           <div class="panel-header">
             <div>
               <div class="panel-title">Danger Zone</div>
-              <div id="danger-summary" class="csv-summary">Manual recovery and deletion actions.</div>
+              <div id="danger-summary" class="csv-summary">Manual recovery, rename, and deletion actions.</div>
             </div>
           </div>
           <div class="panel-body">
             <div class="danger-actions">
               <button id="clear-submit-lock">Unlock submit</button>
+              <button id="rename-experiment">Rename Experiment</button>
               <button id="archive-experiment">Archive Experiment</button>
               <button id="delete-experiment" class="danger">Delete Experiment</button>
             </div>
@@ -5621,6 +5663,11 @@ HTML = r"""<!doctype html>
       }
       const clearButton = document.getElementById('clear-submit-lock');
       if (clearButton) clearButton.disabled = !locked || !state.selected;
+      const renameButton = document.getElementById('rename-experiment');
+      if (renameButton) {
+        renameButton.disabled = locked || !state.selected;
+        renameButton.title = locked ? 'Cannot rename while submit is locked.' : '';
+      }
       const archiveButton = document.getElementById('archive-experiment');
       if (archiveButton) archiveButton.disabled = !state.selected;
       const dangerSummary = document.getElementById('danger-summary');
@@ -5628,7 +5675,7 @@ HTML = r"""<!doctype html>
         if (locked) {
           dangerSummary.textContent = `${submitLockMessage()}.`;
         } else {
-          dangerSummary.textContent = 'Manual recovery and deletion actions.';
+          dangerSummary.textContent = 'Manual recovery, rename, and deletion actions.';
         }
       }
     }
@@ -5754,6 +5801,28 @@ HTML = r"""<!doctype html>
           refreshExperiments({ force: true }),
           loadArchivedExperiments({ force: true }).catch(err => out(String(err)))
         ]);
+      });
+    }
+    async function renameExperiment() {
+      if (!state.selected) return;
+      if (state.submitLock?.locked) {
+        alert('Cannot rename while submit is locked.');
+        renderSubmitButton();
+        return;
+      }
+      const id = state.selected;
+      const newId = prompt('New experiment path:', id);
+      if (newId === null) return;
+      const trimmed = newId.trim().replace(/^\/+|\/+$/g, '');
+      if (!trimmed || trimmed === id) return;
+      const button = document.getElementById('rename-experiment');
+      await withBusyButton(button, 'Renaming...', async () => {
+        const result = await api(`/api/experiments/${encodeURIComponent(id)}/rename`, {
+          method: 'POST',
+          body: JSON.stringify({ new_id: trimmed })
+        });
+        await refreshExperiments({ force: true });
+        await selectExperiment(result.new_id);
       });
     }
     async function deleteExperiment() {
@@ -6642,6 +6711,7 @@ HTML = r"""<!doctype html>
     document.getElementById('probe-run').onclick = probeExperiment;
     document.getElementById('submit').onclick = submitExperiment;
     document.getElementById('clear-submit-lock').onclick = clearSubmitLock;
+    document.getElementById('rename-experiment').onclick = renameExperiment;
     document.getElementById('archive-experiment').onclick = archiveExperiment;
     document.getElementById('delete-experiment').onclick = deleteExperiment;
     document.getElementById('refresh-progress').onclick = () => withBusyButton('refresh-progress', '', () => loadProgress()).catch(err => out(String(err)));
@@ -6862,6 +6932,11 @@ def make_handler(app):
                     return
                 if path == "/api/pins":
                     json_response(self, 200, app.write_pins(payload.get("pinned") or []))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/rename$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    json_response(self, 200, app.rename_experiment(experiment_id, payload))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/(archive|unarchive)$", path)
                 if match:

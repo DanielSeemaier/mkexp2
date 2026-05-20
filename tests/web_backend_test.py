@@ -271,6 +271,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("const PLOT_RELOAD_DELAY_MS = 5000", mkexp2_web.HTML)
         self.assertIn("if (action?.status === 'running')", mkexp2_web.HTML)
         self.assertIn('id="clear-submit-lock"', mkexp2_web.HTML)
+        self.assertIn('id="rename-experiment"', mkexp2_web.HTML)
         self.assertIn('id="delete-experiment"', mkexp2_web.HTML)
         self.assertIn('id="archive-open"', mkexp2_web.HTML)
         self.assertIn('aria-label="Archived experiments"', mkexp2_web.HTML)
@@ -286,6 +287,9 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("margin-top: 14px;", mkexp2_web.HTML)
         self.assertIn("Type the full experiment name to delete it", mkexp2_web.HTML)
         self.assertIn("function renderSubmitButton", mkexp2_web.HTML)
+        self.assertIn("async function renameExperiment", mkexp2_web.HTML)
+        self.assertIn("/rename", mkexp2_web.HTML)
+        self.assertIn("Cannot rename while submit is locked.", mkexp2_web.HTML)
         self.assertIn("state.submitBusy", mkexp2_web.HTML)
         self.assertIn("algorithmLoading", mkexp2_web.HTML)
         self.assertIn("selectionSeq", mkexp2_web.HTML)
@@ -577,6 +581,48 @@ class WebBackendTest(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 app.delete_experiment("2026/exp")
+
+    def test_rename_experiment_moves_directory_and_updates_pins(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "2026" / "exp"
+            exp.mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            other = repo / "other"
+            other.mkdir()
+            (other / "Experiment").write_text("ExperimentY() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+            app.write_pins(["2026/exp", "other"])
+
+            renamed = app.rename_experiment("2026/exp", {"new_id": "2026/renamed"})
+            self.assertTrue(renamed["renamed"])
+            self.assertEqual(renamed["new_id"], "2026/renamed")
+            self.assertFalse(exp.exists())
+            self.assertTrue((repo / "2026" / "renamed" / "Experiment").is_file())
+            self.assertEqual([item["id"] for item in app.list_experiments(force=True)], ["2026/renamed", "other"])
+            self.assertEqual(app.read_pins()["pinned"], ["2026/renamed", "other"])
+
+    def test_rename_experiment_rejects_locks_collisions_and_bad_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            for path in [repo / "exp", repo / "target"]:
+                path.mkdir()
+                (path / "Experiment").write_text("ExperimentX() { :; }\n")
+            (repo / "exp" / ".mkexp2").mkdir()
+            (repo / "exp" / ".mkexp2" / "submit.lock").write_text("started_at=now\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            with self.assertRaises(ValueError):
+                app.rename_experiment("exp", {"new_id": "new"})
+            (repo / "exp" / ".mkexp2" / "submit.lock").unlink()
+            with self.assertRaises(ValueError):
+                app.rename_experiment("exp", {"new_id": "target"})
+            with self.assertRaises(ValueError):
+                app.rename_experiment("exp", {"new_id": "../escape"})
+            with self.assertRaises(ValueError):
+                app.rename_experiment("exp", {"new_id": "exp.archived"})
+            with self.assertRaises(ValueError):
+                app.rename_experiment("exp", {"new_id": ".hidden/exp"})
 
     def test_archive_and_unarchive_experiment_renames_leaf_and_updates_pins(self):
         with tempfile.TemporaryDirectory() as tmp:

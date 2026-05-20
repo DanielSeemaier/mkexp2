@@ -395,6 +395,8 @@ The UI can:
   persisted server-side in `.mkexp2/web-pins.json` under the configured
   experiment repo
 - resize the sidebar; the chosen width is stored in browser local storage
+- rename experiments by moving the experiment directory inside the repo; renames
+  are rejected while the experiment has `.mkexp2/submit.lock`
 - archive experiments by renaming the experiment directory leaf to
   `<name>.archived`; archived experiments are hidden from the sidebar and can
   be restored from the header archive dialog
