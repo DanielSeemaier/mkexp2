@@ -114,6 +114,17 @@ def iso_from_timestamp(timestamp):
     return _dt.datetime.fromtimestamp(timestamp).isoformat(timespec="seconds")
 
 
+def display_experiment_function_name(function_name):
+    value = str(function_name or "")
+    if value.startswith("Experiment") and len(value) > len("Experiment"):
+        value = value[len("Experiment") :]
+    return value.replace("_", " ") or str(function_name or "Experiment")
+
+
+def percent(done, total):
+    return int(done * 100 / total) if total else 0
+
+
 def run_command(argv, cwd=None, timeout=60):
     started = time.time()
     try:
@@ -919,6 +930,7 @@ class Mkexp2WebApp:
             "--run-properties",
             "--jobs",
             "--calls",
+            "--all",
         }
         argv = ["probe"]
         if selector:
@@ -1099,6 +1111,10 @@ class Mkexp2WebApp:
         }
 
     def progress(self, experiment_id):
+        fast = self.progress_from_metadata(experiment_id)
+        if fast is not None:
+            return fast
+
         result = self.command(experiment_id, ["progress", "--json"], timeout=60)
         result["stdout"] = strip_ansi(result.get("stdout", ""))
         result["stderr"] = strip_ansi(result.get("stderr", ""))
@@ -1111,6 +1127,122 @@ class Mkexp2WebApp:
         return {
             "ok": result["returncode"] == 0,
             "progress": result,
+            "progress_json": progress_json,
+            "submit_lock": self.submit_lock(experiment_id),
+        }
+
+    def progress_from_metadata(self, experiment_id):
+        started = time.time()
+        experiment_path = self.active_experiment_path(experiment_id)
+        jobs_dir = experiment_path / "jobs"
+        if not jobs_dir.is_dir():
+            return None
+        meta_files = sorted(jobs_dir.glob("*.cmds.meta.tsv"))
+        if not meta_files:
+            return None
+
+        experiment_order = []
+        algorithm_order = {}
+        counts = {}
+        expected_logs = []
+        try:
+            for meta_file in meta_files:
+                with meta_file.open("r", encoding="utf-8") as handle:
+                    for line in handle:
+                        parts = line.rstrip("\n").split("\t")
+                        if len(parts) < 6:
+                            continue
+                        algorithm = parts[1]
+                        function_name = parts[3] or "Experiment"
+                        log_file = parts[5]
+                        if not algorithm or not log_file:
+                            continue
+                        if function_name not in counts:
+                            counts[function_name] = {}
+                            experiment_order.append(function_name)
+                            algorithm_order[function_name] = []
+                        if algorithm not in counts[function_name]:
+                            counts[function_name][algorithm] = {"done": 0, "total": 0}
+                            algorithm_order[function_name].append(algorithm)
+                        counts[function_name][algorithm]["total"] += 1
+                        log_path = Path(log_file)
+                        if not log_path.is_absolute():
+                            log_path = experiment_path / log_path
+                        expected_logs.append((function_name, algorithm, (
+                            os.path.abspath(str(log_path)),
+                            os.path.realpath(str(log_path)),
+                        )))
+        except OSError:
+            return None
+
+        if not expected_logs:
+            return None
+
+        existing_logs = set()
+        logs_dir = experiment_path / "logs"
+        if logs_dir.is_dir():
+            for dirpath, _, filenames in os.walk(logs_dir):
+                for filename in filenames:
+                    path = os.path.join(dirpath, filename)
+                    existing_logs.add(os.path.abspath(path))
+                    existing_logs.add(os.path.realpath(path))
+
+        for function_name, algorithm, log_paths in expected_logs:
+            if any(log_path in existing_logs for log_path in log_paths):
+                counts[function_name][algorithm]["done"] += 1
+
+        experiments = []
+        all_done = 0
+        all_total = 0
+        for function_name in experiment_order:
+            algorithms = []
+            exp_done = 0
+            exp_total = 0
+            for algorithm in algorithm_order.get(function_name, []):
+                item = counts[function_name][algorithm]
+                done = item["done"]
+                total = item["total"]
+                exp_done += done
+                exp_total += total
+                algorithms.append({
+                    "name": algorithm,
+                    "done": done,
+                    "total": total,
+                    "percent": percent(done, total),
+                    "complete": total > 0 and done >= total,
+                })
+            all_done += exp_done
+            all_total += exp_total
+            experiments.append({
+                "name": display_experiment_function_name(function_name),
+                "function": function_name,
+                "done": exp_done,
+                "total": exp_total,
+                "percent": percent(exp_done, exp_total),
+                "complete": exp_total > 0 and exp_done >= exp_total,
+                "algorithms": algorithms,
+            })
+
+        progress_json = {
+            "ok": True,
+            "done": all_done,
+            "total": all_total,
+            "percent": percent(all_done, all_total),
+            "complete": all_total > 0 and all_done >= all_total,
+            "experiments": experiments,
+        }
+        command = {
+            "argv": ["metadata-progress"],
+            "cwd": str(experiment_path),
+            "returncode": 0,
+            "stdout": json.dumps(progress_json, separators=(",", ":")),
+            "stderr": "",
+            "elapsed_seconds": round(time.time() - started, 3),
+            "timed_out": False,
+        }
+        return {
+            "ok": True,
+            "progress": command,
             "progress_json": progress_json,
             "submit_lock": self.submit_lock(experiment_id),
         }
@@ -6759,18 +6891,13 @@ HTML = r"""<!doctype html>
       try {
         const probe = await api(`/api/experiments/${encodeURIComponent(experimentId)}/probe`, {
           method: 'POST',
-          body: JSON.stringify({})
+          body: JSON.stringify({ flags: ['--all', '--algorithms'] })
         });
         if (!isCurrent()) return;
         const experiments = probe.experiments || [];
         const names = new Set();
         for (const item of experiments) {
-          const details = await api(`/api/experiments/${encodeURIComponent(experimentId)}/probe`, {
-            method: 'POST',
-            body: JSON.stringify({ selector: item.name, flags: ['--algorithms'] })
-          });
-          if (!isCurrent()) return;
-          for (const alg of (details.resolved?.algorithms || [])) names.add(alg.name);
+          for (const alg of (item.resolved?.algorithms || [])) names.add(alg.name);
         }
         if (!isCurrent()) return;
         renderAlgorithmChoices(names);

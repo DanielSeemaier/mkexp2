@@ -109,6 +109,7 @@ Inspect experiments as JSON:
 mkexp2 probe
 mkexp2 probe Baseline
 mkexp2 probe Baseline --algorithms
+mkexp2 probe --all --algorithms
 mkexp2 probe Baseline --jobs
 mkexp2 probe Baseline --calls
 mkexp2 probe --presets
@@ -299,6 +300,7 @@ Example:
 - Probe support:
   - `mkexp2 probe` lists all `Experiment*` functions as JSON
   - `mkexp2 probe <experiment>` returns declared and resolved experiment state as JSON
+  - `mkexp2 probe --all [aspect flags]` returns one payload per experiment function in a single process
   - selectors accept either the display name (`Baseline`) or function name (`ExperimentBaseline`)
   - aspect flags narrow the payload:
     - `--algorithms`
@@ -307,6 +309,7 @@ Example:
     - `--run-properties`
     - `--jobs`
     - `--calls`
+  - algorithm/graph/topology/run-property probes avoid full run-matrix expansion; jobs/calls and the default detailed probe still expand
   - `--property <Algorithm>` prints the resolved property map for that algorithm as a JSON object
   - `--property <Algorithm>.<property>` prints a single resolved algorithm property as JSON
 - `mkexp2 init` adds `.mkexp2/`, `logs/*`, `!logs/install.md`, and `slurm/` to `.gitignore`; CSV results, `plots.pdf`, and the install log are intentionally not ignored.
@@ -434,9 +437,7 @@ The UI can:
   succeeds
 - view stats below Results, backed by `mkexp2 stats --json`, currently showing
   geometric-mean cut and geometric-mean time per algorithm from parsed CSV files
-- refresh run progress from the Experiment page by running `mkexp2 progress
-  --json`; after progress has been loaded, incomplete runs auto-refresh every
-  15 seconds, while `.mkexp2/submit.lock` keeps the Submit button disabled
+- refresh run progress from the Experiment page; the web backend uses generated `jobs/*.cmds.meta.tsv` files when available and falls back to `mkexp2 progress --json`; after progress has been loaded, incomplete runs auto-refresh every 15 seconds, while `.mkexp2/submit.lock` keeps the Submit button disabled
 - clear `.mkexp2/submit.lock` from the Submit panel to recover from crashed or
   abandoned submissions
 - auto-load and render `logs/install.md` from the Install Log tab, with a

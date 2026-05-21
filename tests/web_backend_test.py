@@ -250,6 +250,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("async function persistExperiment", mkexp2_web.HTML)
         self.assertIn("function renderCheckResult", mkexp2_web.HTML)
         self.assertIn("function parseCheckJson", mkexp2_web.HTML)
+        self.assertIn("flags: ['--all', '--algorithms']", mkexp2_web.HTML)
         self.assertIn('id="check-indicator"', mkexp2_web.HTML)
         self.assertIn("function setCheckIndicator", mkexp2_web.HTML)
         self.assertIn("function clearCheckIndicator", mkexp2_web.HTML)
@@ -890,6 +891,43 @@ class WebBackendTest(unittest.TestCase):
         self.assertFalse(result["progress_json"]["complete"])
         self.assertEqual(calls, [(["/fake/mkexp2", "progress", "--json"], str((repo / "exp").resolve()), 60)])
 
+    def test_progress_uses_generated_metadata_when_available(self):
+        original_run_command = mkexp2_web.run_command
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            raise AssertionError("metadata progress should not invoke mkexp2")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            exp.mkdir()
+            (exp / "Experiment").write_text("ExperimentMeta() { :; }\n")
+            (exp / "jobs").mkdir()
+            (exp / "logs" / "Fast" / "ExperimentMeta").mkdir(parents=True)
+            existing = exp / "logs" / "Fast" / "ExperimentMeta" / "a.log"
+            existing.write_text("done\n")
+            missing = exp / "logs" / "Slow" / "ExperimentMeta" / "b.log"
+            (exp / "jobs" / "ExperimentMeta__1x1x1.cmds.meta.tsv").write_text(
+                f"0\tFast\tMock\tExperimentMeta\t1x1x1\t{existing}\n"
+                f"1\tSlow\tMock\tExperimentMeta\t1x1x1\t{missing}\n"
+            )
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+            mkexp2_web.run_command = fake_run_command
+            try:
+                result = app.progress("exp")
+            finally:
+                mkexp2_web.run_command = original_run_command
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["progress"]["argv"], ["metadata-progress"])
+        self.assertEqual(result["progress_json"]["done"], 1)
+        self.assertEqual(result["progress_json"]["total"], 2)
+        self.assertEqual(result["progress_json"]["experiments"][0]["function"], "ExperimentMeta")
+        self.assertEqual(result["progress_json"]["experiments"][0]["algorithms"][0]["name"], "Fast")
+        self.assertEqual(result["progress_json"]["experiments"][0]["algorithms"][0]["done"], 1)
+        self.assertEqual(result["progress_json"]["experiments"][0]["algorithms"][1]["name"], "Slow")
+        self.assertEqual(result["progress_json"]["experiments"][0]["algorithms"][1]["done"], 0)
+
     def test_probe_payload_uses_json_argv_array_and_parses_payload(self):
         calls = []
         original_run_command = mkexp2_web.run_command
@@ -920,6 +958,33 @@ class WebBackendTest(unittest.TestCase):
         self.assertEqual(result["experiments"][0]["name"], "ExperimentX")
         self.assertIn("_command", result)
         self.assertEqual(calls, [(["/fake/mkexp2", "probe", "ExperimentX", "--algorithms"], str((repo / "exp").resolve()), 60)])
+
+    def test_probe_payload_all_uses_single_bulk_argv(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            calls.append((list(argv), str(cwd) if cwd else None, timeout))
+            return {
+                "returncode": 0,
+                "stdout": '{"experiments":[{"experiment":{"name":"A"},"resolved":{"algorithms":[{"name":"Fast"}]}}]}\n',
+                "stderr": "",
+                "elapsed_seconds": 0.1,
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "exp").mkdir()
+            (repo / "exp" / "Experiment").write_text("ExperimentA() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+            mkexp2_web.run_command = fake_run_command
+            try:
+                result = app.probe_payload("exp", {"flags": ["--all", "--algorithms"]})
+            finally:
+                mkexp2_web.run_command = original_run_command
+
+        self.assertEqual(result["experiments"][0]["resolved"]["algorithms"][0]["name"], "Fast")
+        self.assertEqual(calls, [(["/fake/mkexp2", "probe", "--all", "--algorithms"], str((repo / "exp").resolve()), 60)])
 
     def test_stats_uses_json_argv_array_and_parses_payload(self):
         calls = []

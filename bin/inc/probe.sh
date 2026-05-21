@@ -655,6 +655,66 @@ ProbePrintExperimentList() {
   printf ']}'
 }
 
+ProbePrepareExperimentContext() {
+  local selected_fn="$1"
+  ResetExpandedModel
+  EXPAND_EXPERIMENT_NAME="$selected_fn"
+  EXPAND_EXPERIMENT_LABEL="$(SafeName "$selected_fn")"
+  EXPAND_EXPERIMENT_DISPLAY="$(DisplayExperimentName "$selected_fn")"
+}
+
+ProbeAspectCount() {
+  printf '%d' $((MKEXP2_PROBE_ALGORITHMS + MKEXP2_PROBE_GRAPHS + MKEXP2_PROBE_TOPOLOGIES + MKEXP2_PROBE_RUN_PROPERTIES + MKEXP2_PROBE_JOBS + MKEXP2_PROBE_CALLS))
+}
+
+ProbeNeedsExpansion() {
+  local aspect_count="$1"
+  if (( aspect_count == 0 )); then
+    return 0
+  fi
+  if (( MKEXP2_PROBE_JOBS || MKEXP2_PROBE_CALLS )); then
+    return 0
+  fi
+  return 1
+}
+
+ProbePrintSelectedExperiment() {
+  local experiment_file="$1"
+  local selected_fn="$2"
+  local aspect_count=0
+
+  LoadExperimentFunctionState "$experiment_file" "$selected_fn"
+  ProbePrepareExperimentContext "$selected_fn"
+
+  aspect_count=$(ProbeAspectCount)
+  if ProbeNeedsExpansion "$aspect_count"; then
+    ExpandCurrentExperiment "$selected_fn" "probe"
+  fi
+
+  if [[ -n "$MKEXP2_PROBE_PROPERTY" ]]; then
+    ProbePrintPropertyValue "$MKEXP2_PROBE_PROPERTY"
+    return $?
+  fi
+
+  ProbePrintExperimentJson "$experiment_file"
+}
+
+ProbePrintAllExperimentsJson() {
+  local experiment_file="$1"
+  shift
+  local -a experiment_functions=("$@")
+  local fn=""
+  local sep=""
+
+  printf '{"experiments":['
+  for fn in "${experiment_functions[@]}"; do
+    printf '%s' "$sep"
+    ProbePrintSelectedExperiment "$experiment_file" "$fn"
+    sep=","
+  done
+  printf ']}\n'
+}
+
 ProbePrintPresetList() {
   local -a names=()
   local file=""
@@ -792,6 +852,11 @@ ProbeCommand() {
   local -a experiment_functions=("$@")
   local selected_fn=""
 
+  if (( MKEXP2_PROBE_ALL )); then
+    ProbePrintAllExperimentsJson "$experiment_file" "${experiment_functions[@]}"
+    return $?
+  fi
+
   if [[ -z "$MKEXP2_PROBE_TARGET" ]]; then
     ProbePrintExperimentList "${experiment_functions[@]}"
     printf '\n'
@@ -799,14 +864,6 @@ ProbeCommand() {
   fi
 
   selected_fn=$(ProbeResolveExperimentFunction "$MKEXP2_PROBE_TARGET" "${experiment_functions[@]}") || return 1
-  LoadExperimentFunctionState "$experiment_file" "$selected_fn"
-  ExpandCurrentExperiment "$selected_fn" "probe"
-
-  if [[ -n "$MKEXP2_PROBE_PROPERTY" ]]; then
-    ProbePrintPropertyValue "$MKEXP2_PROBE_PROPERTY"
-    return $?
-  fi
-
-  ProbePrintExperimentJson "$experiment_file"
+  ProbePrintSelectedExperiment "$experiment_file" "$selected_fn"
   printf '\n'
 }

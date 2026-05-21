@@ -36,6 +36,7 @@ Options:
   --run-properties           With `probe`, return resolved run properties only
   --jobs                     With `probe`, return detailed job metadata
   --calls                    With `probe`, return expanded call details
+  --all                      With `probe`, apply aspect flags to every experiment function
   --presets                  With `probe`, return init presets as JSON
   --json                     With `check`, `progress`, `stats`, or `plot --list`, return structured JSON
   --property A[.B]           With `probe`, print algorithm properties or one resolved property
@@ -448,6 +449,10 @@ ParseCli() {
         MKEXP2_PROBE_CALLS=1
         shift
         ;;
+      --all)
+        MKEXP2_PROBE_ALL=1
+        shift
+        ;;
       --presets)
         MKEXP2_PROBE_PRESETS=1
         shift
@@ -757,13 +762,17 @@ ParseCli() {
         EchoFatal "probe --presets cannot be combined with an experiment selector"
         exit 1
       fi
-      if (( probe_aspect_count > 0 )) || [[ -n "$MKEXP2_PROBE_PROPERTY" ]]; then
+      if (( probe_aspect_count > 0 )) || [[ -n "$MKEXP2_PROBE_PROPERTY" ]] || (( MKEXP2_PROBE_ALL )); then
         EchoFatal "probe --presets cannot be combined with experiment aspect flags"
         exit 1
       fi
     fi
-    if (( probe_aspect_count > 0 )) && [[ -z "$MKEXP2_PROBE_TARGET" ]]; then
+    if (( probe_aspect_count > 0 )) && [[ -z "$MKEXP2_PROBE_TARGET" ]] && (( ! MKEXP2_PROBE_ALL )); then
       EchoFatal "probe aspect flags require an experiment selector"
+      exit 1
+    fi
+    if (( MKEXP2_PROBE_ALL )) && [[ -n "$MKEXP2_PROBE_TARGET" ]]; then
+      EchoFatal "probe --all cannot be combined with an experiment selector"
       exit 1
     fi
     if [[ -n "$MKEXP2_PROBE_PROPERTY" && -z "$MKEXP2_PROBE_TARGET" ]]; then
@@ -779,7 +788,7 @@ ParseCli() {
     exit 1
   fi
 
-  if (( MKEXP2_PROBE_ALGORITHMS || MKEXP2_PROBE_GRAPHS || MKEXP2_PROBE_TOPOLOGIES || MKEXP2_PROBE_RUN_PROPERTIES || MKEXP2_PROBE_JOBS || MKEXP2_PROBE_CALLS )) && [[ "$MKEXP2_MODE" != "probe" ]]; then
+  if (( MKEXP2_PROBE_ALGORITHMS || MKEXP2_PROBE_GRAPHS || MKEXP2_PROBE_TOPOLOGIES || MKEXP2_PROBE_RUN_PROPERTIES || MKEXP2_PROBE_JOBS || MKEXP2_PROBE_CALLS || MKEXP2_PROBE_ALL )) && [[ "$MKEXP2_MODE" != "probe" ]]; then
     EchoFatal "probe aspect flags can only be used with probe"
     exit 1
   fi
