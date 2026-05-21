@@ -1967,7 +1967,6 @@ HTML = r"""<!doctype html>
     .app.share-mode .danger-zone,
     .app.share-mode #check,
     .app.share-mode #share-experiment,
-    .app.share-mode #download-experiment,
     .app.share-mode #add-plot-source {
       display: none !important;
     }
@@ -6387,7 +6386,7 @@ HTML = r"""<!doctype html>
       });
     }
     async function downloadExperiment() {
-      if (!state.selected || state.shared) return;
+      if (!state.selected) return;
       await withBusyButton('download-experiment', '', async () => {
         const result = await fetchDownload(`/api/experiments/${encodeURIComponent(state.selected)}/download`);
         const url = URL.createObjectURL(result.blob);
@@ -7468,6 +7467,20 @@ def make_handler(app):
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
+                return
+            if tail == "download":
+                archive = app.experiment_archive(experiment_id)
+                archive_path = archive["path"]
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", archive["content_type"])
+                    self.send_header("Content-Length", str(archive_path.stat().st_size))
+                    self.send_header("Content-Disposition", f"attachment; filename=\"{archive['filename']}\"")
+                    self.end_headers()
+                    with archive_path.open("rb") as file:
+                        shutil.copyfileobj(file, self.wfile)
+                finally:
+                    archive_path.unlink(missing_ok=True)
                 return
             match_action = re.match(r"^actions/([^/]+)$", tail)
             if match_action:

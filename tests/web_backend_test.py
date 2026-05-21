@@ -296,7 +296,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("__SHARE_ID__", mkexp2_web.HTML)
         self.assertIn("share-mode", mkexp2_web.HTML)
         self.assertNotIn(".app.share-mode .probe-panel", mkexp2_web.HTML)
-        self.assertIn(".app.share-mode #download-experiment", mkexp2_web.HTML)
+        self.assertNotIn(".app.share-mode #download-experiment", mkexp2_web.HTML)
         self.assertIn(".app.share-mode .editor-shell", mkexp2_web.HTML)
         self.assertIn(".app.share-mode #experiment-editor", mkexp2_web.HTML)
         self.assertIn("background: transparent;", mkexp2_web.HTML)
