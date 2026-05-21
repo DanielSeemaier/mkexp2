@@ -6105,6 +6105,9 @@ HTML = r"""<!doctype html>
       return experimentCreationKey(right) - experimentCreationKey(left)
         || String(left.label || left.id).localeCompare(String(right.label || right.id));
     }
+    function mostRecentExperiment(experiments) {
+      return Array.from(experiments || []).sort(compareExperimentsByCreatedDesc)[0] || null;
+    }
     function experimentTree(experiments) {
       const root = treeNode();
       const sorted = Array.from(experiments).sort((left, right) => left.id.localeCompare(right.id));
@@ -6322,7 +6325,8 @@ HTML = r"""<!doctype html>
       state.pinnedExperiments = new Set(pins.pinned || []);
       renderExperimentsList();
       if (options.selectMostRecent && !state.selected && state.experiments.length) {
-        await selectExperiment(state.experiments[0].id);
+        const latest = mostRecentExperiment(state.experiments);
+        if (latest) await selectExperiment(latest.id);
       }
     }
     async function refreshConfig() {
