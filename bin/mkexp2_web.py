@@ -1349,6 +1349,30 @@ class Mkexp2WebApp:
             "truncated": len(content) > MAX_TEXT_RESPONSE,
         }
 
+    def description(self, experiment_id):
+        path = self.active_experiment_path(experiment_id)
+        description_file = path / "description.md"
+        if not description_file.is_file():
+            return {"exists": False, "path": str(description_file), "content": ""}
+        stat = description_file.stat()
+        content = description_file.read_text(encoding="utf-8", errors="replace")
+        return {
+            "exists": True,
+            "path": str(description_file),
+            "size": stat.st_size,
+            "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+            "content": content[:MAX_TEXT_RESPONSE],
+            "truncated": len(content) > MAX_TEXT_RESPONSE,
+        }
+
+    def write_description(self, experiment_id, content):
+        path = self.active_experiment_path(experiment_id)
+        description_file = path / "description.md"
+        description_file.write_text(str(content or ""), encoding="utf-8")
+        result = self.description(experiment_id)
+        result["saved"] = True
+        return result
+
     def plots_info(self, experiment_id):
         path = self.active_experiment_path(experiment_id)
         pdf = path / "plots.pdf"
@@ -2482,6 +2506,24 @@ HTML = r"""<!doctype html>
       font-size: 12px;
       font-variant-numeric: tabular-nums;
       text-align: right;
+    }
+    .description-body {
+      display: grid;
+      gap: 10px;
+    }
+    .description-editor {
+      min-height: 160px;
+      resize: vertical;
+      font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .description-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .app.share-mode .description-edit-actions {
+      display: none !important;
     }
     .stats-table td:nth-child(n+2),
     .stats-table th:nth-child(n+2) {
@@ -3779,6 +3821,25 @@ HTML = r"""<!doctype html>
                 <div id="progress-output" class="csv-empty">Run progress to count finished log files against expected runs.</div>
               </div>
             </section>
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <div class="panel-title">Description</div>
+                  <div id="description-summary" class="csv-summary">No description loaded.</div>
+                </div>
+                <div class="actions description-edit-actions">
+                  <button id="description-edit">Edit</button>
+                </div>
+              </div>
+              <div class="panel-body description-body">
+                <div id="description-rendered" class="csv-empty">No description yet.</div>
+                <textarea id="description-editor" class="description-editor hidden" spellcheck="true"></textarea>
+                <div id="description-actions" class="description-actions hidden">
+                  <button id="description-cancel">Cancel</button>
+                  <button id="description-save" class="primary">Save</button>
+                </div>
+              </div>
+            </section>
           </div>
         </section>
         <section class="panel probe-panel">
@@ -3991,6 +4052,9 @@ HTML = r"""<!doctype html>
       consoleEntries: [],
       consoleOpen: false,
       progressTimer: null,
+      description: null,
+      descriptionFor: null,
+      descriptionEditing: false,
       activeView: 'experiment-view',
       shared: false,
       shareId: ''
@@ -4899,6 +4963,93 @@ HTML = r"""<!doctype html>
       flushCode();
       flushParagraph();
       flushList();
+    }
+    function renderDescriptionWorkspace() {
+      const summary = document.getElementById('description-summary');
+      const rendered = document.getElementById('description-rendered');
+      const editorNode = document.getElementById('description-editor');
+      const actions = document.getElementById('description-actions');
+      const editButton = document.getElementById('description-edit');
+      if (!state.selected) {
+        state.descriptionEditing = false;
+        summary.textContent = 'No experiment selected.';
+        rendered.className = 'csv-empty';
+        rendered.textContent = 'Select an experiment first.';
+        editorNode.classList.add('hidden');
+        actions.classList.add('hidden');
+        editButton.disabled = true;
+        return;
+      }
+      editButton.disabled = state.descriptionFor !== state.selected || state.shared;
+      if (state.descriptionFor !== state.selected || !state.description) {
+        state.descriptionEditing = false;
+        summary.textContent = 'No description loaded.';
+        rendered.className = 'csv-empty';
+        rendered.textContent = 'Loading description...';
+        editorNode.classList.add('hidden');
+        actions.classList.add('hidden');
+        return;
+      }
+      const content = state.description.content || '';
+      const suffix = state.description.truncated ? ' (truncated)' : '';
+      summary.textContent = state.description.exists
+        ? `description.md, ${state.description.size || 0} bytes, modified ${state.description.modified_at || 'unknown'}${suffix}`
+        : 'description.md does not exist yet.';
+      if (state.descriptionEditing && !state.shared) {
+        rendered.classList.add('hidden');
+        editorNode.classList.remove('hidden');
+        actions.classList.remove('hidden');
+        editButton.disabled = true;
+        return;
+      }
+      editorNode.classList.add('hidden');
+      actions.classList.add('hidden');
+      rendered.classList.remove('hidden');
+      if (content.trim()) {
+        renderMarkdown(content, rendered);
+      } else {
+        rendered.className = 'csv-empty';
+        rendered.textContent = 'No description yet.';
+      }
+    }
+    async function loadDescription() {
+      if (!state.selected) return;
+      const experimentId = state.selected;
+      state.descriptionEditing = false;
+      renderDescriptionWorkspace();
+      const data = await api(`/api/experiments/${encodeURIComponent(experimentId)}/description`);
+      if (state.selected !== experimentId) return;
+      state.description = data;
+      state.descriptionFor = experimentId;
+      renderDescriptionWorkspace();
+    }
+    function editDescription() {
+      if (!state.selected || state.shared || state.descriptionFor !== state.selected) return;
+      const editorNode = document.getElementById('description-editor');
+      editorNode.value = state.description?.content || '';
+      state.descriptionEditing = true;
+      renderDescriptionWorkspace();
+      editorNode.focus();
+    }
+    function cancelDescriptionEdit() {
+      state.descriptionEditing = false;
+      renderDescriptionWorkspace();
+    }
+    async function saveDescription() {
+      if (!state.selected || state.shared) return;
+      const experimentId = state.selected;
+      const description = document.getElementById('description-editor').value;
+      await withBusyButton('description-save', 'Saving...', async () => {
+        const result = await api(`/api/experiments/${encodeURIComponent(experimentId)}/description`, {
+          method: 'PUT',
+          body: JSON.stringify({ description })
+        });
+        if (state.selected !== experimentId) return;
+        state.description = result;
+        state.descriptionFor = experimentId;
+        state.descriptionEditing = false;
+        renderDescriptionWorkspace();
+      });
     }
     function span(className, value) {
       return `<span class="${className}">${esc(value)}</span>`;
@@ -6076,6 +6227,9 @@ HTML = r"""<!doctype html>
       state.compareColumnModes = {};
       state.installLog = null;
       state.installLogFor = null;
+      state.description = null;
+      state.descriptionFor = null;
+      state.descriptionEditing = false;
       state.logsDir = '';
       state.logsListing = null;
       state.logsFor = null;
@@ -6099,6 +6253,7 @@ HTML = r"""<!doctype html>
       renderResultsWorkspace();
       renderStatsWorkspace();
       renderInstallLogWorkspace();
+      renderDescriptionWorkspace();
       renderLogsWorkspace();
       renderSubmitLock({ locked: false });
       renderProgress(null);
@@ -6300,6 +6455,9 @@ HTML = r"""<!doctype html>
       state.compareColumnModes = {};
       state.installLog = null;
       state.installLogFor = null;
+      state.description = null;
+      state.descriptionFor = null;
+      state.descriptionEditing = false;
       state.logsDir = '';
       state.logsListing = null;
       state.logsFor = null;
@@ -6320,6 +6478,7 @@ HTML = r"""<!doctype html>
       renderResultsWorkspace();
       renderStatsWorkspace();
       renderInstallLogWorkspace();
+      renderDescriptionWorkspace();
       renderLogsWorkspace();
       renderSubmitLock({ locked: false });
       renderProgress(null);
@@ -6335,6 +6494,7 @@ HTML = r"""<!doctype html>
       document.getElementById('selected-path').textContent = data.path;
       setEditorValue(data.experiment);
       renderSubmitLock(data.submit_lock);
+      loadDescription().catch(err => out(String(err)));
       await loadAlgorithms(id);
     }
     async function selectSharedExperiment(shareId) {
@@ -6354,6 +6514,7 @@ HTML = r"""<!doctype html>
       setEditorValue(data.experiment);
       renderSubmitLock(data.submit_lock);
       renderProgress(null);
+      loadDescription().catch(err => out(String(err)));
     }
     async function persistExperiment() {
       if (!state.selected) return;
@@ -7070,6 +7231,9 @@ HTML = r"""<!doctype html>
     document.getElementById('console-clear').onclick = clearConsoleLog;
     document.getElementById('check').onclick = checkExperiment;
     document.getElementById('probe-run').onclick = probeExperiment;
+    document.getElementById('description-edit').onclick = editDescription;
+    document.getElementById('description-cancel').onclick = cancelDescriptionEdit;
+    document.getElementById('description-save').onclick = saveDescription;
     document.getElementById('submit').onclick = submitExperiment;
     document.getElementById('clear-submit-lock').onclick = clearSubmitLock;
     document.getElementById('rename-experiment').onclick = renameExperiment;
@@ -7162,6 +7326,9 @@ def make_handler(app):
                 return
             if tail == "progress":
                 json_response(self, 200, app.progress(experiment_id))
+                return
+            if tail == "description":
+                json_response(self, 200, app.description(experiment_id))
                 return
             if tail == "plots":
                 json_response(self, 200, app.plots_info(experiment_id))
@@ -7328,6 +7495,10 @@ def make_handler(app):
                     else:
                         json_response(self, 200, app.progress(experiment_id))
                     return
+                match = re.match(r"^/api/experiments/([^/]+)/description$", path)
+                if match:
+                    json_response(self, 200, app.description(urllib.parse.unquote(match.group(1))))
+                    return
                 match = re.match(r"^/api/experiments/([^/]+)/plots$", path)
                 if match:
                     json_response(self, 200, app.plots_info(urllib.parse.unquote(match.group(1))))
@@ -7486,6 +7657,11 @@ def make_handler(app):
                 payload = read_json(self)
                 if path == "/api/pins":
                     json_response(self, 200, app.write_pins(payload.get("pinned") or []))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/description$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    json_response(self, 200, app.write_description(experiment_id, payload.get("description", "")))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/experiment$", path)
                 if not match:

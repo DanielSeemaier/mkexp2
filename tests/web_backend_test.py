@@ -486,6 +486,22 @@ class WebBackendTest(unittest.TestCase):
         self.assertNotIn(".markdown-doc {\n      border:", mkexp2_web.HTML)
         self.assertIn("cores", mkexp2_web.HTML)
 
+    def test_html_contains_description_panel(self):
+        self.assertIn("Description", mkexp2_web.HTML)
+        self.assertIn('id="description-summary"', mkexp2_web.HTML)
+        self.assertIn('id="description-rendered"', mkexp2_web.HTML)
+        self.assertIn('id="description-editor"', mkexp2_web.HTML)
+        self.assertIn('id="description-edit"', mkexp2_web.HTML)
+        self.assertIn('id="description-save"', mkexp2_web.HTML)
+        self.assertIn('id="description-cancel"', mkexp2_web.HTML)
+        self.assertIn("async function loadDescription", mkexp2_web.HTML)
+        self.assertIn("function renderDescriptionWorkspace", mkexp2_web.HTML)
+        self.assertIn("function editDescription", mkexp2_web.HTML)
+        self.assertIn("async function saveDescription", mkexp2_web.HTML)
+        self.assertIn("/description", mkexp2_web.HTML)
+        self.assertIn("description.md does not exist yet.", mkexp2_web.HTML)
+        self.assertIn(".app.share-mode .description-edit-actions", mkexp2_web.HTML)
+
     def test_install_log_result_handles_missing_and_existing_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -502,6 +518,27 @@ class WebBackendTest(unittest.TestCase):
             existing = app.install_log("exp")
             self.assertTrue(existing["exists"])
             self.assertIn("# mkexp2 install log", existing["content"])
+            self.assertFalse(existing["truncated"])
+
+    def test_description_result_handles_missing_existing_and_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            exp.mkdir()
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            missing = app.description("exp")
+            self.assertFalse(missing["exists"])
+            self.assertTrue(missing["path"].endswith("description.md"))
+
+            saved = app.write_description("exp", "# Why\n\nSome **notes**.\n")
+            self.assertTrue(saved["saved"])
+            self.assertTrue(saved["exists"])
+            self.assertEqual((exp / "description.md").read_text(), "# Why\n\nSome **notes**.\n")
+
+            existing = app.description("exp")
+            self.assertIn("# Why", existing["content"])
             self.assertFalse(existing["truncated"])
 
     def test_plots_info_handles_missing_and_existing_pdf(self):
