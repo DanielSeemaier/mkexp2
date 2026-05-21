@@ -1272,6 +1272,29 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
         self.assertEqual(queue[0]["state"], "PD")
         self.assertEqual(queue[0]["nodelist"], "(Dependency)")
 
+        queue_with_time_limit = mkexp2_web.parse_squeue_table(
+            """             JOBID PARTITION     NAME     USER STATE       TIME TIME_LIMIT  NODES NODELIST(REASON)
+             70819       all submit-l seemaier PENDING       0:00  UNLIMITED      1 (Dependency)
+       70818_[0-87%1]   hellman UecoRoll seemaier PENDING       0:00  UNLIMITED      1 (Resources)
+             70816   hellman mkexp2-i seemaier RUNNING       3:11 365-00:00:00      1 hellman
+"""
+        )
+        self.assertEqual(len(queue_with_time_limit), 3)
+        self.assertEqual(queue_with_time_limit[0]["nodes"], "1")
+        self.assertEqual(queue_with_time_limit[0]["nodelist"], "(Dependency)")
+        self.assertEqual(queue_with_time_limit[0]["time_limit"], "UNLIMITED")
+        self.assertEqual(queue_with_time_limit[1]["job_id"], "70818_[0-87%1]")
+        self.assertEqual(queue_with_time_limit[2]["nodelist"], "hellman")
+
+        queue_delimited = mkexp2_web.parse_squeue_table(
+            "70818_[0-87%1]|hellman|UecoRoll|seemaier|PENDING|0:00|1|(Dependency)\n"
+            "70816|hellman|mkexp2-i|seemaier|RUNNING|3:11|1|hellman\n"
+        )
+        self.assertEqual(len(queue_delimited), 2)
+        self.assertEqual(queue_delimited[0]["job_id"], "70818_[0-87%1]")
+        self.assertEqual(queue_delimited[0]["nodelist"], "(Dependency)")
+        self.assertEqual(queue_delimited[1]["state"], "RUNNING")
+
         sinfo = mkexp2_web.parse_sinfo_nodes("node01|cpu|32/32/0/64|257000|gpu:2|zen4|mix|none\n")
         self.assertEqual(sinfo["node01"]["partition"], "cpu")
         self.assertEqual(sinfo["node01"]["cpu_info"], "32/32/0/64")
@@ -1313,13 +1336,46 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
         self.assertEqual(backus["jobs"][0]["user"], "alice")
         self.assertEqual(backus["jobs"][0]["start_time"], "2026-05-16T15:00:00")
 
+    def test_slurm_status_does_not_create_unassigned_node_for_pending_jobs(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            calls.append(list(argv))
+            if argv[:4] == ["sinfo", "-lN", "-p", "all"]:
+                return {"returncode": 127, "stdout": "", "stderr": "sinfo not found"}
+            if argv == ["squeue", "-h", "-o", mkexp2_web.SQUEUE_NODE_FORMAT]:
+                return {
+                    "returncode": 0,
+                    "stdout": (
+                        "70819||seemaier|submit-l|PENDING|Unknown|0:00\n"
+                        "70818|(Resources)|seemaier|UecoRoll|PENDING|Unknown|0:00\n"
+                        "70816|hellman|seemaier|mkexp2-i|RUNNING|2026-05-21T19:26:00|3:11\n"
+                    ),
+                    "stderr": "",
+                }
+            return {"returncode": 0, "stdout": "", "stderr": ""}
+
+        mkexp2_web.run_command = fake_run_command
+        try:
+            status = mkexp2_web.SlurmStatus().get()
+        finally:
+            mkexp2_web.run_command = original_run_command
+
+        names = [node["name"] for node in status["nodes"]]
+        self.assertNotIn("unassigned", names)
+        self.assertNotIn("(Resources)", names)
+        hellman = next(node for node in status["nodes"] if node["name"] == "hellman")
+        self.assertEqual(len(hellman["jobs"]), 1)
+        self.assertEqual(hellman["jobs"][0]["job_id"], "70816")
+
     def test_squeue_status_falls_back_when_squeue_is_missing(self):
         calls = []
         original_run_command = mkexp2_web.run_command
 
         def fake_run_command(argv, cwd=None, timeout=60):
             calls.append(list(argv))
-            if argv == ["squeue"]:
+            if argv == ["squeue", "-h", "-o", mkexp2_web.SQUEUE_TABLE_FORMAT]:
                 return {"returncode": 127, "stdout": "", "stderr": "squeue not found"}
             return {"returncode": 0, "stdout": "", "stderr": ""}
 
@@ -1329,7 +1385,7 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
         finally:
             mkexp2_web.run_command = original_run_command
 
-        self.assertIn(["squeue"], calls)
+        self.assertIn(["squeue", "-h", "-o", mkexp2_web.SQUEUE_TABLE_FORMAT], calls)
         self.assertEqual(queue["source"], "fallback sample: squeue not installed")
         self.assertEqual(len(queue["rows"]), 3)
         self.assertEqual(queue["rows"][1]["partition"], "diffie")
@@ -1341,17 +1397,19 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
 
         def fake_run_command(argv, cwd=None, timeout=60):
             calls.append((list(argv), timeout))
-            if argv == ["squeue"]:
+            if argv == ["squeue", "-h", "-o", mkexp2_web.SQUEUE_TABLE_FORMAT]:
                 return {
                     "returncode": 0,
                     "stdout": (
-                        "JOBID PARTITION NAME USER ST TIME NODES NODELIST(REASON)\n"
-                        "123 all mine owner R 0:10 1 node01\n"
-                        "124 all other alice R 0:20 1 node02\n"
+                        "123|all|mine|owner|RUNNING|0:10|1|node01\n"
+                        "124|all|other|alice|RUNNING|0:20|1|node02\n"
+                        "125_[0-3%1]|all|array|owner|PENDING|0:00|1|(Resources)\n"
                     ),
                     "stderr": "",
                 }
             if argv == ["scancel", "123"]:
+                return {"returncode": 0, "stdout": "", "stderr": ""}
+            if argv == ["scancel", "125_[0-3%1]"]:
                 return {"returncode": 0, "stdout": "", "stderr": ""}
             return {"returncode": 99, "stdout": "", "stderr": "unexpected"}
 
@@ -1360,6 +1418,7 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
         try:
             queue = mkexp2_web.SlurmStatus().queue()
             result = mkexp2_web.SlurmStatus().cancel_job({"job_id": "123"})
+            array_result = mkexp2_web.SlurmStatus().cancel_job({"job_id": "125_[0-3%1]"})
             with self.assertRaises(ValueError):
                 mkexp2_web.SlurmStatus().cancel_job({"job_id": "124"})
         finally:
@@ -1369,7 +1428,9 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
         self.assertEqual(queue["server_user"], "owner")
         self.assertTrue(result["ok"])
         self.assertEqual(result["job"]["user"], "owner")
+        self.assertTrue(array_result["ok"])
         self.assertIn((["scancel", "123"], 30), calls)
+        self.assertIn((["scancel", "125_[0-3%1]"], 30), calls)
 
     def test_spack_plot_cache_action_uses_fixed_argv(self):
         calls = []

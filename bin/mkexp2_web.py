@@ -25,6 +25,8 @@ MAX_LOG_LIST_ENTRIES = 500
 SLURM_CACHE_SECONDS = 15
 EXPERIMENT_CACHE_SECONDS = 60
 PLOT_ACTION_TIMEOUT_SECONDS = 7200
+SQUEUE_NODE_FORMAT = "%i|%N|%u|%j|%T|%S|%M"
+SQUEUE_TABLE_FORMAT = "%i|%P|%j|%u|%T|%M|%D|%R"
 WEB_STATE_DIR = ".mkexp2"
 WEB_PINS_FILE = "web-pins.json"
 WEB_SHARES_FILE = "web-shares.json"
@@ -341,6 +343,15 @@ def expand_nodelist(value):
     return out
 
 
+def _is_real_slurm_node_field(value):
+    value = str(value or "").strip()
+    if not value or value in ("(null)", "None", "N/A", "null"):
+        return False
+    if value.startswith("(") and value.endswith(")"):
+        return False
+    return True
+
+
 def parse_squeue_jobs(text):
     jobs = []
     for line in text.splitlines():
@@ -349,12 +360,13 @@ def parse_squeue_jobs(text):
         parts = line.split("|")
         if len(parts) < 7:
             continue
-        job_id, nodes, user, name, state, start_time, elapsed = parts[:7]
+        job_id, nodes, user, name, state, start_time, elapsed = [part.strip() for part in parts[:7]]
+        node_names = expand_nodelist(nodes) if _is_real_slurm_node_field(nodes) else []
         jobs.append(
             {
                 "job_id": job_id,
                 "nodes": nodes,
-                "node_names": expand_nodelist(nodes),
+                "node_names": node_names,
                 "user": user,
                 "job_name": name,
                 "state": state,
@@ -365,28 +377,58 @@ def parse_squeue_jobs(text):
     return jobs
 
 
+def _parse_squeue_delimited_line(line):
+    parts = [part.strip() for part in line.split("|")]
+    if len(parts) < 8:
+        return None
+    job_id, partition, name, user, state, elapsed, nodes, nodelist = parts[:8]
+    return {
+        "job_id": job_id,
+        "partition": partition,
+        "name": name,
+        "user": user,
+        "state": state,
+        "time": elapsed,
+        "time_limit": "",
+        "nodes": nodes,
+        "nodelist": nodelist,
+    }
+
+
+def _parse_squeue_table_line(line):
+    parts = line.split()
+    if len(parts) < 8:
+        return None
+    time_limit = ""
+    if len(parts) >= 9 and not parts[6].isdigit():
+        job_id, partition, name, user, state, elapsed, time_limit, nodes = parts[:8]
+        nodelist = " ".join(parts[8:])
+    else:
+        job_id, partition, name, user, state, elapsed, nodes = parts[:7]
+        nodelist = " ".join(parts[7:])
+    return {
+        "job_id": job_id,
+        "partition": partition,
+        "name": name,
+        "user": user,
+        "state": state,
+        "time": elapsed,
+        "time_limit": time_limit,
+        "nodes": nodes,
+        "nodelist": nodelist,
+    }
+
+
 def parse_squeue_table(text):
     rows = []
     for line in str(text or "").splitlines():
         line = line.strip()
         if not line or line.startswith("JOBID"):
             continue
-        parts = line.split(None, 7)
-        if len(parts) < 8:
+        row = _parse_squeue_delimited_line(line) if "|" in line else _parse_squeue_table_line(line)
+        if not row:
             continue
-        job_id, partition, name, user, state, elapsed, nodes, nodelist = parts
-        rows.append(
-            {
-                "job_id": job_id,
-                "partition": partition,
-                "name": name,
-                "user": user,
-                "state": state,
-                "time": elapsed,
-                "nodes": nodes,
-                "nodelist": nodelist,
-            }
-        )
+        rows.append(row)
     return rows
 
 
@@ -420,7 +462,7 @@ class SlurmStatus:
             nodes.update(parse_sinfo_long_nodes(SINFO_LONG_FALLBACK))
 
         squeue = run_command(
-            ["squeue", "-h", "-o", "%i|%N|%u|%j|%T|%S|%M"],
+            ["squeue", "-h", "-o", SQUEUE_NODE_FORMAT],
             timeout=8,
         )
         commands["squeue"] = squeue
@@ -432,8 +474,8 @@ class SlurmStatus:
                 if node_name in nodes:
                     nodes[node_name].setdefault("jobs", []).append(job)
                     attached = True
-            if not attached:
-                name = job["nodes"] or "unassigned"
+            if not attached and _is_real_slurm_node_field(job["nodes"]):
+                name = job["nodes"]
                 nodes.setdefault(
                     name,
                     {
@@ -460,8 +502,8 @@ class SlurmStatus:
         }
 
     def queue(self):
-        command = run_command(["squeue"], timeout=8)
-        source = "squeue"
+        command = run_command(["squeue", "-h", "-o", SQUEUE_TABLE_FORMAT], timeout=8)
+        source = f"squeue -h -o {SQUEUE_TABLE_FORMAT}"
         raw = command["stdout"]
         if command["returncode"] == 127:
             source = "fallback sample: squeue not installed"
@@ -478,11 +520,11 @@ class SlurmStatus:
 
     def cancel_job(self, payload):
         job_id = str((payload or {}).get("job_id") or "").strip()
-        if not re.fullmatch(r"[A-Za-z0-9_.+-]+", job_id):
+        if not re.fullmatch(r"[A-Za-z0-9_.+\-\[\]%,]+", job_id):
             raise ValueError("invalid Slurm job id")
 
         owner = getpass.getuser()
-        squeue = run_command(["squeue"], timeout=8)
+        squeue = run_command(["squeue", "-h", "-o", SQUEUE_TABLE_FORMAT], timeout=8)
         if squeue["returncode"] != 0:
             raise ValueError("cannot verify Slurm job ownership before scancel")
         rows = parse_squeue_table(squeue["stdout"])
