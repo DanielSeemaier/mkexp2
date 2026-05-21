@@ -2429,6 +2429,35 @@ HTML = r"""<!doctype html>
     .check-message {
       color: var(--muted);
     }
+    .check-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .check-indicator {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      display: inline-grid;
+      place-items: center;
+      border: 1px solid var(--border);
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .check-indicator.hidden {
+      display: none;
+    }
+    .check-indicator.ok {
+      color: #0f6b3d;
+      background: #dcfce7;
+      border-color: #86efac;
+    }
+    .check-indicator.bad {
+      color: #991b1b;
+      background: #fee2e2;
+      border-color: #fca5a5;
+    }
     .check-facts {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -3841,7 +3870,8 @@ HTML = r"""<!doctype html>
                 <div class="panel-title" id="selected-title">Experiment</div>
                 <div class="muted" id="selected-path"></div>
               </div>
-              <div class="actions">
+              <div class="actions check-action">
+                <span id="check-indicator" class="check-indicator hidden" aria-live="polite"></span>
                 <button id="check">Check</button>
               </div>
             </div>
@@ -4318,6 +4348,42 @@ HTML = r"""<!doctype html>
         return null;
       }
     }
+    function setCheckIndicator(ok, tooltip) {
+      const indicator = document.getElementById('check-indicator');
+      if (!indicator) return;
+      indicator.className = `check-indicator ${ok ? 'ok' : 'bad'}`;
+      indicator.textContent = ok ? '✓' : '!';
+      indicator.title = tooltip || (ok ? 'mkexp2 check passed.' : 'mkexp2 check failed.');
+      indicator.setAttribute('aria-label', indicator.title);
+    }
+    function clearCheckIndicator() {
+      const indicator = document.getElementById('check-indicator');
+      if (!indicator) return;
+      indicator.className = 'check-indicator hidden';
+      indicator.textContent = '';
+      indicator.title = '';
+      indicator.removeAttribute('aria-label');
+    }
+    function firstLines(text, limit = 6) {
+      return stripAnsi(String(text || ''))
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean)
+        .slice(0, limit)
+        .join('\n');
+    }
+    function checkErrorTooltip(result, payload, importantLines = []) {
+      const payloadErrors = Array.isArray(payload?.errors)
+        ? payload.errors.map(item => typeof item === 'string' ? item : JSON.stringify(item))
+        : [];
+      const lines = [
+        ...payloadErrors,
+        ...importantLines,
+        firstLines(result?.stderr || '', 4),
+        firstLines(result?.stdout || '', 4)
+      ].filter(Boolean);
+      return lines.length ? lines.slice(0, 8).join('\n') : 'mkexp2 check failed.';
+    }
     function actionSucceeded(action, kind) {
       if (action?.status !== 'completed') return false;
       if (kind === 'parse') return Boolean(action.result?.parsed);
@@ -4380,6 +4446,9 @@ HTML = r"""<!doctype html>
         .split(/\r?\n/)
         .map(line => line.trim())
         .filter(line => /\[(fail|warn)\]/i.test(line));
+      setCheckIndicator(ok, ok
+        ? (warningOnly ? 'mkexp2 check passed with warnings.' : 'mkexp2 check passed.')
+        : checkErrorTooltip(result, payload, importantLines));
       appendConsoleLog(ok ? (warningOnly ? 'Check passed with warnings' : 'Check passed') : 'Check failed', {
         message: ok
           ? 'Saved the Experiment file and validated the experiment configuration.'
@@ -6288,6 +6357,7 @@ HTML = r"""<!doctype html>
     }
     function clearSelectedExperiment() {
       state.selected = null;
+      clearCheckIndicator();
       clearAlgorithmChoices();
       state.results = [];
       state.resultsFor = null;
@@ -6531,6 +6601,7 @@ HTML = r"""<!doctype html>
       const selectionId = ++state.selectionSeq;
       state.selected = id;
       state.algorithmLoadSeq += 1;
+      clearCheckIndicator();
       state.results = [];
       state.resultsFor = null;
       state.stats = null;
@@ -6586,6 +6657,7 @@ HTML = r"""<!doctype html>
       state.shareId = shareId;
       document.querySelector('.app').classList.add('share-mode');
       editor.readOnly = true;
+      clearCheckIndicator();
       const data = await api(`/api/share/${encodeURIComponent(shareId)}/experiment`);
       const id = data.id;
       state.selected = id;
@@ -6628,19 +6700,30 @@ HTML = r"""<!doctype html>
       if (!state.selected) return;
       const experimentId = state.selected;
       const button = document.getElementById('check');
-      await withBusyButton(button, 'Checking...', async () => {
-        out('Saving and checking...');
-        const saved = await persistExperiment();
+      clearCheckIndicator();
+      try {
+        await withBusyButton(button, 'Checking...', async () => {
+          out('Saving and checking...');
+          const saved = await persistExperiment();
+          if (state.selected !== experimentId) return;
+          const result = await api(`/api/experiments/${encodeURIComponent(experimentId)}/check`, { method: 'POST' });
+          if (state.selected !== experimentId) return;
+          renderCheckResult(result, saved);
+          try {
+            await loadAlgorithms(experimentId);
+          } catch (err) {
+            out(`Algorithm refresh failed after check: ${String(err)}`);
+          }
+        });
+      } catch (err) {
         if (state.selected !== experimentId) return;
-        const result = await api(`/api/experiments/${encodeURIComponent(experimentId)}/check`, { method: 'POST' });
-        if (state.selected !== experimentId) return;
-        renderCheckResult(result, saved);
-        try {
-          await loadAlgorithms(experimentId);
-        } catch (err) {
-          out(`Algorithm refresh failed after check: ${String(err)}`);
-        }
-      });
+        const message = firstLines(err?.message || String(err), 8) || 'mkexp2 check failed.';
+        setCheckIndicator(false, message);
+        appendConsoleLog('Check failed', {
+          message: 'Saved the Experiment file, but mkexp2 check could not complete.',
+          error: message
+        });
+      }
     }
     async function probeExperiment() {
       if (!state.selected) return;
