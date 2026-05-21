@@ -600,6 +600,18 @@ class Mkexp2WebApp:
     def is_archived_experiment_id(self, experiment_id):
         return Path(str(experiment_id or "")).name.endswith(ARCHIVE_SUFFIX)
 
+    def experiment_time_metadata(self, path):
+        path = Path(path)
+        exp_file = path / "Experiment"
+        dir_stat = path.stat()
+        file_stat = exp_file.stat() if exp_file.is_file() else dir_stat
+        created_at = stat_creation_time(dir_stat)
+        return {
+            "created_at": iso_from_timestamp(created_at),
+            "created_at_epoch": created_at,
+            "modified_at": iso_from_timestamp(file_stat.st_mtime),
+        }
+
     def active_experiment_path(self, experiment_id):
         if self.is_archived_experiment_id(experiment_id):
             raise ValueError(f"experiment is archived: {experiment_id}")
@@ -666,9 +678,7 @@ class Mkexp2WebApp:
             if not exp_file.is_file():
                 continue
             path = exp_file.parent.resolve()
-            file_stat = exp_file.stat()
-            dir_stat = path.stat()
-            created_at = stat_creation_time(dir_stat)
+            time_metadata = self.experiment_time_metadata(path)
             is_archived = parts[-1].endswith(ARCHIVE_SUFFIX)
             if is_archived != archived:
                 continue
@@ -682,9 +692,9 @@ class Mkexp2WebApp:
                     "parent": "/".join(parts[:-1]),
                     "depth": len(parts),
                     "path": str(path),
-                    "created_at": iso_from_timestamp(created_at),
-                    "created_at_epoch": created_at,
-                    "modified_at": iso_from_timestamp(file_stat.st_mtime),
+                    "created_at": time_metadata["created_at"],
+                    "created_at_epoch": time_metadata["created_at_epoch"],
+                    "modified_at": time_metadata["modified_at"],
                     "has_results": (path / "results").is_dir(),
                     "has_plots_pdf": (path / "plots.pdf").is_file(),
                     "archived": is_archived,
@@ -2282,12 +2292,25 @@ HTML = r"""<!doctype html>
       padding: 8px 10px;
       min-width: 0;
       overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      display: grid;
+      gap: 2px;
     }
     .experiment-row.active {
       border-color: var(--accent);
       background: #e8f5f3;
+    }
+    .experiment-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .experiment-date {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 1.25;
+      white-space: nowrap;
     }
     .pin-button {
       min-height: 38px;
@@ -6101,6 +6124,18 @@ HTML = r"""<!doctype html>
       const parsed = Date.parse(exp.created_at || exp.modified_at || '');
       return Number.isFinite(parsed) ? parsed : 0;
     }
+    function formatExperimentDate(exp) {
+      const timestamp = experimentCreationKey(exp);
+      if (!timestamp) return '';
+      const date = new Date(timestamp);
+      if (Number.isNaN(date.getTime())) return '';
+      const pad = value => String(value).padStart(2, '0');
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    }
+    function selectedPathText(path, exp) {
+      const date = formatExperimentDate(exp || {});
+      return date ? `${path} · created ${date}` : path;
+    }
     function compareExperimentsByCreatedDesc(left, right) {
       return experimentCreationKey(right) - experimentCreationKey(left)
         || String(left.label || left.id).localeCompare(String(right.label || right.id));
@@ -6178,8 +6213,16 @@ HTML = r"""<!doctype html>
       item.className = 'experiment-item';
       const button = document.createElement('button');
       button.className = 'experiment-row' + (state.selected === exp.id ? ' active' : '');
-      button.textContent = label;
-      button.title = exp.id;
+      const name = document.createElement('span');
+      name.className = 'experiment-name';
+      name.textContent = label;
+      const date = document.createElement('span');
+      date.className = 'experiment-date';
+      const created = formatExperimentDate(exp);
+      date.textContent = created ? `created ${created}` : 'created unknown';
+      button.title = created ? `${exp.id}\ncreated ${created}` : exp.id;
+      button.appendChild(name);
+      button.appendChild(date);
       button.onclick = () => withBusyButton(button, 'Loading...', () => selectExperiment(exp.id)).catch(err => out(String(err)));
       const pin = document.createElement('button');
       pin.className = 'pin-button' + (pinned ? ' active' : '');
@@ -6787,7 +6830,7 @@ HTML = r"""<!doctype html>
       if (state.selected !== id || state.selectionSeq !== selectionId) return;
       clearTransientOutput();
       document.getElementById('selected-title').textContent = id;
-      document.getElementById('selected-path').textContent = data.path;
+      document.getElementById('selected-path').textContent = selectedPathText(data.path, data);
       setEditorValue(data.experiment);
       renderSubmitLock(data.submit_lock);
       loadDescription().catch(err => out(String(err)));
@@ -6807,7 +6850,7 @@ HTML = r"""<!doctype html>
       clearAlgorithmChoices();
       setView('experiment-view').catch(err => out(String(err)));
       document.getElementById('selected-title').textContent = id;
-      document.getElementById('selected-path').textContent = data.path;
+      document.getElementById('selected-path').textContent = selectedPathText(data.path, data);
       setEditorValue(data.experiment);
       renderSubmitLock(data.submit_lock);
       renderProgress(null);
@@ -7613,16 +7656,18 @@ def make_handler(app):
                 return
             if tail == "experiment":
                 exp_path = context["path"]
+                payload = {
+                    "id": experiment_id,
+                    "path": str(exp_path),
+                    "experiment": (exp_path / "Experiment").read_text(encoding="utf-8"),
+                    "submit_lock": app.submit_lock(experiment_id),
+                    "read_only": True,
+                }
+                payload.update(app.experiment_time_metadata(exp_path))
                 json_response(
                     self,
                     200,
-                    {
-                        "id": experiment_id,
-                        "path": str(exp_path),
-                        "experiment": (exp_path / "Experiment").read_text(encoding="utf-8"),
-                        "submit_lock": app.submit_lock(experiment_id),
-                        "read_only": True,
-                    },
+                    payload,
                 )
                 return
             if tail == "results":
@@ -7789,15 +7834,17 @@ def make_handler(app):
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
                     exp_path = app.active_experiment_path(experiment_id)
+                    payload = {
+                        "id": experiment_id,
+                        "path": str(exp_path),
+                        "experiment": (exp_path / "Experiment").read_text(encoding="utf-8"),
+                        "submit_lock": app.submit_lock(experiment_id),
+                    }
+                    payload.update(app.experiment_time_metadata(exp_path))
                     json_response(
                         self,
                         200,
-                        {
-                            "id": experiment_id,
-                            "path": str(exp_path),
-                            "experiment": (exp_path / "Experiment").read_text(encoding="utf-8"),
-                            "submit_lock": app.submit_lock(experiment_id),
-                        },
+                        payload,
                     )
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/results$", path)
