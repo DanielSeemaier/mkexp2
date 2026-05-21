@@ -4026,10 +4026,6 @@ HTML = r"""<!doctype html>
                 <div class="panel-title" id="selected-title">Experiment</div>
                 <div class="muted" id="selected-path"></div>
               </div>
-              <div class="actions check-action">
-                <span id="check-indicator" class="check-indicator hidden" aria-live="polite"></span>
-                <button id="check">Check</button>
-              </div>
             </div>
             <div class="panel-body">
               <div class="editor-shell">
@@ -4042,6 +4038,10 @@ HTML = r"""<!doctype html>
             <section class="panel submit-panel">
               <div class="panel-header">
                 <div class="panel-title">Submit</div>
+                <div class="actions check-action">
+                  <span id="check-indicator" class="check-indicator hidden" aria-live="polite"></span>
+                  <button id="check">Check</button>
+                </div>
               </div>
               <div class="panel-body stack">
                 <div id="algorithm-list" class="chips"></div>
@@ -6130,11 +6130,11 @@ HTML = r"""<!doctype html>
       const date = new Date(timestamp);
       if (Number.isNaN(date.getTime())) return '';
       const pad = value => String(value).padStart(2, '0');
-      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+      return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
     }
     function selectedPathText(path, exp) {
       const date = formatExperimentDate(exp || {});
-      return date ? `${path} · created ${date}` : path;
+      return date ? `${path} · ${date}` : path;
     }
     function compareExperimentsByCreatedDesc(left, right) {
       return experimentCreationKey(right) - experimentCreationKey(left)
@@ -6219,8 +6219,8 @@ HTML = r"""<!doctype html>
       const date = document.createElement('span');
       date.className = 'experiment-date';
       const created = formatExperimentDate(exp);
-      date.textContent = created ? `created ${created}` : 'created unknown';
-      button.title = created ? `${exp.id}\ncreated ${created}` : exp.id;
+      date.textContent = created || 'unknown';
+      button.title = created ? `${exp.id}\n${created}` : exp.id;
       button.appendChild(name);
       button.appendChild(date);
       button.onclick = () => withBusyButton(button, 'Loading...', () => selectExperiment(exp.id)).catch(err => out(String(err)));
