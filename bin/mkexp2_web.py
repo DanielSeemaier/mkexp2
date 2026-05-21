@@ -4294,7 +4294,7 @@ HTML = r"""<!doctype html>
       if (token() || allowEmptyToken) {
         refreshConfig().catch(err => out(String(err)));
         refreshPresets().catch(err => out(String(err)));
-        refreshExperiments().catch(err => out(String(err)));
+        refreshExperiments({ selectMostRecent: true }).catch(err => out(String(err)));
         refreshStatus().catch(err => out(String(err)));
       }
     });
@@ -6321,6 +6321,9 @@ HTML = r"""<!doctype html>
       state.experiments = data.experiments;
       state.pinnedExperiments = new Set(pins.pinned || []);
       renderExperimentsList();
+      if (options.selectMostRecent && !state.selected && state.experiments.length) {
+        await selectExperiment(state.experiments[0].id);
+      }
     }
     async function refreshConfig() {
       const data = await api('/api/config');
@@ -7561,7 +7564,7 @@ HTML = r"""<!doctype html>
     } else if (token() || allowEmptyToken) {
       refreshConfig().catch(err => out(String(err)));
       refreshPresets().catch(err => out(String(err)));
-      refreshExperiments().catch(err => out(String(err)));
+      refreshExperiments({ selectMostRecent: true }).catch(err => out(String(err)));
       refreshStatus().catch(err => out(String(err)));
     } else {
       out('Enter the session token printed by mkexp2 web.');

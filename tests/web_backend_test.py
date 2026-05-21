@@ -251,6 +251,8 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("function renderCheckResult", mkexp2_web.HTML)
         self.assertIn("function parseCheckJson", mkexp2_web.HTML)
         self.assertIn("flags: ['--all', '--algorithms']", mkexp2_web.HTML)
+        self.assertIn("selectMostRecent: true", mkexp2_web.HTML)
+        self.assertIn("selectExperiment(state.experiments[0].id)", mkexp2_web.HTML)
         self.assertIn('id="check-indicator"', mkexp2_web.HTML)
         self.assertIn("function setCheckIndicator", mkexp2_web.HTML)
         self.assertIn("function clearCheckIndicator", mkexp2_web.HTML)
