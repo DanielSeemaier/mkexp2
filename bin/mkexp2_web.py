@@ -121,6 +121,7 @@ def run_command(argv, cwd=None, timeout=60):
             list(argv),
             cwd=str(cwd) if cwd else None,
             text=True,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout,
@@ -4377,6 +4378,7 @@ HTML = r"""<!doctype html>
         ? payload.errors.map(item => typeof item === 'string' ? item : JSON.stringify(item))
         : [];
       const lines = [
+        result?.timed_out ? `mkexp2 check timed out after ${result.elapsed_seconds ?? '?'}s.` : '',
         ...payloadErrors,
         ...importantLines,
         firstLines(result?.stderr || '', 4),
@@ -4438,7 +4440,7 @@ HTML = r"""<!doctype html>
     }
     function renderCheckResult(result, saveResult) {
       const payload = parseCheckJson(result);
-      const ok = payload ? Boolean(payload.ok) : Number(result.returncode) === 0;
+      const ok = result?.timed_out ? false : (payload ? Boolean(payload.ok) && Number(result.returncode) === 0 : Number(result.returncode) === 0);
       const warningOnly = ok && Number(payload?.warnings || 0) > 0;
       const combined = `${result.stdout || ''}\n${result.stderr || ''}`;
       const cleanOutput = stripAnsi(combined);

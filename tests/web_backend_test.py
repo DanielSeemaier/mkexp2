@@ -17,6 +17,23 @@ SPEC.loader.exec_module(mkexp2_web)
 
 
 class WebBackendTest(unittest.TestCase):
+    def test_run_command_closes_child_stdin(self):
+        original_run = mkexp2_web.subprocess.run
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(kwargs)
+            return subprocess.CompletedProcess(argv, 0, stdout="{}", stderr="")
+
+        mkexp2_web.subprocess.run = fake_run
+        try:
+            result = mkexp2_web.run_command(["mkexp2", "check"])
+        finally:
+            mkexp2_web.subprocess.run = original_run
+
+        self.assertEqual(result["returncode"], 0)
+        self.assertEqual(calls[0]["stdin"], subprocess.DEVNULL)
+
     def test_action_store_reuses_running_unique_action(self):
         store = mkexp2_web.ActionStore()
         started = threading.Event()
