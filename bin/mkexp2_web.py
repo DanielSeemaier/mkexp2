@@ -11,9 +11,11 @@ import secrets
 import shutil
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.parse
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -61,6 +63,11 @@ def slugify(value):
     value = value.strip().lower()
     value = re.sub(r"[^a-z0-9._-]+", "-", value)
     value = re.sub(r"-+", "-", value).strip("-._")
+    return value or "experiment"
+
+
+def download_filename(value):
+    value = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value or "experiment")).strip("-._")
     return value or "experiment"
 
 
@@ -1373,6 +1380,51 @@ class Mkexp2WebApp:
         result["saved"] = True
         return result
 
+    def experiment_archive(self, experiment_id):
+        path = self.active_experiment_path(experiment_id)
+        base = download_filename(path.name)
+        tar_command = shutil.which("tar")
+        zstd_command = shutil.which("zstd")
+        if tar_command and zstd_command:
+            archive = tempfile.NamedTemporaryFile(prefix=f"{base}-", suffix=".tar.zst", delete=False)
+            archive.close()
+            archive_path = Path(archive.name)
+            result = run_command(
+                [tar_command, "--zstd", "-cf", str(archive_path), "-C", str(path.parent), path.name],
+                timeout=3600,
+            )
+            if result["returncode"] == 0 and archive_path.is_file() and archive_path.stat().st_size > 0:
+                return {
+                    "path": archive_path,
+                    "filename": f"{base}.tar.zst",
+                    "content_type": "application/zstd",
+                    "format": "tar.zst",
+                }
+            archive_path.unlink(missing_ok=True)
+
+        archive = tempfile.NamedTemporaryFile(prefix=f"{base}-", suffix=".zip", delete=False)
+        archive.close()
+        archive_path = Path(archive.name)
+        try:
+            with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as zip_file:
+                for root, dirs, files in os.walk(path):
+                    dirs.sort()
+                    files.sort()
+                    root_path = Path(root)
+                    for name in files:
+                        file_path = root_path / name
+                        rel_path = Path(path.name) / file_path.relative_to(path)
+                        zip_file.write(file_path, rel_path.as_posix())
+            return {
+                "path": archive_path,
+                "filename": f"{base}.zip",
+                "content_type": "application/zip",
+                "format": "zip",
+            }
+        except Exception:
+            archive_path.unlink(missing_ok=True)
+            raise
+
     def plots_info(self, experiment_id):
         path = self.active_experiment_path(experiment_id)
         pdf = path / "plots.pdf"
@@ -1915,6 +1967,7 @@ HTML = r"""<!doctype html>
     .app.share-mode .danger-zone,
     .app.share-mode #check,
     .app.share-mode #share-experiment,
+    .app.share-mode #download-experiment,
     .app.share-mode #add-plot-source {
       display: none !important;
     }
@@ -3777,6 +3830,9 @@ HTML = r"""<!doctype html>
         <button id="share-experiment" class="icon-button" aria-label="Share experiment" title="Share experiment">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.6 6.8-4.2"/><path d="m8.6 13.4 6.8 4.2"/></svg>
         </button>
+        <button id="download-experiment" class="icon-button" aria-label="Download experiment archive" title="Download experiment archive">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        </button>
       </div>
       <section id="experiment-view" class="view-panel active">
         <section class="grid">
@@ -4599,6 +4655,21 @@ HTML = r"""<!doctype html>
         throw new Error(text);
       }
       return await response.blob();
+    }
+    async function fetchDownload(path) {
+      const requestPath = apiPath(path);
+      const response = await fetch(requestPath, { headers: { 'X-MKEXP2-Token': token() } });
+      if (!response.ok) {
+        const text = await response.text();
+        appendConsoleLog(`GET ${requestPath} failed`, text);
+        throw new Error(text);
+      }
+      const disposition = response.headers.get('content-disposition') || '';
+      const filenameMatch = disposition.match(/filename="([^"]+)"/);
+      return {
+        blob: await response.blob(),
+        filename: filenameMatch ? filenameMatch[1] : ''
+      };
     }
     function clearPlotPdfUrl() {
       if (state.plotPdfUrl) URL.revokeObjectURL(state.plotPdfUrl);
@@ -6315,6 +6386,20 @@ HTML = r"""<!doctype html>
         document.getElementById('share-link').value = result.share_url || '';
       });
     }
+    async function downloadExperiment() {
+      if (!state.selected || state.shared) return;
+      await withBusyButton('download-experiment', '', async () => {
+        const result = await fetchDownload(`/api/experiments/${encodeURIComponent(state.selected)}/download`);
+        const url = URL.createObjectURL(result.blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = result.filename || `${slugifyName(state.selected)}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      });
+    }
     async function deleteExperiment() {
       if (!state.selected) return;
       if (state.submitLock?.locked) {
@@ -7224,6 +7309,7 @@ HTML = r"""<!doctype html>
     document.getElementById('git-refresh').onclick = () => withBusyButton('git-refresh', '', loadGitStatus).catch(err => out(String(err)));
     document.getElementById('git-push').onclick = pushGitChanges;
     document.getElementById('share-experiment').onclick = shareExperiment;
+    document.getElementById('download-experiment').onclick = downloadExperiment;
     document.getElementById('share-close').onclick = closeShareDialog;
     document.getElementById('settings-open').onclick = openSettingsDialog;
     document.getElementById('settings-close').onclick = closeSettingsDialog;
@@ -7548,6 +7634,21 @@ def make_handler(app):
                     self.send_header("Content-Length", str(len(data)))
                     self.end_headers()
                     self.wfile.write(data)
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/download$", path)
+                if match:
+                    archive = app.experiment_archive(urllib.parse.unquote(match.group(1)))
+                    archive_path = archive["path"]
+                    try:
+                        self.send_response(200)
+                        self.send_header("Content-Type", archive["content_type"])
+                        self.send_header("Content-Length", str(archive_path.stat().st_size))
+                        self.send_header("Content-Disposition", f"attachment; filename=\"{archive['filename']}\"")
+                        self.end_headers()
+                        with archive_path.open("rb") as file:
+                            shutil.copyfileobj(file, self.wfile)
+                    finally:
+                        archive_path.unlink(missing_ok=True)
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/plot-artifacts/([^/]+)\.pdf$", path)
                 if match:

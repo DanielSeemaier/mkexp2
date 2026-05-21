@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -284,6 +285,10 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('class="view-tabs"', mkexp2_web.HTML)
         self.assertIn('class="view-tabs-spacer"', mkexp2_web.HTML)
         self.assertIn('id="share-experiment" class="icon-button" aria-label="Share experiment"', mkexp2_web.HTML)
+        self.assertIn('id="download-experiment" class="icon-button" aria-label="Download experiment archive"', mkexp2_web.HTML)
+        self.assertIn("async function downloadExperiment", mkexp2_web.HTML)
+        self.assertIn("function fetchDownload", mkexp2_web.HTML)
+        self.assertIn("/download", mkexp2_web.HTML)
         self.assertNotIn('<button id="share-experiment">Share</button>', mkexp2_web.HTML)
         self.assertIn('id="share-modal"', mkexp2_web.HTML)
         self.assertIn('id="share-ssh"', mkexp2_web.HTML)
@@ -291,6 +296,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("__SHARE_ID__", mkexp2_web.HTML)
         self.assertIn("share-mode", mkexp2_web.HTML)
         self.assertNotIn(".app.share-mode .probe-panel", mkexp2_web.HTML)
+        self.assertIn(".app.share-mode #download-experiment", mkexp2_web.HTML)
         self.assertIn(".app.share-mode .editor-shell", mkexp2_web.HTML)
         self.assertIn(".app.share-mode #experiment-editor", mkexp2_web.HTML)
         self.assertIn("background: transparent;", mkexp2_web.HTML)
@@ -540,6 +546,27 @@ class WebBackendTest(unittest.TestCase):
             existing = app.description("exp")
             self.assertIn("# Why", existing["content"])
             self.assertFalse(existing["truncated"])
+
+    def test_experiment_archive_download_contains_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            exp.mkdir()
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            (exp / "description.md").write_text("# Notes\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            archive = app.experiment_archive("exp")
+            try:
+                self.assertTrue(archive["path"].is_file())
+                self.assertIn(archive["format"], {"tar.zst", "zip"})
+                self.assertTrue(archive["filename"].startswith("exp."))
+                if archive["format"] == "zip":
+                    with zipfile.ZipFile(archive["path"]) as zip_file:
+                        self.assertIn("exp/Experiment", zip_file.namelist())
+                        self.assertIn("exp/description.md", zip_file.namelist())
+            finally:
+                archive["path"].unlink(missing_ok=True)
 
     def test_plots_info_handles_missing_and_existing_pdf(self):
         with tempfile.TemporaryDirectory() as tmp:
