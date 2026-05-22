@@ -4544,7 +4544,9 @@ HTML = r"""<!doctype html>
     .modal {
       width: min(760px, 100%);
       max-height: calc(100vh - 40px);
-      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 8px;
@@ -4559,6 +4561,7 @@ HTML = r"""<!doctype html>
       padding: 12px 14px;
       border-bottom: 1px solid var(--border);
       background: var(--surface);
+      flex: 0 0 auto;
     }
     .modal-footer {
       border-top: 1px solid var(--border);
@@ -4571,6 +4574,8 @@ HTML = r"""<!doctype html>
       display: grid;
       gap: 12px;
       padding: 14px;
+      min-height: 0;
+      overflow: auto;
     }
     .tag-manager-grid {
       display: grid;
@@ -7624,7 +7629,11 @@ HTML = r"""<!doctype html>
         more.textContent = `Showing the first ${listing.entries.length} entries. Open a subdirectory to narrow the list.`;
         list.appendChild(more);
       }
-      if (state.logContent && state.logContent.relative_path === state.selectedLog) {
+      const selectedLogInListing = Boolean(
+        state.selectedLog
+        && (listing.entries || []).some(entry => entry.type === 'file' && entry.path === state.selectedLog)
+      );
+      if (selectedLogInListing && state.logContent && state.logContent.relative_path === state.selectedLog) {
         const isMarkdown = /\.md$/i.test(state.logContent.relative_path || '');
         if (isMarkdown) {
           renderMarkdown(state.logContent.content || '', content);
@@ -7646,7 +7655,14 @@ HTML = r"""<!doctype html>
     }
     async function loadLogs(dir = state.logsDir || '') {
       if (!state.selected) return;
-      state.logsDir = dir || '';
+      const nextDir = dir || '';
+      const directoryChanged = nextDir !== state.logsDir;
+      state.logsDir = nextDir;
+      if (directoryChanged) {
+        state.selectedLog = '';
+        state.logContent = null;
+        renderLogsWorkspace();
+      }
       const query = new URLSearchParams({ dir: state.logsDir, limit: '500' });
       state.logsListing = await api(`/api/experiments/${encodeURIComponent(state.selected)}/logs?${query.toString()}`);
       state.logsFor = state.selected;
@@ -7702,6 +7718,22 @@ HTML = r"""<!doctype html>
       const parsed = Date.parse(exp.created_at || exp.modified_at || '');
       return Number.isFinite(parsed) ? parsed : 0;
     }
+    function experimentNameDateKey(exp) {
+      const text = String(exp?.id || exp?.label || exp?.name || '');
+      const leaf = text.split('/').filter(Boolean).pop() || text;
+      let match = leaf.match(/^(\d{4})\.(\d{2})\.(\d{2})(?:[-_.](\d{2})(\d{2}))?/);
+      if (match) {
+        const [, year, month, day, hour = '00', minute = '00'] = match;
+        return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute)).getTime();
+      }
+      match = leaf.match(/^(\d{2})(\d{2})-/);
+      const parentYear = text.match(/(?:^|\/)(\d{4})(?:\/|$)/);
+      if (match && parentYear) {
+        const [, month, day] = match;
+        return new Date(Number(parentYear[1]), Number(month) - 1, Number(day)).getTime();
+      }
+      return 0;
+    }
     function formatExperimentDate(exp) {
       const timestamp = experimentCreationKey(exp);
       if (!timestamp) return '';
@@ -7715,8 +7747,10 @@ HTML = r"""<!doctype html>
       return date ? `${path} · ${date}` : path;
     }
     function compareExperimentsByCreatedDesc(left, right) {
-      return experimentCreationKey(right) - experimentCreationKey(left)
-        || String(left.label || left.id).localeCompare(String(right.label || right.id));
+      const createdDelta = experimentCreationKey(right) - experimentCreationKey(left);
+      if (Math.abs(createdDelta) > 1000) return createdDelta;
+      return experimentNameDateKey(right) - experimentNameDateKey(left)
+        || String(right.label || right.id).localeCompare(String(left.label || left.id));
     }
     function mostRecentExperiment(experiments) {
       return Array.from(experiments || []).sort(compareExperimentsByCreatedDesc)[0] || null;
@@ -9895,8 +9929,11 @@ HTML = r"""<!doctype html>
     }
     async function loadPlotInfo() {
       if (!state.selected) return null;
-      state.plotArtifacts = await api(`/api/experiments/${encodeURIComponent(state.selected)}/plot-artifacts`);
-      state.plotArtifactsFor = state.selected;
+      const experimentId = state.selected;
+      const artifacts = await api(`/api/experiments/${encodeURIComponent(experimentId)}/plot-artifacts`);
+      if (state.selected !== experimentId) return null;
+      state.plotArtifacts = artifacts;
+      state.plotArtifactsFor = experimentId;
       renderPlotPanel();
       return state.plotArtifacts;
     }
@@ -9973,14 +10010,16 @@ HTML = r"""<!doctype html>
     }
     async function loadPlotSources(includeAll = false) {
       if (!state.selected) return null;
+      const experimentId = state.selected;
       const query = includeAll ? '?all=1' : '';
-      const data = await api(`/api/experiments/${encodeURIComponent(state.selected)}/plot-sources${query}`);
+      const data = await api(`/api/experiments/${encodeURIComponent(experimentId)}/plot-sources${query}`);
+      if (state.selected !== experimentId) return null;
       if (includeAll) return data;
       state.plotSources = data;
-      state.plotSourcesFor = state.selected;
-      if (state.plotSourcesInitializedFor !== state.selected) {
+      state.plotSourcesFor = experimentId;
+      if (state.plotSourcesInitializedFor !== experimentId) {
         state.selectedPlotSources = new Set((data.current || []).map(sourceKey));
-        state.plotSourcesInitializedFor = state.selected;
+        state.plotSourcesInitializedFor = experimentId;
       }
       renderPlotPanel();
       return data;
@@ -10060,6 +10099,7 @@ HTML = r"""<!doctype html>
     }
     async function openPlotSourceDialog() {
       if (!state.selected) return;
+      const experimentId = state.selected;
       const modal = document.getElementById('plot-source-modal');
       const list = document.getElementById('plot-source-modal-list');
       const summary = document.getElementById('plot-source-modal-summary');
@@ -10067,6 +10107,7 @@ HTML = r"""<!doctype html>
       list.className = 'plot-source-modal-list csv-empty';
       list.textContent = 'Loading CSV files...';
       const data = await loadPlotSources(true);
+      if (!data || state.selected !== experimentId) return;
       const experiments = data.experiments || [];
       summary.textContent = `${experiments.length} experiment(s) with CSV results.`;
       list.className = 'plot-source-modal-list';
@@ -10188,10 +10229,12 @@ HTML = r"""<!doctype html>
     }
     async function loadStats() {
       if (!state.selected) return;
-      const data = await api(`/api/experiments/${encodeURIComponent(state.selected)}/stats`);
+      const experimentId = state.selected;
+      const data = await api(`/api/experiments/${encodeURIComponent(experimentId)}/stats`);
+      if (state.selected !== experimentId) return;
       clearTransientOutput();
       state.stats = data;
-      state.statsFor = state.selected;
+      state.statsFor = experimentId;
       renderStatsWorkspace();
     }
     function cpuCount(value) {
