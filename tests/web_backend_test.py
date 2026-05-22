@@ -297,6 +297,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="describe-search"', mkexp2_web.HTML)
         self.assertIn('data-describe-filter="algorithms"', mkexp2_web.HTML)
         self.assertIn("describeFilter: 'algorithms'", mkexp2_web.HTML)
+        self.assertIn("margin-bottom: 12px;", mkexp2_web.HTML)
         self.assertIn('id="describe-output"', mkexp2_web.HTML)
         self.assertIn("async function loadDescribeCatalog", mkexp2_web.HTML)
         self.assertIn("function describeAliasMatches", mkexp2_web.HTML)

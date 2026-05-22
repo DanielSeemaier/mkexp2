@@ -3281,6 +3281,7 @@ HTML = r"""<!doctype html>
       gap: 10px;
       align-items: center;
       min-width: 0;
+      margin-bottom: 12px;
     }
     .describe-toolbar input {
       min-width: 0;
