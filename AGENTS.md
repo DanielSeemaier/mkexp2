@@ -113,6 +113,8 @@ There is no linting configuration or CI setup.
 
    The Settings dialog includes a `Codex` cleanup action that archives all active experiments tagged `Codex` except experiments that are pinned/starred or currently submit-locked. This is a reversible directory rename to `<leaf>.archived` and does not auto-commit.
 
+   The top navigation tabs use dedicated active-tab contrast CSS variables so selected tabs remain readable in both light and dark themes.
+
    The Submit panel keeps the submit action in the panel header as an icon-only play button, with busy/lock state reflected by the button disabled state and tooltip. Algorithm choices are rendered without an extra bordered per-experiment container so the panel has one less visible hierarchy level.
 
    The Slurm queue dialog also has a footer `Cancel all` action that asks for explicit confirmation and sends a matching backend `confirm_user` before invoking `scancel -u <server_user>`.

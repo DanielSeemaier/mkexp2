@@ -2743,6 +2743,9 @@ HTML = r"""<!doctype html>
       --compare-mid-bg: #ffedd5;
       --shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
       --sidebar-width: 320px;
+      --tab-active-bg: var(--text);
+      --tab-active-border: var(--text);
+      --tab-active-text: #ffffff;
     }
     :root[data-theme="dark"] {
       color-scheme: dark;
@@ -2772,6 +2775,9 @@ HTML = r"""<!doctype html>
       --compare-equal-bg: #172f5f;
       --compare-mid-bg: #4d2d0c;
       --shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
+      --tab-active-bg: #0f766e;
+      --tab-active-border: #2dd4bf;
+      --tab-active-text: #ffffff;
     }
     * { box-sizing: border-box; }
     body {
@@ -3374,9 +3380,9 @@ HTML = r"""<!doctype html>
       font-weight: 800;
     }
     .view-tab.active {
-      background: var(--text);
-      border-color: var(--text);
-      color: white;
+      background: var(--tab-active-bg);
+      border-color: var(--tab-active-border);
+      color: var(--tab-active-text);
     }
     .view-panel {
       display: none;
