@@ -2461,6 +2461,23 @@ HTML = r"""<!doctype html>
       stroke-linejoin: round;
       fill: none;
     }
+    .icon-text-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-width: 0;
+    }
+    .icon-text-button svg {
+      width: 15px;
+      height: 15px;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+      flex: 0 0 auto;
+    }
     input, textarea, select {
       width: 100%;
       border: 1px solid var(--border);
@@ -3258,6 +3275,39 @@ HTML = r"""<!doctype html>
       max-height: 620px;
       overflow: auto;
     }
+    .describe-toolbar {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      min-width: 0;
+    }
+    .describe-toolbar input {
+      min-width: 0;
+    }
+    .describe-filter {
+      display: inline-flex;
+      gap: 4px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 3px;
+      background: #f8fafc;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .describe-filter button {
+      height: 28px;
+      min-height: 28px;
+      padding: 0 10px;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+      font-size: 12px;
+    }
+    .describe-filter button.active {
+      color: white;
+      background: var(--text);
+    }
     .describe-section {
       display: grid;
       gap: 10px;
@@ -3284,6 +3334,7 @@ HTML = r"""<!doctype html>
     }
     .describe-card {
       display: grid;
+      align-content: start;
       gap: 9px;
       min-width: 0;
       border: 1px solid var(--border);
@@ -3360,6 +3411,14 @@ HTML = r"""<!doctype html>
       background: white;
       padding: 3px 7px;
       font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    @media (max-width: 980px) {
+      .describe-toolbar {
+        grid-template-columns: 1fr;
+      }
+      .describe-filter {
+        justify-content: flex-start;
+      }
     }
     .probe-output {
       display: grid;
@@ -4568,7 +4627,9 @@ HTML = r"""<!doctype html>
             <div id="create-modal-title" class="modal-title">Create Experiment</div>
             <div id="create-summary" class="csv-summary">Choose a name and preset.</div>
           </div>
-          <button id="create-close" class="icon-button" aria-label="Close create dialog" title="Close">x</button>
+          <button id="create-close" class="icon-button" aria-label="Close create dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
         </div>
         <div class="modal-body">
           <div class="create-form">
@@ -4612,7 +4673,9 @@ HTML = r"""<!doctype html>
             <div id="archive-modal-title" class="modal-title">Archived Experiments</div>
             <div id="archive-summary" class="csv-summary">No archived experiments loaded.</div>
           </div>
-          <button id="archive-close" class="icon-button" aria-label="Close archived experiments" title="Close">x</button>
+          <button id="archive-close" class="icon-button" aria-label="Close archived experiments" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
         </div>
         <div class="modal-body">
           <div id="archive-list" class="archive-list csv-empty">Open the dialog to load archived experiments.</div>
@@ -4631,7 +4694,9 @@ HTML = r"""<!doctype html>
             <div id="git-modal-title" class="modal-title">Experiment Repo Git</div>
             <div id="git-repo-summary" class="csv-summary">No status loaded.</div>
           </div>
-          <button id="git-close" class="icon-button" aria-label="Close Git dialog" title="Close">x</button>
+          <button id="git-close" class="icon-button" aria-label="Close Git dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
         </div>
         <div class="modal-body">
           <div id="git-status" class="git-status-grid"></div>
@@ -4656,7 +4721,9 @@ HTML = r"""<!doctype html>
             <div id="share-modal-title" class="modal-title">Share Experiment</div>
             <div id="share-summary" class="csv-summary">Create a link for viewing this experiment without a token.</div>
           </div>
-          <button id="share-close" class="icon-button" aria-label="Close share dialog" title="Close">x</button>
+          <button id="share-close" class="icon-button" aria-label="Close share dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
         </div>
         <div class="modal-body">
           <div class="share-fields">
@@ -4690,7 +4757,9 @@ HTML = r"""<!doctype html>
             <div id="queue-modal-title" class="modal-title">Slurm Queue</div>
             <div id="queue-summary" class="csv-summary">No queue loaded.</div>
           </div>
-          <button id="queue-close" class="icon-button" aria-label="Close Slurm queue" title="Close">x</button>
+          <button id="queue-close" class="icon-button" aria-label="Close Slurm queue" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
         </div>
         <div class="modal-body">
           <div id="queue-output" class="csv-empty">Open the dialog to load squeue output.</div>
@@ -4709,7 +4778,9 @@ HTML = r"""<!doctype html>
           <div>
             <div id="settings-modal-title" class="modal-title">Settings</div>
           </div>
-          <button id="settings-close" class="icon-button" aria-label="Close settings" title="Close">x</button>
+          <button id="settings-close" class="icon-button" aria-label="Close settings" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
         </div>
         <div class="modal-body">
           <div class="settings-token">
@@ -4737,7 +4808,10 @@ HTML = r"""<!doctype html>
               <div class="settings-tool-title">Spack R library cache</div>
               <div id="spack-cache-summary" class="csv-summary">Not loaded.</div>
             </div>
-            <button id="spack-cache-refresh">Refresh Spack R library cache</button>
+            <button id="spack-cache-refresh" class="icon-text-button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+              <span>Resolve Spack R cache</span>
+            </button>
           </div>
         </div>
       </div>
@@ -4749,7 +4823,9 @@ HTML = r"""<!doctype html>
             <div id="plot-source-modal-title" class="modal-title">Add CSV Source</div>
             <div id="plot-source-modal-summary" class="csv-summary">Load CSV files from other experiments.</div>
           </div>
-          <button id="plot-source-close" class="icon-button" title="Close">x</button>
+          <button id="plot-source-close" class="icon-button" aria-label="Close CSV source dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
         </div>
         <div class="modal-body">
           <div id="plot-source-modal-list" class="plot-source-modal-list csv-empty">No CSV files loaded.</div>
@@ -4848,6 +4924,16 @@ HTML = r"""<!doctype html>
             <button id="describe-toggle">Show Reference</button>
           </div>
           <div id="describe-body" class="panel-body hidden">
+            <div class="describe-toolbar">
+              <input id="describe-search" type="search" placeholder="Search algorithms, aliases, properties, systems">
+              <div class="describe-filter" role="group" aria-label="Reference category">
+                <button type="button" data-describe-filter="algorithms">Algorithms</button>
+                <button type="button" data-describe-filter="dsl">DSL</button>
+                <button type="button" data-describe-filter="systems">Systems</button>
+                <button type="button" data-describe-filter="presets">Presets</button>
+                <button type="button" data-describe-filter="all">All</button>
+              </div>
+            </div>
             <div id="describe-output" class="describe-output">
               <div class="probe-placeholder">Open the reference to load available systems, partitioners, aliases, presets, and DSL commands.</div>
             </div>
@@ -5044,6 +5130,8 @@ HTML = r"""<!doctype html>
       describeCatalog: null,
       describeLoaded: false,
       describeOpen: false,
+      describeFilter: 'algorithms',
+      describeQuery: '',
       config: { name_template: '%Y.%m.%d-<name>' },
       openDirs: new Set(),
       archivedOpenDirs: new Set(),
@@ -7508,6 +7596,46 @@ HTML = r"""<!doctype html>
       const text = String(value ?? '').trim();
       return text || fallback;
     }
+    function describeQuery() {
+      return String(state.describeQuery || '').trim().toLowerCase();
+    }
+    function describeMatchesText(query, ...values) {
+      if (!query) return true;
+      return values.some(value => String(value ?? '').toLowerCase().includes(query));
+    }
+    function describePropertiesText(properties) {
+      const props = Array.isArray(properties) ? properties : [];
+      return props.map(prop => [
+        prop.key,
+        prop.value,
+        prop.allowed,
+        prop.when,
+        ...(Array.isArray(prop.values) ? prop.values : [])
+      ].filter(Boolean).join(' ')).join(' ');
+    }
+    function describeAliasMatches(alias, query) {
+      return describeMatchesText(
+        query,
+        alias?.name,
+        alias?.base,
+        alias?.parent,
+        alias?.args,
+        alias?.own_args,
+        describePropertiesText(alias?.properties)
+      );
+    }
+    function describeCommandMatches(command, query) {
+      return describeMatchesText(query, command?.name, command?.usage, command?.description);
+    }
+    function describePartitionerBaseMatches(partitioner, query) {
+      return describeMatchesText(
+        query,
+        partitioner?.name,
+        (partitioner?.hooks || []).join(' '),
+        describePropertiesText(partitioner?.defaults),
+        partitioner?.notes
+      );
+    }
     function appendDescribeChip(container, text, title = '') {
       const chip = document.createElement('span');
       chip.className = 'describe-chip';
@@ -7549,8 +7677,13 @@ HTML = r"""<!doctype html>
       return section;
     }
     function renderDescribeDsl(container, dsl) {
-      const commands = Array.isArray(dsl?.commands) ? dsl.commands : [];
-      const section = describeSection('Experiment DSL', `${commands.length} commands`);
+      const query = describeQuery();
+      const allCommands = Array.isArray(dsl?.commands) ? dsl.commands : [];
+      const commands = allCommands.filter(command => describeCommandMatches(command, query));
+      const allCommon = Array.isArray(dsl?.common_properties) ? dsl.common_properties : [];
+      const common = query ? allCommon.filter(property => describeMatchesText(query, property)) : allCommon;
+      if (!commands.length && !common.length) return false;
+      const section = describeSection('Experiment DSL', `${commands.length}/${allCommands.length} commands`);
       const grid = document.createElement('div');
       grid.className = 'describe-grid';
       const card = document.createElement('div');
@@ -7575,7 +7708,6 @@ HTML = r"""<!doctype html>
         list.appendChild(row);
       }
       card.appendChild(list);
-      const common = Array.isArray(dsl?.common_properties) ? dsl.common_properties : [];
       if (common.length) {
         const title = document.createElement('div');
         title.className = 'describe-muted';
@@ -7589,10 +7721,20 @@ HTML = r"""<!doctype html>
       grid.appendChild(card);
       section.appendChild(grid);
       container.appendChild(section);
+      return true;
     }
     function renderDescribeSystems(container, systems) {
-      const items = Array.isArray(systems) ? systems : [];
-      const section = describeSection('Systems', `${items.length} available`);
+      const query = describeQuery();
+      const allItems = Array.isArray(systems) ? systems : [];
+      const items = allItems.filter(system => describeMatchesText(
+        query,
+        system?.name,
+        (system?.hooks || []).join(' '),
+        describePropertiesText(system?.defaults),
+        system?.notes
+      ));
+      if (!items.length) return false;
+      const section = describeSection('Systems', `${items.length}/${allItems.length} available`);
       const grid = document.createElement('div');
       grid.className = 'describe-grid';
       for (const system of items) {
@@ -7614,13 +7756,22 @@ HTML = r"""<!doctype html>
       }
       section.appendChild(grid);
       container.appendChild(section);
+      return true;
     }
     function renderDescribePartitioners(container, partitioners) {
+      const query = describeQuery();
       const items = Array.isArray(partitioners) ? partitioners : [];
-      const section = describeSection('Partitioners and Algorithms', `${items.length} partitioners`);
+      const section = describeSection('Partitioners and Algorithms');
       const grid = document.createElement('div');
       grid.className = 'describe-grid';
+      let visibleCount = 0;
       for (const partitioner of items) {
+        const aliases = Array.isArray(partitioner.aliases) ? partitioner.aliases : [];
+        const baseMatches = describePartitionerBaseMatches(partitioner, query);
+        const matchingAliases = query ? aliases.filter(alias => describeAliasMatches(alias, query)) : aliases;
+        if (query && !baseMatches && !matchingAliases.length) continue;
+        const shownAliases = query && !baseMatches ? matchingAliases : aliases;
+        visibleCount += 1;
         const card = document.createElement('div');
         card.className = 'describe-card';
         const header = document.createElement('div');
@@ -7628,28 +7779,29 @@ HTML = r"""<!doctype html>
         const title = document.createElement('div');
         title.className = 'describe-card-title';
         title.textContent = partitioner.name || '';
-        const aliases = Array.isArray(partitioner.aliases) ? partitioner.aliases : [];
         const meta = document.createElement('div');
         meta.className = 'describe-card-meta';
-        meta.textContent = aliases.length ? `${aliases.length} aliases` : 'base algorithm';
+        meta.textContent = shownAliases.length ? `${shownAliases.length} aliases` : 'base algorithm';
         header.appendChild(title);
         header.appendChild(meta);
         card.appendChild(header);
         appendDescribeProperties(card, partitioner.defaults || []);
         const list = document.createElement('div');
         list.className = 'describe-alias-list';
-        const baseRow = document.createElement('div');
-        baseRow.className = 'describe-alias';
-        const baseName = document.createElement('div');
-        baseName.className = 'describe-name';
-        baseName.textContent = partitioner.name || '';
-        const baseMeta = document.createElement('div');
-        baseMeta.className = 'describe-muted';
-        baseMeta.textContent = 'Direct plugin name, no alias CLI arguments.';
-        baseRow.appendChild(baseName);
-        baseRow.appendChild(baseMeta);
-        list.appendChild(baseRow);
-        for (const alias of aliases) {
+        if (!query || baseMatches) {
+          const baseRow = document.createElement('div');
+          baseRow.className = 'describe-alias';
+          const baseName = document.createElement('div');
+          baseName.className = 'describe-name';
+          baseName.textContent = partitioner.name || '';
+          const baseMeta = document.createElement('div');
+          baseMeta.className = 'describe-muted';
+          baseMeta.textContent = 'Direct plugin name, no alias CLI arguments.';
+          baseRow.appendChild(baseName);
+          baseRow.appendChild(baseMeta);
+          list.appendChild(baseRow);
+        }
+        for (const alias of shownAliases) {
           const row = document.createElement('div');
           row.className = 'describe-alias';
           const name = document.createElement('div');
@@ -7671,33 +7823,59 @@ HTML = r"""<!doctype html>
         card.appendChild(list);
         grid.appendChild(card);
       }
+      if (!visibleCount) return false;
+      const count = section.querySelector('.describe-section-title');
+      const meta = document.createElement('div');
+      meta.className = 'describe-section-count';
+      meta.textContent = `${visibleCount}/${items.length} partitioners`;
+      count.appendChild(meta);
       section.appendChild(grid);
       container.appendChild(section);
+      return true;
     }
     function renderDescribeSimpleLists(container, title, items) {
-      const list = Array.isArray(items) ? items : [];
-      const section = describeSection(title, `${list.length} available`);
+      const query = describeQuery();
+      const allItems = Array.isArray(items) ? items : [];
+      const list = allItems.filter(item => describeMatchesText(query, item?.name || String(item), item?.path || ''));
+      if (!list.length) return false;
+      const section = describeSection(title, `${list.length}/${allItems.length} available`);
       const row = document.createElement('div');
       row.className = 'describe-chip-row';
       for (const item of list) appendDescribeChip(row, item.name || String(item));
-      if (!list.length) appendDescribeChip(row, 'none');
       section.appendChild(row);
       container.appendChild(section);
+      return true;
+    }
+    function renderDescribeFilters() {
+      document.querySelectorAll('[data-describe-filter]').forEach(button => {
+        button.classList.toggle('active', button.dataset.describeFilter === state.describeFilter);
+      });
+      const input = document.getElementById('describe-search');
+      if (input && input.value !== state.describeQuery) input.value = state.describeQuery;
     }
     function renderDescribeCatalog() {
       const body = document.getElementById('describe-body');
       const button = document.getElementById('describe-toggle');
       body.classList.toggle('hidden', !state.describeOpen);
       button.textContent = state.describeOpen ? 'Hide Reference' : 'Show Reference';
+      renderDescribeFilters();
       const box = document.getElementById('describe-output');
       if (!state.describeOpen || !state.describeLoaded || !state.describeCatalog) return;
       box.className = 'describe-output';
       box.innerHTML = '';
-      renderDescribeDsl(box, state.describeCatalog.dsl || {});
-      renderDescribeSystems(box, state.describeCatalog.systems || []);
-      renderDescribePartitioners(box, state.describeCatalog.partitioners || []);
-      renderDescribeSimpleLists(box, 'Parsers', state.describeCatalog.parsers || []);
-      renderDescribeSimpleLists(box, 'Presets', state.describeCatalog.presets || []);
+      const filter = state.describeFilter || 'algorithms';
+      let rendered = 0;
+      if (filter === 'all' || filter === 'algorithms') rendered += renderDescribePartitioners(box, state.describeCatalog.partitioners || []) ? 1 : 0;
+      if (filter === 'all' || filter === 'dsl') rendered += renderDescribeDsl(box, state.describeCatalog.dsl || {}) ? 1 : 0;
+      if (filter === 'all' || filter === 'systems') rendered += renderDescribeSystems(box, state.describeCatalog.systems || []) ? 1 : 0;
+      if (filter === 'all') rendered += renderDescribeSimpleLists(box, 'Parsers', state.describeCatalog.parsers || []) ? 1 : 0;
+      if (filter === 'all' || filter === 'presets') rendered += renderDescribeSimpleLists(box, 'Presets', state.describeCatalog.presets || []) ? 1 : 0;
+      if (!rendered) {
+        box.className = 'csv-empty';
+        box.textContent = state.describeQuery
+          ? `No reference entries match "${state.describeQuery}".`
+          : 'No reference entries in this category.';
+      }
     }
     async function loadDescribeCatalog() {
       const box = document.getElementById('describe-output');
@@ -9128,6 +9306,16 @@ HTML = r"""<!doctype html>
     document.getElementById('spack-cache-refresh').onclick = () => refreshSpackCache().catch(err => out(String(err)));
     document.getElementById('check').onclick = checkExperiment;
     document.getElementById('describe-toggle').onclick = () => toggleDescribePanel().catch(err => out(String(err)));
+    document.getElementById('describe-search').oninput = event => {
+      state.describeQuery = event.target.value || '';
+      renderDescribeCatalog();
+    };
+    document.querySelectorAll('[data-describe-filter]').forEach(button => {
+      button.onclick = () => {
+        state.describeFilter = button.dataset.describeFilter || 'algorithms';
+        renderDescribeCatalog();
+      };
+    });
     document.getElementById('probe-run').onclick = probeExperiment;
     document.getElementById('description-edit').onclick = editDescription;
     document.getElementById('description-cancel').onclick = cancelDescriptionEdit;
