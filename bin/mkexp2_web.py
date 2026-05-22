@@ -37,7 +37,17 @@ EXPERIMENT_SKIP_DIRS = {".git", ".mkexp2", "jobs", "logs", "plots", "results", "
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 TAG_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$")
 TAG_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
-DEFAULT_TAGS = [{"name": "Codex", "color": "#2563eb"}]
+TAG_COLOR_PALETTE = [
+    {"name": "Blue", "color": "#2563eb"},
+    {"name": "Teal", "color": "#0f766e"},
+    {"name": "Green", "color": "#16a34a"},
+    {"name": "Amber", "color": "#d97706"},
+    {"name": "Red", "color": "#dc2626"},
+    {"name": "Purple", "color": "#7c3aed"},
+    {"name": "Pink", "color": "#db2777"},
+    {"name": "Slate", "color": "#64748b"},
+]
+DEFAULT_TAGS = [{"name": "Codex", "color": TAG_COLOR_PALETTE[0]["color"]}]
 SINFO_LONG_FALLBACK = """Sat May 16 15:57:01 2026
 NODELIST    NODES PARTITION       STATE CPUS    S:C:T MEMORY TMP_DISK WEIGHT AVAIL_FE REASON
 backus          1      all*   allocated 128    1:64:2 101939        0      1   (null) none
@@ -892,6 +902,7 @@ class Mkexp2WebApp:
         return {
             "tags": sorted(tag_map.values(), key=lambda item: item["name"].casefold()),
             "assignments": assignments,
+            "palette": list(TAG_COLOR_PALETTE),
         }
 
     def read_tags(self):
@@ -2454,6 +2465,7 @@ HTML = r"""<!doctype html>
     .app.share-mode .danger-zone,
     .app.share-mode #check,
     .app.share-mode #share-experiment,
+    .app.share-mode #tag-open,
     .app.share-mode .tag-controls,
     .app.share-mode #add-plot-source {
       display: none !important;
@@ -3886,9 +3898,38 @@ HTML = r"""<!doctype html>
     }
     .tag-manager-grid {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 120px auto;
+      grid-template-columns: minmax(0, 1fr) minmax(220px, auto) auto;
       gap: 8px;
       align-items: end;
+    }
+    .tag-color-field {
+      display: grid;
+      gap: 5px;
+    }
+    .tag-color-palette {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+      min-height: 34px;
+    }
+    .tag-color-choice {
+      width: 24px;
+      height: 24px;
+      min-width: 24px;
+      padding: 0;
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background: var(--tag-color);
+      box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.14);
+    }
+    .tag-color-choice.active {
+      border-color: #0f172a;
+      box-shadow: inset 0 0 0 2px white;
+    }
+    .tag-color-choice:focus-visible {
+      outline: 2px solid rgba(37, 99, 235, 0.35);
+      outline-offset: 2px;
     }
     .tag-list {
       display: grid;
@@ -4445,10 +4486,11 @@ HTML = r"""<!doctype html>
               <span class="csv-summary">Tag name</span>
               <input id="tag-name" type="text" placeholder="Codex">
             </label>
-            <label>
+            <div class="tag-color-field">
               <span class="csv-summary">Border color</span>
-              <input id="tag-color" type="color" value="#2563eb">
-            </label>
+              <input id="tag-color" type="hidden" value="#2563eb">
+              <div id="tag-color-palette" class="tag-color-palette" role="radiogroup" aria-label="Border color"></div>
+            </div>
             <button id="tag-save">Save Tag</button>
           </div>
           <div id="tag-list" class="tag-list"></div>
@@ -4530,10 +4572,10 @@ HTML = r"""<!doctype html>
         <span class="view-tabs-spacer"></span>
         <div class="tag-controls" aria-label="Experiment tag controls">
           <select id="experiment-tag-select" title="Experiment tag"></select>
-          <button id="tag-open" class="icon-button" aria-label="Manage tags" title="Manage tags">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.2 13.2 20.6a2 2 0 0 1-2.8 0L3 13.2V3h10.2l7.4 7.4a2 2 0 0 1 0 2.8Z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>
-          </button>
         </div>
+        <button id="tag-open" class="icon-button" aria-label="Manage tags" title="Manage tags">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.2 13.2 20.6a2 2 0 0 1-2.8 0L3 13.2V3h10.2l7.4 7.4a2 2 0 0 1 0 2.8Z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>
+        </button>
         <button id="share-experiment" class="icon-button" aria-label="Share experiment" title="Share experiment">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.6 6.8-4.2"/><path d="m8.6 13.4 6.8 4.2"/></svg>
         </button>
@@ -4768,12 +4810,23 @@ HTML = r"""<!doctype html>
     </main>
   </div>
   <script>
+    const DEFAULT_TAG_COLOR_PALETTE = [
+      { name: 'Blue', color: '#2563eb' },
+      { name: 'Teal', color: '#0f766e' },
+      { name: 'Green', color: '#16a34a' },
+      { name: 'Amber', color: '#d97706' },
+      { name: 'Red', color: '#dc2626' },
+      { name: 'Purple', color: '#7c3aed' },
+      { name: 'Pink', color: '#db2777' },
+      { name: 'Slate', color: '#64748b' },
+    ];
     const state = {
       experiments: [],
       archivedExperiments: [],
       selected: null,
       pinnedExperiments: new Set(),
       tags: [],
+      tagPalette: DEFAULT_TAG_COLOR_PALETTE,
       tagAssignments: {},
       algorithms: [],
       algorithmLoading: false,
@@ -6754,6 +6807,38 @@ HTML = r"""<!doctype html>
       select.disabled = !state.selected || state.shared;
       select.title = state.selected ? 'Experiment tag' : 'Select an experiment first';
     }
+    function tagPaletteEntries() {
+      const raw = Array.isArray(state.tagPalette) && state.tagPalette.length ? state.tagPalette : DEFAULT_TAG_COLOR_PALETTE;
+      return raw
+        .map(item => ({
+          name: String(item?.name || item?.color || '').trim(),
+          color: String(item?.color || '').trim().toLowerCase()
+        }))
+        .filter(item => item.name && validTagColor(item.color));
+    }
+    function renderTagColorPalette(selectedColor = '') {
+      const input = document.getElementById('tag-color');
+      const palette = document.getElementById('tag-color-palette');
+      if (!input || !palette) return;
+      const entries = tagPaletteEntries();
+      const firstColor = entries[0]?.color || '#2563eb';
+      let active = validTagColor(selectedColor || input.value) ? String(selectedColor || input.value).toLowerCase() : firstColor;
+      if (!entries.some(item => item.color === active)) active = firstColor;
+      input.value = active;
+      palette.innerHTML = '';
+      for (const entry of entries) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `tag-color-choice${entry.color === active ? ' active' : ''}`;
+        button.style.setProperty('--tag-color', entry.color);
+        button.title = entry.name;
+        button.setAttribute('role', 'radio');
+        button.setAttribute('aria-label', entry.name);
+        button.setAttribute('aria-checked', entry.color === active ? 'true' : 'false');
+        button.onclick = () => renderTagColorPalette(entry.color);
+        palette.appendChild(button);
+      }
+    }
     function renderTagManager() {
       const list = document.getElementById('tag-list');
       if (!list) return;
@@ -6782,7 +6867,7 @@ HTML = r"""<!doctype html>
         row.appendChild(color);
         row.onclick = () => {
           document.getElementById('tag-name').value = tag.name;
-          document.getElementById('tag-color').value = validTagColor(tag.color) ? tag.color : '#2563eb';
+          renderTagColorPalette(tag.color);
         };
         list.appendChild(row);
       }
@@ -6790,8 +6875,10 @@ HTML = r"""<!doctype html>
     async function refreshTags() {
       const data = await api('/api/tags');
       state.tags = data.tags || [];
+      state.tagPalette = data.palette || DEFAULT_TAG_COLOR_PALETTE;
       state.tagAssignments = data.assignments || {};
       renderTagSelect();
+      renderTagColorPalette(document.getElementById('tag-color')?.value);
       renderTagManager();
       renderExperimentsList();
       return data;
@@ -6822,6 +6909,7 @@ HTML = r"""<!doctype html>
           body: JSON.stringify({ name, color })
         });
         state.tags = result.tags || [];
+        state.tagPalette = result.palette || state.tagPalette || DEFAULT_TAG_COLOR_PALETTE;
         state.tagAssignments = result.assignments || {};
         renderTagManager();
         renderTagSelect();

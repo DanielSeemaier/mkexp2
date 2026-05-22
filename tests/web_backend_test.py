@@ -401,6 +401,13 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="tag-modal"', mkexp2_web.HTML)
         self.assertIn('id="tag-open"', mkexp2_web.HTML)
         self.assertIn('id="tag-save"', mkexp2_web.HTML)
+        self.assertIn('id="tag-color" type="hidden"', mkexp2_web.HTML)
+        self.assertIn('id="tag-color-palette"', mkexp2_web.HTML)
+        self.assertIn("DEFAULT_TAG_COLOR_PALETTE", mkexp2_web.HTML)
+        self.assertNotIn('type="color"', mkexp2_web.HTML)
+        self.assertIn(".app.share-mode #tag-open", mkexp2_web.HTML)
+        self.assertLess(mkexp2_web.HTML.index('class="tag-controls"'), mkexp2_web.HTML.index('id="tag-open"'))
+        self.assertLess(mkexp2_web.HTML.index('id="tag-open"'), mkexp2_web.HTML.index('id="share-experiment"'))
         self.assertIn(".experiment-row.tagged", mkexp2_web.HTML)
         self.assertIn("border-left: 4px solid var(--experiment-tag-color)", mkexp2_web.HTML)
         self.assertIn("/api/tags", mkexp2_web.HTML)
@@ -752,6 +759,7 @@ class WebBackendTest(unittest.TestCase):
 
             defaults = app.read_tags()
             self.assertIn({"name": "Codex", "color": "#2563eb"}, defaults["tags"])
+            self.assertIn({"name": "Blue", "color": "#2563eb"}, defaults["palette"])
 
             updated = app.upsert_tag({"name": "Review", "color": "#0f766e"})
             self.assertIn({"name": "Review", "color": "#0f766e"}, updated["tags"])
