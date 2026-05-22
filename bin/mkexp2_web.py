@@ -8512,20 +8512,6 @@ def make_handler(app):
                     set_id = urllib.parse.unquote(match.group(2))
                     json_response(self, 200, app.delete_plot_artifact_set(experiment_id, set_id))
                     return
-                json_response(self, 404, {"error": "not found"})
-            except Exception as exc:
-                json_response(self, 400, {"error": str(exc)})
-
-        def do_DELETE(self):
-            parsed = urllib.parse.urlparse(self.path)
-            path = parsed.path
-            try:
-                if path.startswith("/api/share/"):
-                    json_response(self, 404, {"error": "not found"})
-                    return
-                if path.startswith("/api/") and not self.require_token():
-                    json_response(self, 401, {"error": "missing or invalid token"})
-                    return
                 match = re.match(r"^/api/experiments/([^/]+)/submit-lock$", path)
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))

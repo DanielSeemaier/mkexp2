@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import importlib.util
+import inspect
 import json
 import subprocess
 import tempfile
@@ -528,6 +529,20 @@ class WebBackendTest(unittest.TestCase):
             dev_request = dev_handler.__new__(dev_handler)
             dev_request.headers = {"X-MKEXP2-Token": ""}
             self.assertTrue(dev_request.require_token())
+
+    def test_delete_routes_share_one_handler(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+            handler = mkexp2_web.make_handler(app)
+            source = inspect.getsource(handler.do_DELETE)
+
+        file_source = (ROOT / "bin" / "mkexp2_web.py").read_text(encoding="utf-8")
+        self.assertEqual(file_source.count("def do_DELETE(self):"), 1)
+        self.assertIn("/plot-artifacts/", source)
+        self.assertIn("/plot-artifact-sets/", source)
+        self.assertIn("/submit-lock", source)
+        self.assertIn("app.delete_experiment", source)
 
     def test_html_contains_csv_tabs_and_comparison_view(self):
         self.assertIn('data-view="results-view"', mkexp2_web.HTML)
