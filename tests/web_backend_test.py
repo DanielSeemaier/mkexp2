@@ -488,12 +488,8 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("async function loadLogs", mkexp2_web.HTML)
         self.assertIn("async function loadLogFile", mkexp2_web.HTML)
         self.assertIn("ensureLogsLoaded", mkexp2_web.HTML)
-        self.assertLess(
-            mkexp2_web.HTML.index('data-view="install-log-view"'),
-            mkexp2_web.HTML.index('data-view="experiment-view"'),
-        )
-        self.assertIn('aria-label="Install Log"', mkexp2_web.HTML)
-        self.assertNotIn('data-view="install-log-view">Install Log</button>', mkexp2_web.HTML)
+        self.assertNotIn('data-view="install-log-view"', mkexp2_web.HTML)
+        self.assertNotIn('id="load-install-log"', mkexp2_web.HTML)
         self.assertIn("setView('experiment-view').catch", mkexp2_web.HTML)
         self.assertNotIn('id="plots-summary"', mkexp2_web.HTML)
         self.assertNotIn('id="plot-action-output"', mkexp2_web.HTML)
@@ -832,16 +828,13 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("results-stats", mkexp2_web.HTML)
         self.assertNotIn("state.compareEnabled", mkexp2_web.HTML)
 
-    def test_html_contains_install_log_view(self):
-        self.assertIn('data-view="install-log-view"', mkexp2_web.HTML)
-        self.assertIn('id="load-install-log"', mkexp2_web.HTML)
-        self.assertIn('aria-label="Reload install log"', mkexp2_web.HTML)
+    def test_html_renders_install_markdown_from_logs_view(self):
+        self.assertNotIn('data-view="install-log-view"', mkexp2_web.HTML)
+        self.assertNotIn('id="load-install-log"', mkexp2_web.HTML)
+        self.assertNotIn("/install-log", mkexp2_web.HTML)
         self.assertIn("function renderMarkdown", mkexp2_web.HTML)
-        self.assertIn("async function loadInstallLog", mkexp2_web.HTML)
-        self.assertIn("ensureInstallLogLoaded", mkexp2_web.HTML)
-        self.assertIn("viewId === 'install-log-view'", mkexp2_web.HTML)
-        self.assertIn("/install-log", mkexp2_web.HTML)
-        self.assertIn("logs/install.md does not exist.", mkexp2_web.HTML)
+        self.assertIn("/\\.md$/i.test(state.logContent.relative_path || '')", mkexp2_web.HTML)
+        self.assertIn("renderMarkdown(state.logContent.content || '', content)", mkexp2_web.HTML)
         self.assertIn("markdown-doc", mkexp2_web.HTML)
         self.assertNotIn(".markdown-doc {\n      border:", mkexp2_web.HTML)
         self.assertIn("cores", mkexp2_web.HTML)
@@ -862,7 +855,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertNotIn("description.md does not exist yet.", mkexp2_web.HTML)
         self.assertIn(".app.share-mode .description-edit-actions", mkexp2_web.HTML)
 
-    def test_install_log_result_handles_missing_and_existing_files(self):
+    def test_install_log_is_regular_markdown_log_entry(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             exp = repo / "exp"
@@ -870,13 +863,14 @@ class WebBackendTest(unittest.TestCase):
             (exp / "Experiment").write_text("ExperimentX() { :; }\n")
             app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
 
-            missing = app.install_log("exp")
-            self.assertFalse(missing["exists"])
-            self.assertTrue(missing["path"].endswith("logs/install.md"))
+            empty = app.list_logs("exp")
+            self.assertTrue(empty["exists"])
+            self.assertEqual(empty["entries"], [])
 
             (exp / "logs" / "install.md").write_text("# mkexp2 install log\n\n```console\nok\n```\n")
-            existing = app.install_log("exp")
-            self.assertTrue(existing["exists"])
+            root = app.list_logs("exp")
+            self.assertIn("install.md", [entry["path"] for entry in root["entries"]])
+            existing = app.log_file("exp", "install.md")
             self.assertIn("# mkexp2 install log", existing["content"])
             self.assertFalse(existing["truncated"])
 
@@ -957,7 +951,7 @@ class WebBackendTest(unittest.TestCase):
             self.assertEqual(root["entries"][0]["type"], "dir")
             self.assertEqual(root["entries"][0]["name"], "Algo/Run")
             self.assertEqual(root["entries"][0]["path"], "Algo/Run")
-            self.assertNotIn("install.md", [entry["path"] for entry in root["entries"]])
+            self.assertIn("install.md", [entry["path"] for entry in root["entries"]])
             self.assertNotIn("content", root["entries"][0])
 
             nested = app.list_logs("exp", "Algo/Run")

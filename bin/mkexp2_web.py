@@ -2019,22 +2019,6 @@ class Mkexp2WebApp:
                 )
         return {"files": files}
 
-    def install_log(self, experiment_id):
-        path = self.active_experiment_path(experiment_id)
-        log_file = path / "logs" / "install.md"
-        if not log_file.is_file():
-            return {"exists": False, "path": str(log_file), "content": ""}
-        stat = log_file.stat()
-        content = log_file.read_text(encoding="utf-8", errors="replace")
-        return {
-            "exists": True,
-            "path": str(log_file),
-            "size": stat.st_size,
-            "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
-            "content": content[:MAX_TEXT_RESPONSE],
-            "truncated": len(content) > MAX_TEXT_RESPONSE,
-        }
-
     def description(self, experiment_id):
         path = self.active_experiment_path(experiment_id)
         description_file = path / "description.md"
@@ -2575,7 +2559,7 @@ class Mkexp2WebApp:
         entries = []
         if not str(rel_dir or ""):
             for child in directory.iterdir():
-                if child.name.startswith(".") or child.name == "install.md":
+                if child.name.startswith("."):
                     continue
                 if not child.is_dir():
                     entries.append(make_entry(child))
@@ -5432,7 +5416,6 @@ HTML = r"""<!doctype html>
     </div>
     <main class="main">
       <div class="view-tabs">
-        <button class="view-tab icon-tab" data-view="install-log-view" aria-label="Install Log" title="Install Log">?</button>
         <button class="view-tab active" data-view="experiment-view">Experiment</button>
         <button class="view-tab" data-view="results-view">Results</button>
         <button class="view-tab" data-view="logs-view">Logs</button>
@@ -5608,22 +5591,6 @@ HTML = r"""<!doctype html>
           </div>
         </section>
       </section>
-      <section id="install-log-view" class="view-panel">
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <div class="panel-title">Install Log</div>
-              <div id="install-log-summary" class="csv-summary">No install log loaded.</div>
-            </div>
-            <button id="load-install-log" class="icon-button" aria-label="Reload install log" title="Reload install log">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
-            </button>
-          </div>
-          <div class="panel-body">
-            <div id="install-log" class="csv-empty">Select an experiment, then reload the install log.</div>
-          </div>
-        </section>
-      </section>
       <section id="logs-view" class="view-panel">
         <section class="panel">
           <div class="panel-header">
@@ -5730,8 +5697,6 @@ HTML = r"""<!doctype html>
       compareColumnModes: {},
       columnVisibility: {},
       columnVisibilityFor: null,
-      installLog: null,
-      installLogFor: null,
       logsDir: '',
       logsListing: null,
       logsFor: null,
@@ -7576,31 +7541,6 @@ HTML = r"""<!doctype html>
       );
 
     }
-    function renderInstallLogWorkspace() {
-      const summary = document.getElementById('install-log-summary');
-      const box = document.getElementById('install-log');
-      if (!state.selected) {
-        summary.textContent = 'No experiment selected.';
-        box.className = 'csv-empty';
-        box.textContent = 'Select an experiment first.';
-        return;
-      }
-      if (state.installLogFor !== state.selected || !state.installLog) {
-        summary.textContent = 'No install log loaded.';
-        box.className = 'csv-empty';
-        box.textContent = 'Reload the install log for this experiment.';
-        return;
-      }
-      if (!state.installLog.exists) {
-        summary.textContent = 'logs/install.md does not exist.';
-        box.className = 'csv-empty';
-        box.textContent = 'No install log exists for this experiment yet. Run install or submit with install first.';
-        return;
-      }
-      const suffix = state.installLog.truncated ? ' (truncated)' : '';
-      summary.textContent = `logs/install.md, ${state.installLog.size || 0} bytes, modified ${state.installLog.modified_at || 'unknown'}${suffix}`;
-      renderMarkdown(state.installLog.content || '', box);
-    }
     function formatBytes(value) {
       const size = Number(value);
       if (!Number.isFinite(size)) return '';
@@ -7621,12 +7561,14 @@ HTML = r"""<!doctype html>
       const content = document.getElementById('log-content');
       if (!state.selected) {
         pathLabel.textContent = '';
+        content.className = 'log-content';
         list.innerHTML = '<div class="csv-empty">Select an experiment first.</div>';
         content.innerHTML = '<div class="csv-empty">Select an experiment first.</div>';
         return;
       }
       if (state.logsFor !== state.selected || !state.logsListing) {
         pathLabel.textContent = '';
+        content.className = 'log-content';
         list.innerHTML = '<div class="csv-empty">Open the Logs tab to load the log directory.</div>';
         content.innerHTML = '<div class="csv-empty">Select a log file to load its content.</div>';
         return;
@@ -7635,6 +7577,7 @@ HTML = r"""<!doctype html>
       const dir = listing.dir || '';
       pathLabel.textContent = dir ? `${dir}/` : '';
       if (!listing.exists) {
+        content.className = 'log-content';
         list.innerHTML = '<div class="csv-empty">No logs directory exists for this experiment yet.</div>';
         content.innerHTML = '<div class="csv-empty">Run experiments first, then reload logs.</div>';
         return;
@@ -7682,8 +7625,22 @@ HTML = r"""<!doctype html>
         list.appendChild(more);
       }
       if (state.logContent && state.logContent.relative_path === state.selectedLog) {
-        content.innerHTML = `<pre>${esc(state.logContent.content || '')}</pre>`;
+        const isMarkdown = /\.md$/i.test(state.logContent.relative_path || '');
+        if (isMarkdown) {
+          renderMarkdown(state.logContent.content || '', content);
+          content.classList.add('log-content');
+          if (state.logContent.truncated) {
+            const note = document.createElement('div');
+            note.className = 'csv-summary';
+            note.textContent = 'File preview is truncated by the backend response limit.';
+            content.appendChild(note);
+          }
+        } else {
+          content.className = 'log-content';
+          content.innerHTML = `<pre>${esc(state.logContent.content || '')}</pre>`;
+        }
       } else {
+        content.className = 'log-content';
         content.innerHTML = '<div class="csv-empty">Select a log file to load its content.</div>';
       }
     }
@@ -7710,10 +7667,6 @@ HTML = r"""<!doctype html>
       if (!state.selected) return;
       if (state.resultsFor !== state.selected) await loadResults();
     }
-    async function ensureInstallLogLoaded() {
-      if (!state.selected) return;
-      if (state.installLogFor !== state.selected) await loadInstallLog();
-    }
     async function activateCsvView(viewId) {
       await ensureResultsLoaded();
       if (viewId === 'results-view') {
@@ -7731,9 +7684,6 @@ HTML = r"""<!doctype html>
       });
       if (viewId === 'results-view') {
         await activateCsvView(viewId);
-      }
-      if (viewId === 'install-log-view') {
-        await ensureInstallLogLoaded();
       }
       if (viewId === 'logs-view') {
         await ensureLogsLoaded();
@@ -8866,8 +8816,6 @@ HTML = r"""<!doctype html>
       state.compareColumnModes = {};
       state.columnVisibility = {};
       state.columnVisibilityFor = null;
-      state.installLog = null;
-      state.installLogFor = null;
       state.description = null;
       state.descriptionFor = null;
       state.descriptionEditing = false;
@@ -8897,7 +8845,6 @@ HTML = r"""<!doctype html>
       setEditorValue('');
       renderResultsWorkspace();
       renderStatsWorkspace();
-      renderInstallLogWorkspace();
       renderDescriptionWorkspace();
       renderLogsWorkspace();
       renderSubmitLock({ locked: false });
@@ -9249,8 +9196,6 @@ HTML = r"""<!doctype html>
       state.compareColumnModes = {};
       state.columnVisibility = {};
       state.columnVisibilityFor = null;
-      state.installLog = null;
-      state.installLogFor = null;
       state.description = null;
       state.descriptionFor = null;
       state.descriptionEditing = false;
@@ -9276,7 +9221,6 @@ HTML = r"""<!doctype html>
       setView('experiment-view').catch(err => out(String(err)));
       renderResultsWorkspace();
       renderStatsWorkspace();
-      renderInstallLogWorkspace();
       renderDescriptionWorkspace();
       renderLogsWorkspace();
       renderSubmitLock({ locked: false });
@@ -10250,14 +10194,6 @@ HTML = r"""<!doctype html>
       state.statsFor = state.selected;
       renderStatsWorkspace();
     }
-    async function loadInstallLog() {
-      if (!state.selected) return;
-      const data = await api(`/api/experiments/${encodeURIComponent(state.selected)}/install-log`);
-      clearTransientOutput();
-      state.installLog = data;
-      state.installLogFor = state.selected;
-      renderInstallLogWorkspace();
-    }
     function cpuCount(value) {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed : NaN;
@@ -10389,7 +10325,6 @@ HTML = r"""<!doctype html>
     };
     document.getElementById('load-results').onclick = () => withBusyButton('load-results', '', loadResults).catch(err => out(String(err)));
     document.getElementById('load-stats').onclick = () => withBusyButton('load-stats', 'Generating...', loadStats).catch(err => out(String(err)));
-    document.getElementById('load-install-log').onclick = () => withBusyButton('load-install-log', '', loadInstallLog).catch(err => out(String(err)));
     document.getElementById('reload-logs').onclick = () => withBusyButton('reload-logs', '', () => loadLogs(state.logsDir || '')).catch(err => out(String(err)));
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape' && closeVisibleModal()) {
@@ -10491,9 +10426,6 @@ def make_handler(app):
                 return
             if tail == "stats":
                 json_response(self, 200, app.stats(experiment_id))
-                return
-            if tail == "install-log":
-                json_response(self, 200, app.install_log(experiment_id))
                 return
             if tail == "download-options":
                 json_response(self, 200, app.experiment_download_options(experiment_id))
@@ -10699,10 +10631,6 @@ def make_handler(app):
                 match = re.match(r"^/api/experiments/([^/]+)/stats$", path)
                 if match:
                     json_response(self, 200, app.stats(urllib.parse.unquote(match.group(1))))
-                    return
-                match = re.match(r"^/api/experiments/([^/]+)/install-log$", path)
-                if match:
-                    json_response(self, 200, app.install_log(urllib.parse.unquote(match.group(1))))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/download-options$", path)
                 if match:

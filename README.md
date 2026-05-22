@@ -493,12 +493,10 @@ The UI can:
   `.mkexp2/submit.lock` keeps the Submit button disabled
 - clear `.mkexp2/submit.lock` from the Submit panel to recover from crashed or
   abandoned submissions
-- auto-load and render `logs/install.md` from the Install Log tab, with a
-  reload action and an empty state when the log does not exist yet
 - browse run logs lazily from the Logs tab: the first two run-log directory
   levels are collapsed into `Algorithm/Experiment` entries, `logs/install.md`
-  is hidden because it has its own tab, and file contents are read only after
-  selecting a specific log file
+  appears as a normal root log entry and is rendered as Markdown when selected,
+  and file contents are read only after selecting a specific log file
 - display CSV results in the Results tab with parsed tables, remembered column
   visibility, and multi-select algorithm buttons; selecting two or more CSVs
   automatically shows them side by side, locks scrolling across every selected
