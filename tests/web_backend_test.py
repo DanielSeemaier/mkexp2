@@ -635,6 +635,10 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('class="settings-section"', mkexp2_web.HTML)
         self.assertIn("async function deleteTag", mkexp2_web.HTML)
         self.assertIn("/api/tags/${encodeURIComponent(name)}", mkexp2_web.HTML)
+        self.assertIn('id="archive-codex-experiments"', mkexp2_web.HTML)
+        self.assertIn("async function archiveCodexExperiments", mkexp2_web.HTML)
+        self.assertIn("/api/tags/Codex/archive-experiments", mkexp2_web.HTML)
+        self.assertIn("starred or submit-locked", mkexp2_web.HTML)
         self.assertLess(mkexp2_web.HTML.index('class="tag-controls"'), mkexp2_web.HTML.index('id="share-experiment"'))
         self.assertIn(".experiment-row.tagged", mkexp2_web.HTML)
         self.assertIn("border-left: 4px solid var(--experiment-tag-color)", mkexp2_web.HTML)
@@ -1239,6 +1243,38 @@ class WebBackendTest(unittest.TestCase):
                 app.archive_experiment("exp")
             self.assertTrue((exp / "Experiment").is_file())
             self.assertFalse((repo / "exp.archived").exists())
+
+    def test_archive_tagged_experiments_skips_pinned_and_locked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            for name in ["codex-free", "codex-pinned", "codex-locked", "manual"]:
+                path = repo / name
+                path.mkdir()
+                (path / "Experiment").write_text(f"Experiment{name.replace('-', '')}() {{ :; }}\n")
+            (repo / "codex-locked" / ".mkexp2").mkdir()
+            (repo / "codex-locked" / ".mkexp2" / "submit.lock").write_text("started_at=now\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+            for experiment_id in ["codex-free", "codex-pinned", "codex-locked"]:
+                app.assign_experiment_tag(experiment_id, "Codex")
+            app.write_pins(["codex-pinned"])
+
+            result = app.archive_tagged_experiments("Codex")
+
+            self.assertEqual(result["matching"], 3)
+            self.assertEqual([item["id"] for item in result["archived"]], ["codex-free"])
+            self.assertEqual([item["id"] for item in result["skipped_pinned"]], ["codex-pinned"])
+            self.assertEqual([item["id"] for item in result["skipped_locked"]], ["codex-locked"])
+            self.assertEqual(result["failed"], [])
+            self.assertTrue((repo / "codex-free.archived" / "Experiment").is_file())
+            self.assertTrue((repo / "codex-pinned" / "Experiment").is_file())
+            self.assertTrue((repo / "codex-locked" / "Experiment").is_file())
+            self.assertTrue((repo / "manual" / "Experiment").is_file())
+            self.assertEqual(app.read_pins()["pinned"], ["codex-pinned"])
+            self.assertEqual(app.tag_for_experiment("codex-free.archived")["name"], "Codex")
+            self.assertEqual(
+                [item["id"] for item in app.list_experiments(force=True)],
+                ["codex-locked", "codex-pinned", "manual"],
+            )
 
     def test_archive_and_unarchive_reject_collisions_and_bad_paths(self):
         with tempfile.TemporaryDirectory() as tmp:

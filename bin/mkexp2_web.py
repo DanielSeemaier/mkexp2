@@ -1568,6 +1568,59 @@ class Mkexp2WebApp:
             "archived_path": str(archived_path),
         }
 
+    def archive_tagged_experiments(self, tag_name):
+        tag_name = normalize_tag_name(tag_name)
+        if not tag_name:
+            raise ValueError("tag name is required")
+        tags_state = self.read_tags()
+        tags_by_name = {tag["name"]: tag for tag in tags_state["tags"]}
+        if tag_name not in tags_by_name:
+            raise ValueError(f"unknown tag: {tag_name}")
+
+        assignments = tags_state.get("assignments") or {}
+        pinned = set(self.read_pins().get("pinned") or [])
+        archived = []
+        skipped_locked = []
+        skipped_pinned = []
+        failed = []
+        matching = 0
+
+        for experiment in list(self.list_experiments(force=True)):
+            experiment_id = experiment["id"]
+            if assignments.get(experiment_id) != tag_name:
+                continue
+            matching += 1
+            if experiment_id in pinned:
+                skipped_pinned.append({"id": experiment_id, "reason": "pinned"})
+                continue
+            lock = experiment.get("submit_lock") or {}
+            if lock.get("locked"):
+                skipped_locked.append(
+                    {
+                        "id": experiment_id,
+                        "reason": "submit_locked",
+                        "submit_lock": lock,
+                    }
+                )
+                continue
+            try:
+                archived.append(self.archive_experiment(experiment_id))
+            except Exception as exc:  # keep bulk maintenance useful despite per-item collisions
+                failed.append({"id": experiment_id, "error": str(exc)})
+
+        return {
+            "tag": tag_name,
+            "matching": matching,
+            "archived": archived,
+            "skipped_locked": skipped_locked,
+            "skipped_pinned": skipped_pinned,
+            "failed": failed,
+            "archived_count": len(archived),
+            "skipped_locked_count": len(skipped_locked),
+            "skipped_pinned_count": len(skipped_pinned),
+            "failed_count": len(failed),
+        }
+
     def unarchive_experiment(self, experiment_id):
         path = self.experiment_path(experiment_id)
         if not path.name.endswith(ARCHIVE_SUFFIX):
@@ -5273,6 +5326,17 @@ HTML = r"""<!doctype html>
           </div>
           <div class="settings-tool">
             <div>
+              <div class="settings-tool-title">Codex cleanup</div>
+              <div class="csv-summary">Archive active Codex-tagged experiments unless they are starred or submit-locked.</div>
+            </div>
+            <button id="archive-codex-experiments" class="icon-text-button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+              <span>Archive Codex</span>
+            </button>
+          </div>
+          <div id="archive-codex-output" class="csv-empty hidden"></div>
+          <div class="settings-tool">
+            <div>
               <div class="settings-tool-title">Spack R library cache</div>
               <div id="spack-cache-summary" class="csv-summary">Not loaded.</div>
             </div>
@@ -7995,6 +8059,45 @@ HTML = r"""<!doctype html>
         renderExperimentsList();
       });
     }
+    function renderArchiveCodexResult(result) {
+      const output = document.getElementById('archive-codex-output');
+      if (!output) return;
+      const archivedCount = result?.archived_count || 0;
+      const lockedCount = result?.skipped_locked_count || 0;
+      const pinnedCount = result?.skipped_pinned_count || 0;
+      const failedCount = result?.failed_count || 0;
+      const parts = [
+        `${archivedCount} archived`,
+        `${pinnedCount} starred skipped`,
+        `${lockedCount} submit-locked skipped`,
+      ];
+      if (failedCount) parts.push(`${failedCount} failed`);
+      output.className = `csv-empty${failedCount ? ' status-bad' : ''}`;
+      output.textContent = parts.join('; ') + '.';
+      if (failedCount) {
+        output.title = (result.failed || []).map(item => `${item.id}: ${item.error}`).join('\n');
+      } else {
+        output.title = '';
+      }
+    }
+    async function archiveCodexExperiments() {
+      const message = 'Archive all active, unstarred, unlocked experiments tagged Codex? Starred or submitted experiments will be skipped.';
+      if (!confirm(message)) return;
+      const button = document.getElementById('archive-codex-experiments');
+      await withBusyButton(button, 'Archiving...', async () => {
+        const result = await api('/api/tags/Codex/archive-experiments', {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+        renderArchiveCodexResult(result);
+        const archivedIds = new Set((result.archived || []).map(item => item.id));
+        if (state.selected && archivedIds.has(state.selected)) clearSelectedExperiment();
+        await Promise.all([
+          refreshExperiments({ force: true }),
+          loadArchivedExperiments({ force: true }).catch(err => out(String(err)))
+        ]);
+      });
+    }
     function renderExperimentTree(container, node, prefix = '') {
       const folders = Array.from(node.folders.entries()).sort((left, right) => {
         return (right[1].latest || 0) - (left[1].latest || 0) || left[0].localeCompare(right[0]);
@@ -10311,6 +10414,7 @@ HTML = r"""<!doctype html>
     document.getElementById('settings-open').onclick = openSettingsDialog;
     document.getElementById('settings-close').onclick = closeSettingsDialog;
     document.getElementById('theme-dark-toggle').onchange = event => saveTheme(event.target.checked ? 'dark' : 'light');
+    document.getElementById('archive-codex-experiments').onclick = () => archiveCodexExperiments().catch(err => out(String(err)));
     document.getElementById('spack-cache-refresh').onclick = () => refreshSpackCache().catch(err => out(String(err)));
     document.getElementById('check').onclick = checkExperiment;
     document.getElementById('describe-toggle').onclick = () => toggleDescribePanel().catch(err => out(String(err)));
@@ -10770,6 +10874,11 @@ def make_handler(app):
                     return
                 if path == "/api/tags":
                     json_response(self, 200, app.upsert_tag(payload))
+                    return
+                match = re.match(r"^/api/tags/([^/]+)/archive-experiments$", path)
+                if match:
+                    tag_name = urllib.parse.unquote(match.group(1))
+                    json_response(self, 200, app.archive_tagged_experiments(tag_name))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/rename$", path)
                 if match:
