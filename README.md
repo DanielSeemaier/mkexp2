@@ -93,7 +93,9 @@ mkexp2 stats --json
 The JSON output keeps the legacy geometric-mean `avg_cut` and `avg_time`
 fields, and also reports failure/timeout/crash/imbalance counts plus common
 subsets that worked for every algorithm: all successful cuts, balanced cuts,
-and successful runtimes.
+and successful runtimes. In the web UI these common subsets are labeled as
+fair sets and are computed only on rows that have valid data for every
+algorithm.
 
 Validate an `Experiment` without generating jobs:
 
@@ -451,9 +453,10 @@ The UI can:
 - commit submitted state to Git after submission
 - run `mkexp2 parse` from the Results tab and reload CSV results when parsing
   succeeds
-- view failure-aware stats at the top of Results, backed by `mkexp2 stats
+- generate failure-aware stats on demand at the top of Results, backed by `mkexp2 stats
   --json`, including row quality counters, all successful cuts, balanced cuts,
-  successful runtimes, and common subsets that worked for every algorithm
+  successful runtimes, and fair-set/common subsets that worked for every
+  algorithm
 - refresh run progress from the Experiment page; selecting an experiment runs
   progress once automatically, the web backend uses generated
   `jobs/*.cmds.meta.tsv` files when available and falls back to `mkexp2

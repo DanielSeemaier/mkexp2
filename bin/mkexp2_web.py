@@ -4101,6 +4101,14 @@ HTML = r"""<!doctype html>
       grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
       gap: 8px;
     }
+    .stats-note {
+      color: var(--muted);
+      padding: 10px 12px;
+      border-left: 3px solid var(--accent);
+      background: #eef8f6;
+      border-radius: 6px;
+      line-height: 1.45;
+    }
     .stat-card {
       min-width: 0;
       padding: 9px 10px;
@@ -4990,11 +4998,12 @@ HTML = r"""<!doctype html>
                   <div class="panel-title">Stats</div>
                   <div id="stats-summary" class="csv-summary">No stats loaded.</div>
                 </div>
-                <button id="load-stats" class="icon-button" aria-label="Reload stats" title="Reload stats">
+                <button id="load-stats" class="icon-text-button" aria-label="Generate stats" title="Generate stats">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+                  <span>Generate Stats</span>
                 </button>
               </div>
-              <div id="stats-output" class="csv-empty">Load results to summarize parsed CSV results.</div>
+              <div id="stats-output" class="csv-empty">Generate stats to summarize parsed CSV results.</div>
             </section>
             <div class="csv-tools">
               <div class="result-toolbar">
@@ -6738,6 +6747,12 @@ HTML = r"""<!doctype html>
       }
       box.appendChild(wrap);
     }
+    function appendStatsNote(box, text) {
+      const note = document.createElement('div');
+      note.className = 'stats-note';
+      note.textContent = text;
+      box.appendChild(note);
+    }
     function appendStatsTable(box, title, headers, rows) {
       const section = document.createElement('section');
       section.className = 'stats-section';
@@ -6788,7 +6803,7 @@ HTML = r"""<!doctype html>
       if (state.statsFor !== state.selected || !state.stats) {
         summary.textContent = 'No stats loaded.';
         box.className = 'csv-empty';
-        box.textContent = 'Reload stats to summarize parsed CSV results.';
+        box.textContent = 'Generate stats to summarize parsed CSV results.';
         return;
       }
       const stats = state.stats.stats_json || null;
@@ -6801,6 +6816,9 @@ HTML = r"""<!doctype html>
       }
       const totals = stats.summary || {};
       const common = stats.common || {};
+      const keyColumns = Array.isArray(stats.key_columns) && stats.key_columns.length
+        ? stats.key_columns.join(', ')
+        : 'row identity';
       summary.textContent = `${algorithms.length} algorithm(s), ${formatStatCount(totals.rows ?? algorithms.reduce((sum, item) => sum + Number(item.rows || 0), 0))} row(s)`;
       box.className = 'stats-workspace';
       box.innerHTML = '';
@@ -6812,9 +6830,14 @@ HTML = r"""<!doctype html>
         { label: 'Timeouts', value: formatStatCount(totals.timeouts) },
         { label: 'Crashes', value: formatStatCount(totals.crashes) },
         { label: 'Imbalanced', value: formatStatCount(totals.imbalanced) },
-        { label: 'Common Balanced', value: formatStatCount(common.balanced_cut_keys) },
-        { label: 'Common Time', value: formatStatCount(common.time_keys) },
+        { label: 'Fair all cuts', value: formatStatCount(common.cut_keys) },
+        { label: 'Fair balanced cuts', value: formatStatCount(common.balanced_cut_keys) },
+        { label: 'Fair runtimes', value: formatStatCount(common.time_keys) },
       ]);
+      appendStatsNote(
+        box,
+        `Fair-set values are computed only on common rows with valid data for every algorithm, matched by ${keyColumns}. Balanced cuts exclude failed, timed-out, and imbalanced runs; the Imbalanced column keeps the balance information as a count.`
+      );
 
       appendStatsTable(
         box,
@@ -6840,7 +6863,7 @@ HTML = r"""<!doctype html>
       appendStatsTable(
         box,
         'Cut Quality',
-        ['Algorithm', 'Balanced n', 'Balanced gmean', 'Balanced mean', 'Balanced min', 'Balanced max', 'Common balanced n', 'Common balanced gmean', 'All-cut n', 'All-cut gmean', 'Common all-cut gmean'],
+        ['Algorithm', 'Balanced n', 'Balanced gmean', 'Balanced mean', 'Balanced min', 'Balanced max', 'Fair balanced n', 'Fair balanced gmean', 'All-cut n', 'All-cut gmean', 'Fair all-cut gmean'],
         algorithms.map(item => {
           const cuts = item.cuts || {};
           const balanced = statMetric(cuts.balanced);
@@ -6866,7 +6889,7 @@ HTML = r"""<!doctype html>
       appendStatsTable(
         box,
         'Runtime',
-        ['Algorithm', 'Successful n', 'Time gmean', 'Time mean', 'Time min', 'Time max', 'Common n', 'Common gmean', 'Common mean', 'Common min', 'Common max'],
+        ['Algorithm', 'Successful n', 'Time gmean', 'Time mean', 'Time min', 'Time max', 'Fair n', 'Fair gmean', 'Fair mean', 'Fair min', 'Fair max'],
         algorithms.map(item => {
           const times = item.times || {};
           const successful = statMetric(times.successful || { count: item.time_count, gmean: item.avg_time });
@@ -6887,21 +6910,6 @@ HTML = r"""<!doctype html>
         })
       );
 
-      appendStatsTable(
-        box,
-        'Balance',
-        ['Algorithm', 'Measured n', 'Imbalance mean', 'Imbalance min', 'Imbalance max'],
-        algorithms.map(item => {
-          const balance = statMetric(item.balance?.successful);
-          return [
-            item.algorithm || '',
-            metricField(balance, 'count'),
-            metricField(balance, 'mean'),
-            metricField(balance, 'min'),
-            metricField(balance, 'max'),
-          ];
-        })
-      );
     }
     function renderInstallLogWorkspace() {
       const summary = document.getElementById('install-log-summary');
@@ -7037,17 +7045,12 @@ HTML = r"""<!doctype html>
       if (!state.selected) return;
       if (state.resultsFor !== state.selected) await loadResults();
     }
-    async function ensureStatsLoaded() {
-      if (!state.selected) return;
-      if (state.statsFor !== state.selected || !state.stats) await loadStats();
-    }
     async function ensureInstallLogLoaded() {
       if (!state.selected) return;
       if (state.installLogFor !== state.selected) await loadInstallLog();
     }
     async function activateCsvView(viewId) {
       await ensureResultsLoaded();
-      await ensureStatsLoaded();
       if (viewId === 'results-view') {
         renderResultsWorkspace();
         renderStatsWorkspace();
@@ -8579,7 +8582,9 @@ HTML = r"""<!doctype html>
         const completed = await watchAction(action.id);
         if (completed?.status === 'completed' && completed.result?.parsed) {
           await loadResults();
-          await loadStats();
+          state.stats = null;
+          state.statsFor = null;
+          renderStatsWorkspace();
         }
       });
     }
@@ -9347,7 +9352,7 @@ HTML = r"""<!doctype html>
       state.plotNoDockerTouched = true;
     };
     document.getElementById('load-results').onclick = () => withBusyButton('load-results', '', loadResults).catch(err => out(String(err)));
-    document.getElementById('load-stats').onclick = () => withBusyButton('load-stats', '', loadStats).catch(err => out(String(err)));
+    document.getElementById('load-stats').onclick = () => withBusyButton('load-stats', 'Generating...', loadStats).catch(err => out(String(err)));
     document.getElementById('load-install-log').onclick = () => withBusyButton('load-install-log', '', loadInstallLog).catch(err => out(String(err)));
     document.getElementById('reload-logs').onclick = () => withBusyButton('reload-logs', '', () => loadLogs(state.logsDir || '')).catch(err => out(String(err)));
     document.querySelectorAll('.view-tab').forEach(button => {

@@ -324,14 +324,19 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('data-view="plots-view"', mkexp2_web.HTML)
         self.assertNotIn('data-view="stats-view"', mkexp2_web.HTML)
         self.assertIn('id="stats-output"', mkexp2_web.HTML)
-        self.assertIn('aria-label="Reload stats"', mkexp2_web.HTML)
+        self.assertIn('aria-label="Generate stats"', mkexp2_web.HTML)
+        self.assertIn("Generate stats to summarize parsed CSV results.", mkexp2_web.HTML)
+        self.assertIn("Generating...", mkexp2_web.HTML)
         self.assertLess(
             mkexp2_web.HTML.index('id="stats-output"'),
             mkexp2_web.HTML.index('class="csv-tools"'),
         )
         self.assertIn("Run Quality", mkexp2_web.HTML)
         self.assertIn("Cut Quality", mkexp2_web.HTML)
-        self.assertIn("Common balanced", mkexp2_web.HTML)
+        self.assertIn("Fair-set values are computed only on common rows", mkexp2_web.HTML)
+        self.assertIn("Fair balanced", mkexp2_web.HTML)
+        self.assertNotIn("async function ensureStatsLoaded", mkexp2_web.HTML)
+        self.assertNotIn("Measured n", mkexp2_web.HTML)
         self.assertIn("function renderStatsWorkspace", mkexp2_web.HTML)
         self.assertIn("async function loadStats", mkexp2_web.HTML)
         self.assertIn("/stats", mkexp2_web.HTML)
