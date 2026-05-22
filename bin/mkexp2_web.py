@@ -3942,7 +3942,7 @@ HTML = r"""<!doctype html>
       justify-content: space-between;
       align-items: center;
       gap: 10px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
     }
     .plot-artifact-view-toggle {
       display: inline-flex;
@@ -4018,8 +4018,9 @@ HTML = r"""<!doctype html>
       grid-template-columns: minmax(0, 1fr);
     }
     .plot-artifact-sidebar .plot-artifact-toolbar {
-      align-items: flex-start;
-      flex-direction: column;
+      align-items: center;
+      flex-direction: row;
+      justify-content: space-between;
     }
     .plot-artifact-sidebar .plot-artifact-open {
       display: none;
