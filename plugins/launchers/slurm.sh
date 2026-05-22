@@ -120,14 +120,21 @@ set -euo pipefail
 cmd_file="\${MKEXP2_CMD_FILE:-${cmd_file}}"
 meta_file="\${MKEXP2_META_FILE:-${meta_file}}"
 
-mkexp2_algorithm_allowed() {
-  local algorithm="\$1"
+mkexp2_command_allowed() {
+  local experiment="\$1"
+  local algorithm="\$2"
   local selected_file="\${MKEXP2_SUBMIT_ALGORITHMS_FILE:-}"
   [[ -n "\$selected_file" && -f "\$selected_file" ]] || return 0
 
-  local selected=""
-  while IFS= read -r selected; do
-    [[ "\$algorithm" == "\$selected" ]] && return 0
+  local selected_experiment=""
+  local selected_algorithm=""
+  while IFS=\$'\\t' read -r selected_experiment selected_algorithm _rest; do
+    [[ -n "\$selected_experiment" ]] || continue
+    if [[ -z "\$selected_algorithm" ]]; then
+      [[ "\$algorithm" == "\$selected_experiment" ]] && return 0
+    elif [[ "\$experiment" == "\$selected_experiment" && "\$algorithm" == "\$selected_algorithm" ]]; then
+      return 0
+    fi
   done < "\$selected_file"
   return 1
 }
@@ -135,8 +142,8 @@ mkexp2_algorithm_allowed() {
 metadata_line=\$(sed -n "\$((SLURM_ARRAY_TASK_ID + 1))p" "\$meta_file" 2>/dev/null || true)
 if [[ -n "\$metadata_line" ]]; then
   IFS=\$'\\t' read -r _mkexp2_index _mkexp2_algorithm _mkexp2_base _mkexp2_experiment _mkexp2_topology _mkexp2_log_file <<< "\$metadata_line"
-  if ! mkexp2_algorithm_allowed "\$_mkexp2_algorithm"; then
-    echo "skipping array task \$SLURM_ARRAY_TASK_ID for algorithm \$_mkexp2_algorithm"
+  if ! mkexp2_command_allowed "\$_mkexp2_experiment" "\$_mkexp2_algorithm"; then
+    echo "skipping array task \$SLURM_ARRAY_TASK_ID for \$_mkexp2_experiment/\$_mkexp2_algorithm"
     exit 0
   fi
 fi

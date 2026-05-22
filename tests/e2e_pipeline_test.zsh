@@ -108,6 +108,67 @@ test_e2e_local_pipeline_and_parse() {
   pass "local all + submit + parse pipeline"
 }
 
+test_e2e_local_per_experiment_submit_filter() {
+  local tmp=""
+  tmp=$(mktemp -d)
+  mkdir -p "$tmp/graphs"
+  : > "$tmp/graphs/alpha.metis"
+  : > "$tmp/graphs/beta.metis"
+
+  cat > "$tmp/Experiment" <<'EOF'
+System local
+Property local.call_wrapper none
+
+DefineAlgorithm TestHarness-Custom TestHarness --custom-flag
+AlgorithmProperty TestHarness-Custom mode custom
+AlgorithmProperty TestHarness-Custom extra user
+
+ExperimentAlpha() {
+  Algorithms TestHarness TestHarness-Dbg
+  Graph graphs/alpha
+  Ks 2
+  Seeds 1
+  Epsilons 0.03
+  Threads 1x1x2
+}
+
+ExperimentBeta() {
+  Algorithms TestHarness-Dbg TestHarness-Custom
+  Graph graphs/beta
+  Ks 2
+  Seeds 1
+  Epsilons 0.03
+  Threads 1x1x2
+}
+EOF
+
+  (
+    cd "$tmp"
+    "$MKEXP2" generate >/dev/null
+
+    printf 'ExperimentBeta\tTestHarness\n' > bad-selection.tsv
+    assert_cmd_fails "submit rejects unknown experiment/algorithm filters" zsh ./submit.sh --selection-file bad-selection.tsv
+
+    {
+      printf 'ExperimentAlpha\tTestHarness-Dbg\n'
+      printf 'ExperimentBeta\tTestHarness-Custom\n'
+    } > selection.tsv
+    zsh ./submit.sh --selection-file selection.tsv > submit-selection.out
+
+    assert_eq "$(find logs -name '*.log' | wc -l | tr -d ' ')" "2" "per-experiment filter runs selected commands only"
+    assert_path_exists logs/TestHarness-Dbg/ExperimentAlpha/alpha___k2_seed1_eps0.03_P1x1x2.log "per-experiment filter runs selected alpha algorithm"
+    assert_path_exists logs/TestHarness-Custom/ExperimentBeta/beta___k2_seed1_eps0.03_P1x1x2.log "per-experiment filter runs selected beta algorithm"
+    if [[ -n "$(find logs/TestHarness -name '*.log' -print 2>/dev/null)" ]]; then
+      fail "per-experiment filter does not run base algorithm from unselected experiment"
+    fi
+    if [[ -e logs/TestHarness-Dbg/ExperimentBeta/beta___k2_seed1_eps0.03_P1x1x2.log ]]; then
+      fail "per-experiment filter does not run same algorithm in unselected experiment"
+    fi
+  )
+
+  pass "local per-experiment submit filter"
+}
+
 test_e2e_slurm_array_submit_filter() {
   local tmp=""
   tmp=$(mktemp -d)

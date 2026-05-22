@@ -14,8 +14,11 @@ set -euo pipefail
 
 typeset -A JOB_IDS=()
 typeset -A AVAILABLE_ALGORITHMS=()
+typeset -A AVAILABLE_EXPERIMENT_ALGORITHMS=()
 typeset -A SELECTED_ALGORITHM_SET=()
+typeset -A SELECTED_EXPERIMENT_ALGORITHM_SET=()
 typeset -a SELECTED_ALGORITHMS=()
+typeset -a SELECTED_EXPERIMENT_SELECTIONS=()
 typeset -a REGISTERED_META_FILES=()
 SUBMIT_INSTALL=0
 INSTALL_JOB_ID=""
@@ -23,6 +26,7 @@ PARSE_JOB_ID=""
 SUBMIT_DIR="${0:A:h}"
 FILTER_DIR=""
 SELECTED_FILTER_FILE=""
+SELECTION_INPUT_FILE=""
 SUBMIT_LOCK_FILE=""
 SUBMIT_LOCK_ACQUIRED=0
 SUBMIT_LOCK_KEEP=0
@@ -32,6 +36,22 @@ while [[ $# -gt 0 ]]; do
     --install)
       SUBMIT_INSTALL=1
       shift
+      ;;
+    --selection-file)
+      if [[ $# -lt 2 ]]; then
+        echo "error: --selection-file requires a TSV file" >&2
+        exit 1
+      fi
+      SELECTION_INPUT_FILE="$2"
+      shift 2
+      ;;
+    --select)
+      if [[ $# -lt 2 ]]; then
+        echo "error: --select requires <experiment>:<algorithm>" >&2
+        exit 1
+      fi
+      SELECTED_EXPERIMENT_SELECTIONS+=("$2")
+      shift 2
       ;;
     --)
       shift
@@ -66,6 +86,89 @@ submit_lock_exit_cleanup() {
 
 trap submit_lock_exit_cleanup EXIT
 
+selection_active() {
+  (( ${#SELECTED_ALGORITHMS[@]} > 0 || ${#SELECTED_EXPERIMENT_ALGORITHM_SET[@]} > 0 ))
+}
+
+add_selected_experiment_algorithm() {
+  local experiment="$1"
+  local algorithm="$2"
+  local key=""
+
+  if [[ -z "$experiment" || -z "$algorithm" ]]; then
+    echo "error: invalid experiment algorithm selection: experiment='$experiment' algorithm='$algorithm'" >&2
+    exit 1
+  fi
+
+  key="${experiment}:${algorithm}"
+  SELECTED_EXPERIMENT_ALGORITHM_SET[$key]=1
+}
+
+add_selected_experiment_token() {
+  local token="$1"
+  local experiment=""
+  local algorithm=""
+
+  if [[ "$token" != *:* ]]; then
+    echo "error: invalid --select token '$token' (expected <experiment>:<algorithm>)" >&2
+    exit 1
+  fi
+  experiment="${token%%:*}"
+  algorithm="${token#*:}"
+  add_selected_experiment_algorithm "$experiment" "$algorithm"
+}
+
+load_selected_selection_file() {
+  local line=""
+  local experiment=""
+  local algorithm=""
+
+  for line in "${SELECTED_EXPERIMENT_SELECTIONS[@]}"; do
+    add_selected_experiment_token "$line"
+  done
+
+  if [[ -z "$SELECTION_INPUT_FILE" ]]; then
+    return 0
+  fi
+  if [[ ! -f "$SELECTION_INPUT_FILE" ]]; then
+    echo "error: selection file not found: $SELECTION_INPUT_FILE" >&2
+    exit 1
+  fi
+
+  while IFS=$'\t' read -r experiment algorithm _rest; do
+    [[ -n "$experiment" ]] || continue
+    if [[ -z "$algorithm" ]]; then
+      SELECTED_ALGORITHMS+=("$experiment")
+      SELECTED_ALGORITHM_SET[$experiment]=1
+    else
+      add_selected_experiment_algorithm "$experiment" "$algorithm"
+    fi
+  done < "$SELECTION_INPUT_FILE"
+}
+
+selected_summary() {
+  local -a items=()
+  local algorithm=""
+  local key=""
+  local experiment=""
+
+  for algorithm in "${SELECTED_ALGORITHMS[@]}"; do
+    items+=("$algorithm")
+  done
+  for key in ${(ko)SELECTED_EXPERIMENT_ALGORITHM_SET}; do
+    local pair_algorithm=""
+    experiment="${key%%:*}"
+    pair_algorithm="${key#*:}"
+    items+=("$experiment:$pair_algorithm")
+  done
+
+  if (( ${#items[@]} == 0 )); then
+    echo "all"
+  else
+    echo "${(j:, :)items}"
+  fi
+}
+
 acquire_submit_lock() {
   mkdir -p "${SUBMIT_LOCK_FILE:h}"
   if [[ -e "$SUBMIT_LOCK_FILE" ]]; then
@@ -79,8 +182,8 @@ acquire_submit_lock() {
       printf 'started_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       printf 'pid=%s\n' "$$"
       printf 'cwd=%s\n' "$SUBMIT_DIR"
-      if (( ${#SELECTED_ALGORITHMS[@]} > 0 )); then
-        printf 'algorithms=%s\n' "${(j:, :)SELECTED_ALGORITHMS}"
+      if selection_active; then
+        printf 'algorithms=%s\n' "$(selected_summary)"
       else
         printf 'algorithms=all\n'
       fi
@@ -93,8 +196,9 @@ acquire_submit_lock() {
 }
 
 for algorithm in "${SELECTED_ALGORITHMS[@]}"; do
-  SELECTED_ALGORITHM_SET["$algorithm"]=1
+  SELECTED_ALGORITHM_SET[$algorithm]=1
 done
+load_selected_selection_file
 
 ensure_slurm_dir() {
   mkdir -p "$SUBMIT_DIR/slurm"
@@ -108,16 +212,22 @@ ensure_filter_dir() {
 }
 
 prepare_selected_filter_file() {
-  if (( ${#SELECTED_ALGORITHMS[@]} == 0 )); then
+  if ! selection_active; then
     return 0
   fi
   ensure_filter_dir
   if [[ -z "$SELECTED_FILTER_FILE" ]]; then
-    SELECTED_FILTER_FILE="$FILTER_DIR/algorithms.txt"
+    SELECTED_FILTER_FILE="$FILTER_DIR/selection.tsv"
     : > "$SELECTED_FILTER_FILE"
     local algorithm=""
+    local key=""
     for algorithm in "${SELECTED_ALGORITHMS[@]}"; do
       print -r -- "$algorithm" >> "$SELECTED_FILTER_FILE"
+    done
+    for key in ${(ko)SELECTED_EXPERIMENT_ALGORITHM_SET}; do
+      local experiment="${key%%:*}"
+      local pair_algorithm="${key#*:}"
+      printf '%s\t%s\n' "$experiment" "$pair_algorithm" >> "$SELECTED_FILTER_FILE"
     done
   fi
 }
@@ -139,7 +249,11 @@ register_meta() {
 
   while IFS=$'\t' read -r index algorithm base experiment topology log_file; do
     [[ -n "$algorithm" ]] || continue
-    AVAILABLE_ALGORITHMS["$algorithm"]=1
+    AVAILABLE_ALGORITHMS[$algorithm]=1
+    if [[ -n "$experiment" ]]; then
+      local pair_key="${experiment}:${algorithm}"
+      AVAILABLE_EXPERIMENT_ALGORITHMS[$pair_key]=1
+    fi
   done < "$meta_file"
 }
 
@@ -152,29 +266,82 @@ format_available_algorithms() {
   fi
 }
 
+format_available_experiment_algorithms() {
+  local -a items=()
+  local key=""
+  local experiment=""
+  local algorithm=""
+
+  for key in ${(ko)AVAILABLE_EXPERIMENT_ALGORITHMS}; do
+    experiment="${key%%:*}"
+    algorithm="${key#*:}"
+    items+=("$experiment:$algorithm")
+  done
+
+  if (( ${#items[@]} == 0 )); then
+    echo "(none)"
+  else
+    echo "${(j:, :)items}"
+  fi
+}
+
 validate_selected_algorithms() {
-  if (( ${#SELECTED_ALGORITHMS[@]} == 0 )); then
+  if ! selection_active; then
     return 0
   fi
 
   local -a unknown=()
+  local -a unknown_pairs=()
   local algorithm=""
+  local key=""
+  local experiment=""
   for algorithm in "${SELECTED_ALGORITHMS[@]}"; do
-    if [[ -z "${AVAILABLE_ALGORITHMS["$algorithm"]:-}" ]]; then
+    if [[ -z "${AVAILABLE_ALGORITHMS[$algorithm]:-}" ]]; then
       unknown+=("$algorithm")
     fi
   done
+  for key in ${(k)SELECTED_EXPERIMENT_ALGORITHM_SET}; do
+    if [[ -z "${AVAILABLE_EXPERIMENT_ALGORITHMS[$key]:-}" ]]; then
+      local pair_algorithm=""
+      experiment="${key%%:*}"
+      pair_algorithm="${key#*:}"
+      unknown_pairs+=("$experiment:$pair_algorithm")
+    fi
+  done
 
-  if (( ${#unknown[@]} > 0 )); then
-    echo "error: unknown algorithm(s): ${(j:, :)unknown}" >&2
+  if (( ${#unknown[@]} > 0 || ${#unknown_pairs[@]} > 0 )); then
+    if (( ${#unknown[@]} > 0 )); then
+      echo "error: unknown algorithm(s): ${(j:, :)unknown}" >&2
+    fi
+    if (( ${#unknown_pairs[@]} > 0 )); then
+      echo "error: unknown experiment/algorithm selection(s): ${(j:, :)unknown_pairs}" >&2
+    fi
     echo "available algorithms: $(format_available_algorithms)" >&2
+    echo "available experiment/algorithm selections: $(format_available_experiment_algorithms)" >&2
     exit 1
   fi
 }
 
+metadata_row_selected() {
+  local experiment="$1"
+  local algorithm="$2"
+  local key="${experiment}:${algorithm}"
+
+  if ! selection_active; then
+    return 0
+  fi
+  if [[ -n "${SELECTED_ALGORITHM_SET[$algorithm]:-}" ]]; then
+    return 0
+  fi
+  if [[ -n "${SELECTED_EXPERIMENT_ALGORITHM_SET[$key]:-}" ]]; then
+    return 0
+  fi
+  return 1
+}
+
 metadata_has_selected() {
   local meta_file="$1"
-  if (( ${#SELECTED_ALGORITHMS[@]} == 0 )); then
+  if ! selection_active; then
     return 0
   fi
 
@@ -185,7 +352,7 @@ metadata_has_selected() {
   local topology=""
   local log_file=""
   while IFS=$'\t' read -r index algorithm base experiment topology log_file; do
-    if [[ -n "${SELECTED_ALGORITHM_SET["$algorithm"]:-}" ]]; then
+    if metadata_row_selected "$experiment" "$algorithm"; then
       return 0
     fi
   done < "$meta_file"
@@ -197,7 +364,7 @@ make_filtered_cmd_file() {
   local meta_file="$2"
   local out=""
 
-  if (( ${#SELECTED_ALGORITHMS[@]} == 0 )); then
+  if ! selection_active; then
     echo "$cmd_file"
     return 0
   fi
@@ -210,9 +377,16 @@ make_filtered_cmd_file() {
   ensure_filter_dir
   out="$FILTER_DIR/${cmd_file:t}"
   awk -F '\t' '
-    NR == FNR { keep[$0] = 1; next }
+    NR == FNR {
+      if (NF >= 2 && $2 != "") {
+        keep_pair[$1 SUBSEP $2] = 1
+      } else if ($1 != "") {
+        keep_algorithm[$1] = 1
+      }
+      next
+    }
     FILENAME == ARGV[2] {
-      if ($2 in keep) {
+      if (($2 in keep_algorithm) || (($4 SUBSEP $2) in keep_pair)) {
         run[$1 + 1] = 1
       }
       next
@@ -237,15 +411,22 @@ selected_array_indices() {
   local meta_file="$1"
   local indices=""
 
-  if (( ${#SELECTED_ALGORITHMS[@]} == 0 )); then
+  if ! selection_active; then
     echo ""
     return 0
   fi
 
   prepare_selected_filter_file
   indices=$(awk -F '\t' '
-    NR == FNR { keep[$0] = 1; next }
-    ($2 in keep) {
+    NR == FNR {
+      if (NF >= 2 && $2 != "") {
+        keep_pair[$1 SUBSEP $2] = 1
+      } else if ($1 != "") {
+        keep_algorithm[$1] = 1
+      }
+      next
+    }
+    (($2 in keep_algorithm) || (($4 SUBSEP $2) in keep_pair)) {
       if (indices != "") {
         indices = indices ","
       }
@@ -337,7 +518,7 @@ submit_slurm() {
     sbatch_args+=("$dep_arg")
   fi
 
-  if (( ${#SELECTED_ALGORITHMS[@]} > 0 )); then
+  if selection_active; then
     prepare_selected_filter_file
     if is_slurm_array_script "$script"; then
       local indices=""
@@ -393,7 +574,7 @@ submit_local() {
     return 0
   }
 
-  if (( ${#SELECTED_ALGORITHMS[@]} > 0 )); then
+  if selection_active; then
     prepare_selected_filter_file
     MKEXP2_CMD_FILE="$filtered_cmd_file" \
       MKEXP2_META_FILE="$meta_file" \

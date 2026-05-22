@@ -1572,11 +1572,50 @@ class Mkexp2WebApp:
             "stats_json": stats_json,
         }
 
-    def submit_action(self, experiment_id, payload):
+    def normalize_submit_selections(self, payload):
         algorithms = payload.get("algorithms") or []
-        force = bool(payload.get("force"))
+        selections = payload.get("selections") or []
         if not isinstance(algorithms, list) or not all(isinstance(item, str) for item in algorithms):
             raise ValueError("algorithms must be an array of strings")
+        if selections and algorithms:
+            raise ValueError("use either algorithms or selections, not both")
+        if not isinstance(selections, list):
+            raise ValueError("selections must be an array")
+
+        normalized = []
+        for item in selections:
+            if not isinstance(item, dict):
+                raise ValueError("selection entries must be objects")
+            experiment = str(item.get("experiment") or item.get("function") or "").strip()
+            if not experiment:
+                raise ValueError("selection entries require an experiment")
+            if "algorithm" in item:
+                item_algorithms = [item.get("algorithm")]
+            else:
+                item_algorithms = item.get("algorithms") or []
+            if not isinstance(item_algorithms, list) or not all(isinstance(algorithm, str) for algorithm in item_algorithms):
+                raise ValueError("selection algorithms must be an array of strings")
+            for algorithm in item_algorithms:
+                name = algorithm.strip()
+                if not name:
+                    continue
+                normalized.append({"experiment": experiment, "algorithm": name})
+        return algorithms, normalized
+
+    def write_submit_selection_file(self, experiment_id, selections):
+        if not selections:
+            return None
+        selection_dir = self.active_experiment_path(experiment_id) / WEB_STATE_DIR
+        selection_dir.mkdir(parents=True, exist_ok=True)
+        path = selection_dir / f"web-submit-selection-{secrets.token_urlsafe(8)}.tsv"
+        with path.open("w", encoding="utf-8") as handle:
+            for item in selections:
+                handle.write(f"{item['experiment']}\t{item['algorithm']}\n")
+        return path
+
+    def submit_action(self, experiment_id, payload):
+        algorithms, selections = self.normalize_submit_selections(payload)
+        force = bool(payload.get("force"))
 
         def action():
             check = self.command(experiment_id, ["check", "--json"], timeout=60)
@@ -1599,18 +1638,30 @@ class Mkexp2WebApp:
                     "generate": generate,
                 }
 
-            submit = run_command(
-                ["zsh", "./submit.sh", "--install", *algorithms],
-                cwd=self.active_experiment_path(experiment_id),
-                timeout=120,
-            )
+            selection_file = self.write_submit_selection_file(experiment_id, selections)
+            submit_argv = ["zsh", "./submit.sh", "--install", *algorithms]
+            if selection_file is not None:
+                submit_argv.extend(["--selection-file", str(selection_file)])
+            try:
+                submit = run_command(
+                    submit_argv,
+                    cwd=self.active_experiment_path(experiment_id),
+                    timeout=120,
+                )
+            finally:
+                if selection_file is not None:
+                    try:
+                        selection_file.unlink()
+                    except FileNotFoundError:
+                        pass
             if submit["returncode"] == 0:
-                commit = self.git_commit_submission(experiment_id, algorithms, force)
+                commit = self.git_commit_submission(experiment_id, algorithms, force, selections)
             else:
                 commit = {"committed": False, "message": "submit failed; no commit created"}
             return {
                 "submitted": submit["returncode"] == 0,
                 "algorithms": algorithms,
+                "selections": selections,
                 "force": force,
                 "check": check,
                 "probe": probe,
@@ -1699,13 +1750,16 @@ class Mkexp2WebApp:
         )["id"]
         return self._startup_spack_cache_action
 
-    def git_commit_submission(self, experiment_id, algorithms, force):
+    def git_commit_submission(self, experiment_id, algorithms, force, selections=None):
         rel = experiment_id
         add = run_command(["git", "add", "-A", "--", rel], cwd=self.repo, timeout=60)
         diff = run_command(["git", "diff", "--cached", "--quiet", "--", rel], cwd=self.repo, timeout=60)
         if diff["returncode"] == 0:
             return {"committed": False, "add": add, "message": "nothing to commit"}
-        algo_text = ", ".join(algorithms) if algorithms else "all algorithms"
+        if selections:
+            algo_text = ", ".join(f"{item['experiment']}:{item['algorithm']}" for item in selections)
+        else:
+            algo_text = ", ".join(algorithms) if algorithms else "all algorithms"
         suffix = " (manual override)" if force else ""
         message = f"chore: submit {experiment_id} ({algo_text}){suffix}"
         commit = run_command(["git", "commit", "-m", message, "--", rel], cwd=self.repo, timeout=60)
@@ -3640,6 +3694,44 @@ HTML = r"""<!doctype html>
       gap: 8px;
       min-width: 0;
     }
+    .submit-choice-list {
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+    }
+    .submit-algorithm-group {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      background: #fbfcfd;
+    }
+    .submit-algorithm-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .submit-algorithm-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 700;
+    }
+    .submit-algorithm-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .submit-algorithm-actions button {
+      min-height: 26px;
+      padding: 4px 7px;
+      font-size: 12px;
+    }
     .algorithm-loading {
       grid-column: 1 / -1;
       color: var(--muted);
@@ -5142,6 +5234,7 @@ HTML = r"""<!doctype html>
       defaultTagNames: [],
       tagAssignments: {},
       algorithms: [],
+      algorithmGroups: [],
       algorithmLoading: false,
       algorithmLoadingFor: '',
       algorithmLoadSeq: 0,
@@ -8015,9 +8108,11 @@ HTML = r"""<!doctype html>
     }
     function renderAlgorithmLoading(experimentId) {
       state.algorithms = [];
+      state.algorithmGroups = [];
       state.algorithmLoading = true;
       state.algorithmLoadingFor = experimentId || '';
       const list = document.getElementById('algorithm-list');
+      list.className = 'chips';
       list.innerHTML = '';
       const row = document.createElement('div');
       row.className = 'chip algorithm-loading';
@@ -8030,29 +8125,91 @@ HTML = r"""<!doctype html>
       list.appendChild(row);
       renderSubmitButton();
     }
-    function renderAlgorithmChoices(names, selectedNames = null) {
-      state.algorithms = Array.from(names || []).sort();
+    function normalizeAlgorithmGroups(experiments) {
+      return (experiments || []).map(item => {
+        const experiment = item.experiment || {};
+        const algorithms = (item.resolved?.algorithms || [])
+          .map(algorithm => algorithm?.name || '')
+          .filter(Boolean)
+          .sort((left, right) => left.localeCompare(right));
+        return {
+          function: experiment.function || item.function || item.name || experiment.name || 'Experiment',
+          name: experiment.name || item.name || experiment.function || 'Experiment',
+          algorithms,
+        };
+      }).filter(group => group.algorithms.length > 0);
+    }
+    function selectionSetForGroup(selectedSelections, group) {
+      if (!Array.isArray(selectedSelections)) return null;
+      const values = selectedSelections
+        .filter(item => item && item.experiment === group.function)
+        .map(item => item.algorithm);
+      return new Set(values);
+    }
+    function setSubmitGroupChecked(groupFunction, checked) {
+      document.querySelectorAll('#algorithm-list input[data-experiment]').forEach(input => {
+        if (input.dataset.experiment === groupFunction) input.checked = checked;
+      });
+    }
+    function renderAlgorithmChoices(groups, selectedSelections = null) {
+      state.algorithmGroups = Array.isArray(groups) ? groups : [];
+      state.algorithms = Array.from(new Set(state.algorithmGroups.flatMap(group => group.algorithms))).sort();
       state.algorithmLoading = false;
       state.algorithmLoadingFor = '';
       const list = document.getElementById('algorithm-list');
+      list.className = 'submit-choice-list';
       list.innerHTML = '';
-      const selectedSet = Array.isArray(selectedNames) ? new Set(selectedNames) : null;
-      for (const name of state.algorithms) {
-        const label = document.createElement('label');
-        label.className = 'chip';
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.checked = selectedSet ? selectedSet.has(name) : true;
-        checkbox.value = name;
-        const text = document.createElement('span');
-        text.className = 'chip-label';
-        text.textContent = name;
-        text.title = name;
-        label.appendChild(checkbox);
-        label.appendChild(text);
-        list.appendChild(label);
+      for (const group of state.algorithmGroups) {
+        const groupSelected = selectionSetForGroup(selectedSelections, group);
+        const section = document.createElement('section');
+        section.className = 'submit-algorithm-group';
+        const header = document.createElement('div');
+        header.className = 'submit-algorithm-header';
+        const title = document.createElement('div');
+        title.className = 'submit-algorithm-title';
+        title.textContent = group.name;
+        title.title = group.function;
+        const actions = document.createElement('div');
+        actions.className = 'submit-algorithm-actions';
+        const allButton = document.createElement('button');
+        allButton.type = 'button';
+        allButton.textContent = 'All';
+        allButton.title = `Select all algorithms in ${group.name}`;
+        allButton.onclick = () => setSubmitGroupChecked(group.function, true);
+        const noneButton = document.createElement('button');
+        noneButton.type = 'button';
+        noneButton.textContent = 'None';
+        noneButton.title = `Deselect all algorithms in ${group.name}`;
+        noneButton.onclick = () => setSubmitGroupChecked(group.function, false);
+        actions.appendChild(allButton);
+        actions.appendChild(noneButton);
+        header.appendChild(title);
+        header.appendChild(actions);
+        section.appendChild(header);
+
+        const chips = document.createElement('div');
+        chips.className = 'chips';
+        for (const name of group.algorithms) {
+          const label = document.createElement('label');
+          label.className = 'chip';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = groupSelected ? groupSelected.has(name) : true;
+          checkbox.value = name;
+          checkbox.dataset.experiment = group.function;
+          checkbox.dataset.algorithm = name;
+          const text = document.createElement('span');
+          text.className = 'chip-label';
+          text.textContent = name;
+          text.title = name;
+          label.appendChild(checkbox);
+          label.appendChild(text);
+          chips.appendChild(label);
+        }
+        section.appendChild(chips);
+        list.appendChild(section);
       }
-      if (!state.algorithms.length) {
+      if (!state.algorithmGroups.length) {
         const empty = document.createElement('div');
         empty.className = 'csv-empty';
         empty.textContent = 'No algorithms found.';
@@ -8062,11 +8219,30 @@ HTML = r"""<!doctype html>
     }
     function clearAlgorithmChoices() {
       state.algorithms = [];
+      state.algorithmGroups = [];
       state.algorithmLoading = false;
       state.algorithmLoadingFor = '';
       state.algorithmLoadSeq += 1;
       document.getElementById('algorithm-list').innerHTML = '';
       renderSubmitButton();
+    }
+    function collectSubmitSelections() {
+      const groups = state.algorithmGroups || [];
+      const total = groups.reduce((sum, group) => sum + group.algorithms.length, 0);
+      const selections = [];
+      document.querySelectorAll('#algorithm-list input[data-experiment]').forEach(input => {
+        if (!input.checked) return;
+        selections.push({
+          experiment: input.dataset.experiment || '',
+          algorithm: input.dataset.algorithm || input.value || '',
+        });
+      });
+      return {
+        total,
+        selected: selections.length,
+        allSelected: total === 0 || selections.length === total,
+        selections,
+      };
     }
     async function refreshSubmitLock() {
       if (!state.selected) {
@@ -8562,7 +8738,7 @@ HTML = r"""<!doctype html>
       if (!experimentId) return;
       const loadId = ++state.algorithmLoadSeq;
       const isCurrent = () => state.selected === experimentId && state.algorithmLoadSeq === loadId;
-      const selectedNames = Array.isArray(options.selectedNames) ? options.selectedNames : null;
+      const selectedSelections = Array.isArray(options.selectedSelections) ? options.selectedSelections : null;
       renderAlgorithmLoading(experimentId);
       try {
         const probe = await api(`/api/experiments/${encodeURIComponent(experimentId)}/probe`, {
@@ -8571,12 +8747,9 @@ HTML = r"""<!doctype html>
         });
         if (!isCurrent()) return;
         const experiments = probe.experiments || [];
-        const names = new Set();
-        for (const item of experiments) {
-          for (const alg of (item.resolved?.algorithms || [])) names.add(alg.name);
-        }
+        const groups = normalizeAlgorithmGroups(experiments);
         if (!isCurrent()) return;
-        renderAlgorithmChoices(names, selectedNames);
+        renderAlgorithmChoices(groups, selectedSelections);
       } catch (err) {
         if (!isCurrent()) return;
         state.algorithmLoading = false;
@@ -8603,25 +8776,25 @@ HTML = r"""<!doctype html>
       renderSubmitButton();
       try {
         if (state.editorDirty && !state.shared) {
-          const priorSelected = Array.from(document.querySelectorAll('#algorithm-list input:checked')).map(item => item.value);
-          const allSelectedBeforeSave = !state.algorithms.length || priorSelected.length === state.algorithms.length;
+          const priorSelection = collectSubmitSelections();
+          const allSelectedBeforeSave = priorSelection.allSelected;
           await persistExperiment();
           state.editorDirty = false;
           if (state.selected !== experimentId) return;
           await loadAlgorithms(experimentId, {
-            selectedNames: allSelectedBeforeSave ? null : priorSelected,
+            selectedSelections: allSelectedBeforeSave ? null : priorSelection.selections,
           });
           if (state.selected !== experimentId) return;
         }
-        const selectedAlgorithms = Array.from(document.querySelectorAll('#algorithm-list input:checked')).map(item => item.value);
-        if (state.algorithms.length && selectedAlgorithms.length === 0) {
+        const submitSelection = collectSubmitSelections();
+        if (submitSelection.total > 0 && submitSelection.selected === 0) {
           out('Select at least one algorithm.');
           return;
         }
-        const algorithms = selectedAlgorithms.length === state.algorithms.length ? [] : selectedAlgorithms;
+        const selections = submitSelection.allSelected ? [] : submitSelection.selections;
         const action = await api(`/api/experiments/${encodeURIComponent(experimentId)}/submit`, {
           method: 'POST',
-          body: JSON.stringify({ algorithms, force })
+          body: JSON.stringify({ selections, force })
         });
         const completed = await watchAction(action.id);
         if (!force && completed?.status === 'completed' && completed.result?.blocked === 'check failed') {

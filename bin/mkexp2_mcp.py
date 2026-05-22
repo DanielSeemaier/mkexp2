@@ -22,7 +22,7 @@ Typical workflow:
 2. Write or edit the Experiment file with `mkexp2_write_experiment`.
 3. Validate with `mkexp2_check_experiment`.
 4. Inspect algorithms with `mkexp2_probe_experiment`, usually with `flags: ["--algorithms"]`.
-5. Submit with `mkexp2_submit_experiment`; omit `algorithms` to submit all enabled algorithms.
+5. Submit with `mkexp2_submit_experiment`; omit `algorithms`/`selections` to submit all enabled algorithms.
 6. Poll `mkexp2_get_action` until the submit action completes.
 7. Poll `mkexp2_get_progress` until `progress_json.complete` is true.
 8. Run `mkexp2_parse_results`, poll the parse action, then call `mkexp2_get_stats`.
@@ -36,7 +36,9 @@ Experiment file basics:
 - `DefineAlgorithm Child Base [extra CLI args...]` creates a named variant.
 - `AlgorithmProperty Child repo_ref origin/my-branch` selects a Git branch/ref.
 - Algorithm names submitted through `mkexp2_submit_experiment` must exactly match
-  resolved names reported by `mkexp2_probe_experiment`.
+  resolved names reported by `mkexp2_probe_experiment`. For multi-function
+  Experiment files, use `selections` entries with `experiment` and `algorithms`
+  to submit different algorithm subsets per experiment function.
 
 Minimal example:
 ```zsh
@@ -161,6 +163,22 @@ def array_schema(description):
     }
 
 
+def submit_selections_schema():
+    return {
+        "type": "array",
+        "description": "Optional per-experiment selections. Each item names an Experiment function and exact algorithm names for that function.",
+        "items": {
+            "type": "object",
+            "properties": {
+                "experiment": string_schema("Experiment function name, e.g. ExperimentFoo."),
+                "algorithms": array_schema("Exact algorithm names to submit for this experiment function."),
+            },
+            "required": ["experiment", "algorithms"],
+            "additionalProperties": False,
+        },
+    }
+
+
 class Mkexp2McpServer:
     def __init__(self, client):
         self.client = client
@@ -235,11 +253,12 @@ class Mkexp2McpServer:
                 "handler": self.probe_experiment,
             },
             "mkexp2_submit_experiment": {
-                "description": "Generate and submit an experiment. Omit algorithms to submit all enabled algorithms.",
+                "description": "Generate and submit an experiment. Omit algorithms/selections to submit all enabled algorithms.",
                 "inputSchema": input_schema(
                     {
                         "experiment_id": string_schema("Repo-relative experiment id."),
                         "algorithms": array_schema("Optional exact algorithm names to submit."),
+                        "selections": submit_selections_schema(),
                         "force": {"type": "boolean", "description": "Submit even if mkexp2 check fails."},
                     },
                     ["experiment_id"],
@@ -344,9 +363,12 @@ class Mkexp2McpServer:
     def submit_experiment(self, args):
         exp = quote_segment(args["experiment_id"])
         payload = {
-            "algorithms": args.get("algorithms") or [],
             "force": bool(args.get("force")),
         }
+        if args.get("selections"):
+            payload["selections"] = args["selections"]
+        else:
+            payload["algorithms"] = args.get("algorithms") or []
         return self.client.post(f"/api/experiments/{exp}/submit", payload, timeout=120)
 
     def get_action(self, args):

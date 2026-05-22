@@ -122,6 +122,30 @@ class McpBridgeTest(unittest.TestCase):
             ),
         )
 
+    def test_submit_can_send_per_experiment_selections(self):
+        client = FakeClient()
+        server = mkexp2_mcp.Mkexp2McpServer(client)
+
+        result = server.call_tool(
+            "mkexp2_submit_experiment",
+            {
+                "experiment_id": "exp",
+                "selections": [{"experiment": "ExperimentA", "algorithms": ["Feature"]}],
+                "force": True,
+            },
+        )
+
+        self.assertEqual(result["id"], "action-1")
+        self.assertEqual(
+            client.calls[0],
+            (
+                "POST",
+                "/api/experiments/exp/submit",
+                {"selections": [{"experiment": "ExperimentA", "algorithms": ["Feature"]}], "force": True},
+                120,
+            ),
+        )
+
     def test_mcp_framing_round_trip(self):
         message = {"jsonrpc": "2.0", "id": 7, "method": "ping"}
         buffer = io.BytesIO()

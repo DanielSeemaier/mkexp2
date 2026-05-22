@@ -59,6 +59,19 @@ Or submit only selected algorithm variants from the generated command set:
 ./submit.sh KaMinPar-FM KaMinPar-LP
 ```
 
+For `Experiment` files with multiple `Experiment*()` functions, submit selected
+algorithms only for selected experiment functions:
+
+```bash
+./submit.sh --select ExperimentA:KaMinPar-FM --select ExperimentB:KaMinPar-LP
+
+cat > selection.tsv <<EOF
+ExperimentA	KaMinPar-FM
+ExperimentB	KaMinPar-LP
+EOF
+./submit.sh --selection-file selection.tsv
+```
+
 To install/build first as part of the same submit action:
 
 ```bash
@@ -450,9 +463,11 @@ The UI can:
   below the editor as compact rows that emphasize branch/ref settings and CLI
   arguments, with resolved settings shown inline
 - fetch bundled init presets with `mkexp2 probe --presets` for new experiments
-- fetch algorithm names with `probe`, select all by default, and submit only the
-  checked subset when the user deselects variants
-- run `mkexp2 generate`, then `./submit.sh --install [algorithms...]`
+- fetch algorithm names with `probe`, group them by experiment function, select
+  all by default, and submit only the checked per-experiment subset when the
+  user deselects variants
+- run `mkexp2 generate`, then `./submit.sh --install [algorithms...]` or
+  `./submit.sh --install --selection-file <tsv>` for per-experiment selections
 - commit submitted state to Git after submission
 - run `mkexp2 parse` from the Results tab and reload CSV results when parsing
   succeeds

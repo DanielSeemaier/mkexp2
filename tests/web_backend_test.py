@@ -619,7 +619,11 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("state.editorDirty = true", mkexp2_web.HTML)
         self.assertIn("await persistExperiment();", mkexp2_web.HTML)
         self.assertIn("loadAlgorithms(experimentId, {", mkexp2_web.HTML)
-        self.assertIn("selectedNames: allSelectedBeforeSave ? null : priorSelected", mkexp2_web.HTML)
+        self.assertIn("function collectSubmitSelections", mkexp2_web.HTML)
+        self.assertIn("selectedSelections: allSelectedBeforeSave ? null : priorSelection.selections", mkexp2_web.HTML)
+        self.assertIn("data-experiment", mkexp2_web.HTML)
+        self.assertIn("submit-algorithm-group", mkexp2_web.HTML)
+        self.assertIn("JSON.stringify({ selections, force })", mkexp2_web.HTML)
 
     def test_empty_token_bypass_is_explicitly_opt_in(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1310,6 +1314,53 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn((["/fake/mkexp2", "generate"], exp_cwd), calls)
         self.assertIn((["zsh", "./submit.sh", "--install", "MockA"], exp_cwd), calls)
         self.assertTrue(any(call[0][:3] == ["git", "commit", "-m"] for call in calls))
+
+    def test_submit_action_writes_per_experiment_selection_file(self):
+        calls = []
+        captured_selection = ""
+        original_run_command = mkexp2_web.run_command
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            nonlocal captured_selection
+            self.assertIsInstance(argv, list)
+            calls.append((list(argv), str(cwd) if cwd else None))
+            if argv[:2] == ["git", "diff"]:
+                return {"returncode": 1, "stdout": "", "stderr": ""}
+            if argv[:3] == ["zsh", "./submit.sh", "--install"]:
+                self.assertIn("--selection-file", argv)
+                selection_path = Path(argv[argv.index("--selection-file") + 1])
+                captured_selection = selection_path.read_text(encoding="utf-8")
+            return {"returncode": 0, "stdout": '{"experiments":[]}', "stderr": ""}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "exp").mkdir()
+            (repo / "exp" / "Experiment").write_text("ExperimentA() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+            mkexp2_web.run_command = fake_run_command
+            try:
+                action = app.submit_action("exp", {
+                    "selections": [
+                        {"experiment": "ExperimentA", "algorithms": ["MockA"]},
+                        {"experiment": "ExperimentB", "algorithm": "MockB"},
+                    ],
+                    "force": False,
+                })
+                for _ in range(100):
+                    current = app.actions.get(action["id"])
+                    if current["status"] != "running":
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(app.actions.get(action["id"])["status"], "completed")
+            finally:
+                mkexp2_web.run_command = original_run_command
+
+        exp_cwd = str((repo / "exp").resolve())
+        self.assertIn("ExperimentA\tMockA\n", captured_selection)
+        self.assertIn("ExperimentB\tMockB\n", captured_selection)
+        self.assertTrue(any(call[0][:4] == ["zsh", "./submit.sh", "--install", "--selection-file"] for call in calls))
+        self.assertTrue(any(call[0][:3] == ["git", "commit", "-m"] and "ExperimentA:MockA" in call[0][3] for call in calls))
+        self.assertTrue(all(call[1] in (exp_cwd, str(repo.resolve())) for call in calls))
 
     def test_parse_action_uses_argv_array(self):
         calls = []
