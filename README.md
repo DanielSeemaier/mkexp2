@@ -421,9 +421,10 @@ The UI can:
   `git commit`, and `git push`
 - create tokenless share links from the Experiment page; a share link opens a
   single-experiment view without the sidebar, editor writes, submit controls,
-  and Danger Zone, but still allows the viewer to parse logs and generate plot
-  artifacts for that shared experiment only. The share dialog shows both the
-  browser URL and a copy/paste SSH tunnel command with a generic `<user>`
+  and Danger Zone, but still shows the Reference panel and allows the viewer to
+  parse logs and generate plot artifacts for that shared experiment only. The
+  share dialog shows both the browser URL and a copy/paste SSH tunnel command
+  with a generic `<user>`
   placeholder, plus a colleague username field that generates a single
   copyable command to start the tunnel in the background and open the share
   link in the browser.

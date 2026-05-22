@@ -3265,9 +3265,6 @@ HTML = r"""<!doctype html>
     .describe-panel {
       margin-top: 14px;
     }
-    .app.share-mode .describe-panel {
-      display: none !important;
-    }
     .describe-output {
       display: grid;
       gap: 16px;
@@ -5229,6 +5226,7 @@ HTML = r"""<!doctype html>
       }
       if (path === '/api/plot/backend') return `/api/share/${encodeURIComponent(state.shareId)}/plot/backend`;
       if (path === '/api/plots/catalog') return `/api/share/${encodeURIComponent(state.shareId)}/plots/catalog`;
+      if (path === '/api/describe') return `/api/share/${encodeURIComponent(state.shareId)}/describe`;
       const match = path.match(/^\/api\/experiments\/[^/]+(?:\/([^?]+))?(\?.*)?$/);
       if (!match) return path;
       const tail = match[1] || 'metadata';
@@ -9432,6 +9430,9 @@ def make_handler(app):
             query = urllib.parse.parse_qs(parsed.query)
             if tail in ("", "metadata"):
                 json_response(self, 200, app.share_metadata(share_id))
+                return
+            if tail == "describe":
+                json_response(self, 200, app.describe_catalog())
                 return
             if tail == "experiment":
                 exp_path = context["path"]
