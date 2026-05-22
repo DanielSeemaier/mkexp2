@@ -8,6 +8,7 @@ import mimetypes
 import os
 import re
 import secrets
+import shlex
 import shutil
 import socket
 import subprocess
@@ -1062,9 +1063,21 @@ class Mkexp2WebApp:
             host = "127.0.0.1"
         return f"http://{host}:{self.web_port}/share/{share_id}"
 
-    def share_ssh_tunnel_command(self):
-        remote_host = socket.gethostname() or os.environ.get("HOSTNAME") or "<cluster-login>"
-        return f"ssh -L {self.web_port}:127.0.0.1:{self.web_port} <user>@{remote_host}"
+    def share_remote_host(self):
+        for candidate in (socket.getfqdn(), socket.gethostname(), os.environ.get("HOSTNAME")):
+            candidate = str(candidate or "").strip()
+            if candidate:
+                return candidate
+        return "<cluster-login>"
+
+    def share_ssh_tunnel_command(self, background=False):
+        remote_host = self.share_remote_host()
+        flags = "-fN " if background else ""
+        return f"ssh {flags}-L {self.web_port}:127.0.0.1:{self.web_port} <user>@{remote_host}"
+
+    def share_colleague_command_template(self, share_id):
+        tunnel = self.share_ssh_tunnel_command(background=True)
+        return f"{tunnel} && python3 -m webbrowser {shlex.quote(self.share_public_url(share_id))}"
 
     def share_experiment(self, experiment_id):
         path = self.active_experiment_path(experiment_id)
@@ -1087,6 +1100,7 @@ class Mkexp2WebApp:
             "share": share,
             "share_url": self.share_public_url(share_id),
             "ssh_tunnel": self.share_ssh_tunnel_command(),
+            "colleague_command_template": self.share_colleague_command_template(share_id),
         }
 
     def resolve_share(self, share_id):
@@ -2604,6 +2618,20 @@ HTML = r"""<!doctype html>
     .share-field textarea {
       min-height: 78px;
       resize: vertical;
+    }
+    .share-command-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .share-command-row textarea {
+      min-height: 58px;
+    }
+    .share-command-row button {
+      align-self: start;
+      height: 34px;
+      white-space: nowrap;
     }
     .experiment-folder {
       min-width: 0;
@@ -4511,6 +4539,17 @@ HTML = r"""<!doctype html>
               <span class="share-field-label">Share link</span>
               <input id="share-link" readonly spellcheck="false">
             </label>
+            <label class="share-field">
+              <span class="share-field-label">Colleague username</span>
+              <input id="share-username" autocomplete="username" spellcheck="false" placeholder="username">
+            </label>
+            <label class="share-field">
+              <span class="share-field-label">One-line command</span>
+              <div class="share-command-row">
+                <textarea id="share-command" readonly spellcheck="false"></textarea>
+                <button id="share-copy-command">Copy</button>
+              </div>
+            </label>
           </div>
         </div>
       </div>
@@ -4906,7 +4945,8 @@ HTML = r"""<!doctype html>
       queueServerUser: '',
       activeView: 'experiment-view',
       shared: false,
-      shareId: ''
+      shareId: '',
+      shareCommandTemplate: ''
     };
     const PLOT_RELOAD_DELAY_MS = 5000;
     const SIDEBAR_WIDTH_KEY = 'mkexp2-sidebar-width';
@@ -7546,6 +7586,35 @@ HTML = r"""<!doctype html>
     function closeShareDialog() {
       document.getElementById('share-modal').classList.add('hidden');
     }
+    function validSshUsername(value) {
+      const text = String(value || '').trim();
+      return /^[A-Za-z0-9._-]+$/.test(text) ? text : '';
+    }
+    function renderShareCommand() {
+      const template = state.shareCommandTemplate || '';
+      const usernameInput = document.getElementById('share-username');
+      const command = document.getElementById('share-command');
+      const copyButton = document.getElementById('share-copy-command');
+      const username = validSshUsername(usernameInput.value);
+      command.value = template ? template.split('<user>').join(username || '<user>') : '';
+      command.title = username || !usernameInput.value.trim()
+        ? ''
+        : 'SSH usernames may contain only letters, digits, dots, underscores, and hyphens.';
+      copyButton.disabled = !template || !username;
+      copyButton.title = copyButton.disabled ? 'Enter a valid SSH username first.' : 'Copy command';
+    }
+    async function copyShareCommand() {
+      const command = document.getElementById('share-command');
+      const text = command.value;
+      if (!text || text.includes('<user>')) return;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        command.focus();
+        command.select();
+        document.execCommand('copy');
+      }
+    }
     async function shareExperiment() {
       if (!state.selected || state.shared) return;
       await withBusyButton('share-experiment', '', async () => {
@@ -7554,6 +7623,9 @@ HTML = r"""<!doctype html>
         document.getElementById('share-summary').textContent = `Shared ${result.share?.experiment_id || state.selected}.`;
         document.getElementById('share-ssh').value = result.ssh_tunnel || '';
         document.getElementById('share-link').value = result.share_url || '';
+        state.shareCommandTemplate = result.colleague_command_template || '';
+        document.getElementById('share-username').value = '';
+        renderShareCommand();
       });
     }
     async function downloadExperiment() {
@@ -8675,6 +8747,8 @@ HTML = r"""<!doctype html>
     document.getElementById('share-experiment').onclick = shareExperiment;
     document.getElementById('download-experiment').onclick = downloadExperiment;
     document.getElementById('share-close').onclick = closeShareDialog;
+    document.getElementById('share-username').oninput = renderShareCommand;
+    document.getElementById('share-copy-command').onclick = () => copyShareCommand().catch(err => out(String(err)));
     document.getElementById('experiment-tag-select').onchange = () => assignSelectedTag().catch(err => out(String(err)));
     document.getElementById('tag-save').onclick = () => saveTag().catch(err => out(String(err)));
     document.getElementById('settings-open').onclick = openSettingsDialog;

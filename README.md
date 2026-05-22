@@ -418,7 +418,9 @@ The UI can:
   and Danger Zone, but still allows the viewer to parse logs and generate plot
   artifacts for that shared experiment only. The share dialog shows both the
   browser URL and a copy/paste SSH tunnel command with a generic `<user>`
-  placeholder.
+  placeholder, plus a colleague username field that generates a single
+  copyable command to start the tunnel in the background and open the share
+  link in the browser.
 - open the header settings button to manage the session token and inspect the
   full browser-session command log, including argv/cwd/stdout/stderr payloads
   returned by web API actions
