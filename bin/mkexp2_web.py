@@ -3413,6 +3413,13 @@ HTML = r"""<!doctype html>
       padding: 3px 7px;
       font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
+    .describe-chip.copyable {
+      cursor: copy;
+    }
+    .describe-chip.copyable:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
     @media (max-width: 980px) {
       .describe-toolbar {
         grid-template-columns: 1fr;
@@ -7641,11 +7648,25 @@ HTML = r"""<!doctype html>
         partitioner?.notes
       );
     }
-    function appendDescribeChip(container, text, title = '') {
+    function appendDescribeChip(container, text, title = '', options = {}) {
       const chip = document.createElement('span');
       chip.className = 'describe-chip';
       chip.textContent = text;
       chip.title = title || text;
+      if (Object.prototype.hasOwnProperty.call(options, 'copyValue')) {
+        const value = String(options.copyValue ?? '');
+        chip.classList.add('copyable');
+        chip.setAttribute('role', 'button');
+        chip.tabIndex = 0;
+        chip.title = `${chip.title || text} — click to copy value`;
+        const copy = () => copyTextToClipboard(value).catch(err => out(String(err)));
+        chip.onclick = copy;
+        chip.onkeydown = event => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          copy();
+        };
+      }
       container.appendChild(chip);
     }
     function appendDescribeProperties(container, properties, emptyText = 'No defaults') {
@@ -7659,7 +7680,8 @@ HTML = r"""<!doctype html>
           const allowed = prop.closed && Array.isArray(prop.values) && prop.values.length
             ? ` values: ${prop.values.join('|')}`
             : (prop.allowed && prop.allowed !== 'any' ? ` values: ${prop.allowed}` : '');
-          appendDescribeChip(row, `${prop.key}=${describeValue(prop.value, '')}`, `${prop.key}${allowed}${prop.when ? `; ${prop.when}` : ''}`);
+          const value = describeValue(prop.value, '');
+          appendDescribeChip(row, `${prop.key}=${value}`, `${prop.key}${allowed}${prop.when ? `; ${prop.when}` : ''}`, { copyValue: value });
         }
       }
       container.appendChild(row);
@@ -7793,19 +7815,6 @@ HTML = r"""<!doctype html>
         appendDescribeProperties(card, partitioner.defaults || []);
         const list = document.createElement('div');
         list.className = 'describe-alias-list';
-        if (!query || baseMatches) {
-          const baseRow = document.createElement('div');
-          baseRow.className = 'describe-alias';
-          const baseName = document.createElement('div');
-          baseName.className = 'describe-name';
-          baseName.textContent = partitioner.name || '';
-          const baseMeta = document.createElement('div');
-          baseMeta.className = 'describe-muted';
-          baseMeta.textContent = 'Direct plugin name, no alias CLI arguments.';
-          baseRow.appendChild(baseName);
-          baseRow.appendChild(baseMeta);
-          list.appendChild(baseRow);
-        }
         for (const alias of shownAliases) {
           const row = document.createElement('div');
           row.className = 'describe-alias';
@@ -7815,12 +7824,14 @@ HTML = r"""<!doctype html>
           const args = document.createElement('div');
           args.className = 'describe-code';
           args.textContent = describeValue(alias.args, 'no CLI args');
-          const metaLine = document.createElement('div');
-          metaLine.className = 'describe-muted';
-          metaLine.textContent = alias.parent && alias.parent !== alias.base ? `${alias.parent} -> ${alias.base}` : `base ${alias.base || partitioner.name || ''}`;
           row.appendChild(name);
           row.appendChild(args);
-          row.appendChild(metaLine);
+          if (alias.parent && alias.parent !== alias.base) {
+            const metaLine = document.createElement('div');
+            metaLine.className = 'describe-muted';
+            metaLine.textContent = `${alias.parent} -> ${alias.base}`;
+            row.appendChild(metaLine);
+          }
           const properties = Array.isArray(alias.properties) ? alias.properties : [];
           if (properties.length) appendDescribeProperties(row, properties, '');
           list.appendChild(row);
@@ -8162,13 +8173,27 @@ HTML = r"""<!doctype html>
       const command = document.getElementById('share-command');
       const text = command.value;
       if (!text || text.includes('<user>')) return;
+      await copyTextToClipboard(text, command);
+    }
+    async function copyTextToClipboard(text, fallbackElement = null) {
+      const value = String(text ?? '');
+      if (!value) return false;
       try {
-        await navigator.clipboard.writeText(text);
+        await navigator.clipboard.writeText(value);
       } catch {
-        command.focus();
-        command.select();
+        const target = fallbackElement || document.createElement('textarea');
+        if (!fallbackElement) {
+          target.value = value;
+          target.style.position = 'fixed';
+          target.style.left = '-9999px';
+          document.body.appendChild(target);
+        }
+        target.focus();
+        target.select();
         document.execCommand('copy');
+        if (!fallbackElement) target.remove();
       }
+      return true;
     }
     async function shareExperiment() {
       if (!state.selected || state.shared) return;
