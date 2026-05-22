@@ -5048,7 +5048,7 @@ HTML = r"""<!doctype html>
           <div class="panel-body">
             <div class="logs-browser">
               <div class="logs-sidebar">
-                <div id="logs-path" class="logs-path">logs/</div>
+                <div id="logs-path" class="logs-path"></div>
                 <div id="logs-list" class="logs-list">
                   <div class="csv-empty">Open the Logs tab to load the log directory.</div>
                 </div>
@@ -6955,20 +6955,20 @@ HTML = r"""<!doctype html>
       const list = document.getElementById('logs-list');
       const content = document.getElementById('log-content');
       if (!state.selected) {
-        pathLabel.textContent = 'logs/';
+        pathLabel.textContent = '';
         list.innerHTML = '<div class="csv-empty">Select an experiment first.</div>';
         content.innerHTML = '<div class="csv-empty">Select an experiment first.</div>';
         return;
       }
       if (state.logsFor !== state.selected || !state.logsListing) {
-        pathLabel.textContent = 'logs/';
+        pathLabel.textContent = '';
         list.innerHTML = '<div class="csv-empty">Open the Logs tab to load the log directory.</div>';
         content.innerHTML = '<div class="csv-empty">Select a log file to load its content.</div>';
         return;
       }
       const listing = state.logsListing;
       const dir = listing.dir || '';
-      pathLabel.textContent = `logs/${dir}${dir ? '/' : ''}`;
+      pathLabel.textContent = dir ? `${dir}/` : '';
       if (!listing.exists) {
         list.innerHTML = '<div class="csv-empty">No logs directory exists for this experiment yet.</div>';
         content.innerHTML = '<div class="csv-empty">Run experiments first, then reload logs.</div>';
