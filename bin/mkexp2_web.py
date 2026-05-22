@@ -7575,7 +7575,7 @@ HTML = r"""<!doctype html>
       }
       const listing = state.logsListing;
       const dir = listing.dir || '';
-      pathLabel.textContent = dir ? `${dir}/` : '';
+      pathLabel.textContent = dir ? `logs/${dir}/` : 'logs/';
       if (!listing.exists) {
         content.className = 'log-content';
         list.innerHTML = '<div class="csv-empty">No logs directory exists for this experiment yet.</div>';
