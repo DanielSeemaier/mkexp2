@@ -175,6 +175,30 @@ class WebBackendTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 app.create_experiment({"name": "Hidden", "name_template": "<name>.archived"})
 
+    def test_copy_experiment_uses_source_experiment_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            source = repo / "source"
+            source.mkdir()
+            source_text = "ExperimentSource() {\n  Algorithms Feature\n}\n"
+            (source / "Experiment").write_text(source_text, encoding="utf-8")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "fixed-<name>", "token")
+
+            copied = app.copy_experiment("source", {"name": "Fork Run", "name_template": "forks/<name>"})
+
+            self.assertEqual(copied["id"], "forks/fork-run")
+            self.assertEqual(copied["source_id"], "source")
+            self.assertEqual((repo / "forks" / "fork-run" / "Experiment").read_text(encoding="utf-8"), source_text)
+            self.assertEqual((repo / "source" / "Experiment").read_text(encoding="utf-8"), source_text)
+            self.assertIn("forks/fork-run", [item["id"] for item in app.list_experiments(force=True)])
+
+            with self.assertRaises(ValueError):
+                app.copy_experiment("source", {"name": "Fork Run", "name_template": "forks/<name>"})
+            with self.assertRaises(ValueError):
+                app.copy_experiment("missing", {"name": "Other"})
+            with self.assertRaises(ValueError):
+                app.copy_experiment("source", {"name": "Hidden", "name_template": "<name>.archived"})
+
     def test_list_presets_uses_probe_json(self):
         original_run_command = mkexp2_web.run_command
         calls = []
@@ -318,6 +342,11 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}", mkexp2_web.HTML)
         self.assertIn("date.textContent = created || 'unknown'", mkexp2_web.HTML)
         self.assertIn("selectedPathText(data.path, data)", mkexp2_web.HTML)
+        self.assertIn('id="copy-experiment"', mkexp2_web.HTML)
+        self.assertIn('id="copy-modal"', mkexp2_web.HTML)
+        self.assertIn("async function copyExperiment", mkexp2_web.HTML)
+        self.assertIn("/copy", mkexp2_web.HTML)
+        self.assertIn("Create a new experiment from the current Experiment file.", mkexp2_web.HTML)
         self.assertIn('id="check-indicator"', mkexp2_web.HTML)
         self.assertIn("function setCheckIndicator", mkexp2_web.HTML)
         self.assertIn("function clearCheckIndicator", mkexp2_web.HTML)

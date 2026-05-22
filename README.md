@@ -448,6 +448,9 @@ The UI can:
   destructive recovery actions
 - create a new directory from the header `+` dialog, selecting a preset and
   optionally overriding the configured name template for that experiment
+- copy the selected experiment from the top navigation into a new directory,
+  using the selected experiment's current `Experiment` file as the starting
+  template
 - edit the raw `Experiment` file with lightweight syntax highlighting
 - open the collapsed Reference panel on demand, which runs one
   `mkexp2 describe --all --json` command and renders searchable/filterable DSL

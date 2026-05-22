@@ -1200,6 +1200,41 @@ class Mkexp2WebApp:
             shutil.rmtree(path, ignore_errors=True)
             raise
 
+    def copy_experiment(self, source_id, payload):
+        source_path = self.active_experiment_path(source_id)
+        known = {experiment["id"] for experiment in self.list_experiments(force=True)}
+        if source_id not in known:
+            raise ValueError(f"experiment not found: {source_id}")
+        source_file = source_path / "Experiment"
+        if not source_file.is_file():
+            raise ValueError(f"experiment not found: {source_id}")
+
+        default_name = f"{Path(source_id).name}-copy"
+        name = payload.get("name") or default_name
+        template = payload.get("name_template") or self.name_template
+        target_id = render_name_template(template, name)
+        self.validate_visible_experiment_id(target_id)
+        target_path = self.experiment_path(target_id)
+        if target_path.exists():
+            raise ValueError(f"experiment already exists: {target_id}")
+        if source_path in target_path.parents:
+            raise ValueError("copy target cannot be inside the source experiment directory")
+
+        target_path.mkdir(parents=True)
+        try:
+            (target_path / "Experiment").write_text(source_file.read_text(encoding="utf-8"), encoding="utf-8")
+            self.invalidate_experiments_cache()
+            return {
+                "copied": True,
+                "id": target_id,
+                "path": str(target_path),
+                "source_id": source_id,
+                "source_path": str(source_path),
+            }
+        except Exception:
+            shutil.rmtree(target_path, ignore_errors=True)
+            raise
+
     def command(self, experiment_id, argv, timeout=60):
         return run_command([str(self.mkexp2), *argv], cwd=self.active_experiment_path(experiment_id), timeout=timeout)
 
@@ -2581,6 +2616,7 @@ HTML = r"""<!doctype html>
     .app.share-mode .submit-panel,
     .app.share-mode .danger-zone,
     .app.share-mode #check,
+    .app.share-mode #copy-experiment,
     .app.share-mode #share-experiment,
     .app.share-mode .tag-controls,
     .app.share-mode #add-plot-source {
@@ -4927,6 +4963,46 @@ HTML = r"""<!doctype html>
         </div>
       </div>
     </div>
+    <div id="copy-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="copy-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="copy-modal-title" class="modal-title">Copy Experiment</div>
+            <div id="copy-summary" class="csv-summary">Create a new experiment from the current Experiment file.</div>
+          </div>
+          <button id="copy-close" class="icon-button" aria-label="Close copy dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="create-form">
+            <label class="create-field">
+              <span class="create-field-label">New experiment name</span>
+              <div class="template-name-row">
+                <span id="copy-name-prefix" class="template-name-part"></span>
+                <input id="copy-name" placeholder="new experiment">
+                <span id="copy-name-suffix" class="template-name-part"></span>
+              </div>
+            </label>
+            <label class="checkbox-line">
+              <input id="copy-template-override" type="checkbox">
+              <span>Override name template</span>
+            </label>
+            <div id="copy-template-controls" class="template-controls hidden">
+              <label class="create-field">
+                <span class="create-field-label">Name template</span>
+                <input id="copy-template" spellcheck="false">
+              </label>
+            </div>
+            <div id="copy-preview" class="csv-summary"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="copy-cancel">Cancel</button>
+          <button id="copy-submit" class="primary">Copy</button>
+        </div>
+      </div>
+    </div>
     <div id="plot-source-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="plot-source-modal-title">
       <div class="modal">
         <div class="modal-header">
@@ -4957,6 +5033,9 @@ HTML = r"""<!doctype html>
         <div class="tag-controls" aria-label="Experiment tag controls">
           <select id="experiment-tag-select" title="Experiment tag"></select>
         </div>
+        <button id="copy-experiment" class="icon-button" aria-label="Copy experiment" title="Copy experiment">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+        </button>
         <button id="share-experiment" class="icon-button" aria-label="Share experiment" title="Share experiment">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.6 6.8-4.2"/><path d="m8.6 13.4 6.8 4.2"/></svg>
         </button>
@@ -5872,6 +5951,11 @@ HTML = r"""<!doctype html>
       const custom = document.getElementById('create-template').value.trim();
       return override && custom ? custom : (state.config.name_template || '%Y.%m.%d-<name>');
     }
+    function activeCopyTemplate() {
+      const override = document.getElementById('copy-template-override').checked;
+      const custom = document.getElementById('copy-template').value.trim();
+      return override && custom ? custom : (state.config.name_template || '%Y.%m.%d-<name>');
+    }
     function updateCreatePreview() {
       const template = activeCreateTemplate();
       const name = document.getElementById('create-name').value || 'experiment';
@@ -5890,6 +5974,26 @@ HTML = r"""<!doctype html>
       document.getElementById('create-template-controls').classList.toggle(
         'hidden',
         !document.getElementById('create-template-override').checked
+      );
+    }
+    function updateCopyPreview() {
+      const template = activeCopyTemplate();
+      const name = document.getElementById('copy-name').value || suggestedCopyName();
+      const renderedName = slugifyName(name);
+      const tokenIndex = template.indexOf('<name>');
+      const prefix = document.getElementById('copy-name-prefix');
+      const suffix = document.getElementById('copy-name-suffix');
+      if (tokenIndex >= 0) {
+        prefix.textContent = renderTemplateForDate(template.slice(0, tokenIndex), '');
+        suffix.textContent = renderTemplateForDate(template.slice(tokenIndex + '<name>'.length), '');
+      } else {
+        prefix.textContent = renderTemplateForDate(template, '');
+        suffix.textContent = '';
+      }
+      document.getElementById('copy-preview').textContent = `Will create: ${renderTemplateForDate(template, renderedName)}`;
+      document.getElementById('copy-template-controls').classList.toggle(
+        'hidden',
+        !document.getElementById('copy-template-override').checked
       );
     }
     function renderGitStatus(status) {
@@ -7289,6 +7393,28 @@ HTML = r"""<!doctype html>
       select.value = currentTag?.name || '';
       select.disabled = !state.selected || state.shared;
       select.title = state.selected ? 'Experiment tag' : 'Select an experiment first';
+      renderExperimentActionButtons();
+    }
+    function renderExperimentActionButtons() {
+      const copyButton = document.getElementById('copy-experiment');
+      if (copyButton) {
+        copyButton.disabled = !state.selected || state.shared;
+        copyButton.title = state.shared
+          ? 'Shared experiments cannot be copied from this view.'
+          : (state.selected ? 'Copy experiment' : 'Select an experiment first');
+      }
+      const shareButton = document.getElementById('share-experiment');
+      if (shareButton) {
+        shareButton.disabled = !state.selected || state.shared;
+        shareButton.title = state.shared
+          ? 'Already viewing a shared experiment.'
+          : (state.selected ? 'Share experiment' : 'Select an experiment first');
+      }
+      const downloadButton = document.getElementById('download-experiment');
+      if (downloadButton) {
+        downloadButton.disabled = !state.selected;
+        downloadButton.title = state.selected ? 'Download experiment archive' : 'Select an experiment first';
+      }
     }
     function tagPaletteEntries() {
       const raw = Array.isArray(state.tagPalette) && state.tagPalette.length ? state.tagPalette : DEFAULT_TAG_COLOR_PALETTE;
@@ -8052,6 +8178,26 @@ HTML = r"""<!doctype html>
     function closeCreateDialog() {
       document.getElementById('create-modal').classList.add('hidden');
     }
+    function suggestedCopyName() {
+      const leaf = String(state.selected || 'experiment').split('/').filter(Boolean).pop() || 'experiment';
+      return `${leaf.replace(/^\d{4}\.\d{2}\.\d{2}-/, '')}-copy`;
+    }
+    async function openCopyDialog() {
+      if (!state.selected || state.shared) return;
+      document.getElementById('copy-modal').classList.remove('hidden');
+      document.getElementById('copy-summary').textContent = `Copying ${state.selected}.`;
+      document.getElementById('copy-name').value = suggestedCopyName();
+      await refreshConfig().catch(err => out(String(err)));
+      document.getElementById('copy-template').value = state.config.name_template || '%Y.%m.%d-<name>';
+      document.getElementById('copy-template-override').checked = false;
+      updateCopyPreview();
+      const name = document.getElementById('copy-name');
+      name.focus();
+      name.select();
+    }
+    function closeCopyDialog() {
+      document.getElementById('copy-modal').classList.add('hidden');
+    }
     function renderSubmitLock(lock) {
       state.submitLock = lock || { locked: false };
       const clearButton = document.getElementById('clear-submit-lock');
@@ -8677,6 +8823,27 @@ HTML = r"""<!doctype html>
           body: JSON.stringify({ name, preset, name_template: nameTemplate })
         });
         closeCreateDialog();
+        await refreshExperiments({ force: true });
+        await selectExperiment(data.id);
+      });
+    }
+    async function copyExperiment() {
+      if (!state.selected || state.shared) return;
+      const sourceId = state.selected;
+      const name = document.getElementById('copy-name').value || suggestedCopyName();
+      const nameTemplate = activeCopyTemplate();
+      const button = document.getElementById('copy-submit');
+      await withBusyButton(button, 'Copying...', async () => {
+        if (state.editorDirty) {
+          await persistExperiment();
+          state.editorDirty = false;
+          if (state.selected !== sourceId) return;
+        }
+        const data = await api(`/api/experiments/${encodeURIComponent(sourceId)}/copy`, {
+          method: 'POST',
+          body: JSON.stringify({ name, name_template: nameTemplate })
+        });
+        closeCopyDialog();
         await refreshExperiments({ force: true });
         await selectExperiment(data.id);
       });
@@ -9418,6 +9585,7 @@ HTML = r"""<!doctype html>
         'share-modal',
         'git-modal',
         'archive-modal',
+        'copy-modal',
         'create-modal',
       ];
       for (const id of modalIds) {
@@ -9562,6 +9730,13 @@ HTML = r"""<!doctype html>
     document.getElementById('create-name').oninput = updateCreatePreview;
     document.getElementById('create-template').oninput = updateCreatePreview;
     document.getElementById('create-template-override').onchange = updateCreatePreview;
+    document.getElementById('copy-experiment').onclick = () => withBusyButton('copy-experiment', '', openCopyDialog).catch(err => out(String(err)));
+    document.getElementById('copy-close').onclick = closeCopyDialog;
+    document.getElementById('copy-cancel').onclick = closeCopyDialog;
+    document.getElementById('copy-submit').onclick = () => copyExperiment().catch(err => out(String(err)));
+    document.getElementById('copy-name').oninput = updateCopyPreview;
+    document.getElementById('copy-template').oninput = updateCopyPreview;
+    document.getElementById('copy-template-override').onchange = updateCopyPreview;
     document.getElementById('archive-open').onclick = () => withBusyButton('archive-open', '', openArchiveDialog).catch(err => out(String(err)));
     document.getElementById('archive-close').onclick = closeArchiveDialog;
     document.getElementById('archive-refresh').onclick = () => withBusyButton('archive-refresh', '', () => loadArchivedExperiments({ force: true })).catch(err => out(String(err)));
@@ -10025,6 +10200,11 @@ def make_handler(app):
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
                     json_response(self, 200, app.rename_experiment(experiment_id, payload))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/copy$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    json_response(self, 201, app.copy_experiment(experiment_id, payload))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/share$", path)
                 if match:
