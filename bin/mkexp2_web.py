@@ -5447,6 +5447,10 @@ HTML = r"""<!doctype html>
                 <div class="panel-title" id="selected-title">Experiment</div>
                 <div class="muted" id="selected-path"></div>
               </div>
+              <div class="actions check-action">
+                <span id="check-indicator" class="check-indicator hidden" aria-live="polite"></span>
+                <button id="check" title="Save and validate the Experiment file">Save</button>
+              </div>
             </div>
             <div class="panel-body">
               <div class="editor-shell">
@@ -5459,10 +5463,6 @@ HTML = r"""<!doctype html>
             <section class="panel submit-panel">
               <div class="panel-header">
                 <div class="panel-title">Submit</div>
-                <div class="actions check-action">
-                  <span id="check-indicator" class="check-indicator hidden" aria-live="polite"></span>
-                  <button id="check">Check</button>
-                </div>
               </div>
               <div class="panel-body stack">
                 <div id="algorithm-list" class="chips"></div>
@@ -9356,7 +9356,7 @@ HTML = r"""<!doctype html>
       const button = document.getElementById('check');
       clearCheckIndicator();
       try {
-        await withBusyButton(button, 'Checking...', async () => {
+        await withBusyButton(button, 'Saving...', async () => {
           out('Saving and checking...');
           const saved = await persistExperiment();
           state.editorDirty = false;
