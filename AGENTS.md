@@ -131,6 +131,8 @@ There is no linting configuration or CI setup.
 
 - **`PartitionerProperty key [fallback]`** — inside plugin hooks, resolves a property for the currently active algorithm. Works consistently during install, generate, and probe phases. `AlgorithmProperty` values inherit through the full `DefineAlgorithm` chain, so a child alias inherits parent alias properties such as `repo_ref` unless it overrides them.
 
+- **`mkexp2 describe <partitioner>` alias listing.** Describe output includes every `DefineAlgorithm` alias whose recursive `GetAlgorithmBase` resolves to the described partitioner, not just direct aliases. Nested aliases print their effective inherited argument string via `GetAlgorithmArgs` plus any properties declared directly on that alias.
+
 - **Unknown algorithm names.** An algorithm not created with `DefineAlgorithm` resolves to a partitioner plugin of the same name; if no such plugin exists, `mkexp2 install/generate` should fail with a clear `unknown partitioner plugin '<name>'` fatal message.
 
 - **TAP test output.** `pass` / `fail` helpers in `tests/lib/test_framework.zsh` print `ok N - msg` / `not ok - msg`. Driver scripts print `1..$TEST_COUNT` at the end.

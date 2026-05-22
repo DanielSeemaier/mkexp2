@@ -62,6 +62,11 @@ EOF
     assert_file_contains describe.out "Partitioner: TestHarness" "describe shows test harness plugin"
     assert_file_contains describe.out "mode=baseline | values: baseline|debug|custom|stress (closed)" "describe prints closed-set defaults"
     assert_file_contains describe.out "TestHarness-Dbg" "describe prints plugin alias"
+
+    "$MKEXP2" describe MtKaHyPar > describe.out
+    assert_file_contains describe.out "MtKaHyPar-G-Default" "describe prints nested plugin alias"
+    assert_file_contains describe.out "args: --preset-type=default" "describe prints inherited alias args"
+    assert_file_contains describe.out "property: file_format=metis" "describe prints nested alias properties"
   )
 
   cat > "$tmp/Experiment" <<'EOF'

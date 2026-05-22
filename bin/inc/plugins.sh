@@ -158,7 +158,7 @@ DescribePartitioner() {
     for alias_name in ${(k)ALG_DEF_BASE}; do
       alias_name="${alias_name#\"}"
       alias_name="${alias_name%\"}"
-      if [[ "${ALG_DEF_BASE["$alias_name"]:-}" == "$base" ]]; then
+      if [[ "$(GetAlgorithmBase "$alias_name")" == "$base" ]]; then
         aliases+=("$alias_name")
       fi
     done
@@ -173,7 +173,8 @@ DescribePartitioner() {
     for alias_name in "${aliases[@]}"; do
       echo "    - $alias_name"
 
-      local alias_args="${ALG_DEF_ARGS["$alias_name"]:-}"
+      local alias_args=""
+      alias_args=$(GetAlgorithmArgs "$alias_name")
 
       if [[ -n "$alias_args" ]]; then
         echo "      args: $alias_args"
