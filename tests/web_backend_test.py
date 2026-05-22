@@ -305,6 +305,14 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("plotSourceOpenDirs", mkexp2_web.HTML)
         self.assertIn("renderPlotSourceTree", mkexp2_web.HTML)
         self.assertIn("selectedPlotSourceObjects", mkexp2_web.HTML)
+        self.assertIn("removeExternalPlotSource", mkexp2_web.HTML)
+        self.assertIn("plotArtifactView", mkexp2_web.HTML)
+        self.assertIn("plot-view-sets", mkexp2_web.HTML)
+        self.assertIn("plot-view-types", mkexp2_web.HTML)
+        self.assertIn("renamePlotArtifactSet", mkexp2_web.HTML)
+        self.assertIn("deletePlotArtifactSet", mkexp2_web.HTML)
+        self.assertIn("deletePlotArtifact", mkexp2_web.HTML)
+        self.assertIn("/plot-artifact-sets/", mkexp2_web.HTML)
         self.assertIn("plots: Array.from(state.selectedPlotTypes)", mkexp2_web.HTML)
         self.assertIn("const PLOT_RELOAD_DELAY_MS = 5000", mkexp2_web.HTML)
         self.assertIn("if (action?.status === 'running')", mkexp2_web.HTML)
@@ -1250,6 +1258,65 @@ class WebBackendTest(unittest.TestCase):
         self.assertEqual(plot_calls[0][0][0:4], ["/fake/mkexp2", "plot", "--no-docker", "--plot"])
         self.assertIn("running-time-box", plot_calls[0][0])
         self.assertIn("MockA", plot_calls[0][0])
+        self.assertTrue(result["created"][0]["plot_set_id"])
+        self.assertEqual(result["created"][0]["plot_set_label"], "Test Plot")
+
+    def test_plot_artifact_sets_can_be_renamed_and_deleted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            plots = exp / "plots"
+            plots.mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            (plots / "a.pdf").write_bytes(b"%PDF-1.4 a\n")
+            (plots / "b.pdf").write_bytes(b"%PDF-1.4 b\n")
+            (plots / "index.json").write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "artifacts": [
+                            {
+                                "id": "a",
+                                "label": "Old - A",
+                                "plot_id": "speedup",
+                                "plot_name": "Speedup",
+                                "plot_set_id": "set-1",
+                                "plot_set_label": "Old",
+                                "path": "plots/a.pdf",
+                                "created_at": "2026-05-22T10:00:00",
+                                "sources": [],
+                            },
+                            {
+                                "id": "b",
+                                "label": "Old - B",
+                                "plot_id": "running-time-box",
+                                "plot_name": "Running Time Box",
+                                "plot_set_id": "set-1",
+                                "plot_set_label": "Old",
+                                "path": "plots/b.pdf",
+                                "created_at": "2026-05-22T10:00:01",
+                                "sources": [],
+                            },
+                        ],
+                    }
+                )
+            )
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+
+            renamed = app.rename_plot_artifact_set("exp", "set-1", {"label": "New Name"})
+            artifacts = renamed["artifacts"]["artifacts"]
+            self.assertEqual({item["plot_set_label"] for item in artifacts}, {"New Name"})
+            self.assertEqual({item["label"] for item in artifacts}, {"New Name - Speedup", "New Name - Running Time Box"})
+
+            deleted_one = app.delete_plot_artifact("exp", "a")
+            self.assertEqual(deleted_one["deleted"], ["a"])
+            self.assertFalse((plots / "a.pdf").exists())
+            self.assertTrue((plots / "b.pdf").exists())
+
+            deleted_set = app.delete_plot_artifact_set("exp", "set-1")
+            self.assertEqual(deleted_set["deleted"], ["b"])
+            self.assertFalse((plots / "b.pdf").exists())
+            self.assertEqual(deleted_set["artifacts"]["artifacts"], [])
 
     def test_slurm_parsers(self):
         scontrol = """NodeName=node01 Arch=x86_64 CPUTot=64 RealMemory=257000 State=ALLOCATED

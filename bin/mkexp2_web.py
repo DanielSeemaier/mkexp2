@@ -1699,6 +1699,42 @@ class Mkexp2WebApp:
         tmp.write_text(json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         tmp.replace(path)
 
+    def plot_artifact_set_label(self, artifact):
+        label = str(artifact.get("plot_set_label") or "").strip()
+        if label:
+            return label
+        label = str(artifact.get("label") or artifact.get("plot_name") or artifact.get("id") or "Plot set").strip()
+        plot_name = str(artifact.get("plot_name") or "").strip()
+        suffix = f" - {plot_name}"
+        if plot_name and label.endswith(suffix):
+            label = label[: -len(suffix)].strip()
+        return label or "Plot set"
+
+    def plot_artifact_set_id(self, artifact):
+        set_id = str(artifact.get("plot_set_id") or artifact.get("set_id") or "").strip()
+        if re.fullmatch(r"[A-Za-z0-9._-]+", set_id):
+            return set_id
+        created = str(artifact.get("plot_set_created_at") or artifact.get("created_at") or "").strip()
+        if created:
+            return f"legacy-{slugify(created)}-{slugify(self.plot_artifact_set_label(artifact))[:40]}"
+        return f"legacy-{slugify(self.plot_artifact_set_label(artifact))[:64]}"
+
+    def hydrated_plot_artifact(self, artifact, pdf):
+        stat = pdf.stat()
+        item = dict(artifact)
+        set_label = self.plot_artifact_set_label(item)
+        item.update(
+            {
+                "exists": True,
+                "size": stat.st_size,
+                "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+                "plot_set_id": self.plot_artifact_set_id(item),
+                "plot_set_label": set_label,
+                "plot_set_created_at": item.get("plot_set_created_at") or item.get("created_at") or "",
+            }
+        )
+        return item
+
     def list_plot_artifacts(self, experiment_id):
         index = self.read_plot_artifacts_index(experiment_id)
         directory = self.plot_artifacts_dir(experiment_id)
@@ -1708,16 +1744,7 @@ class Mkexp2WebApp:
             pdf = (self.active_experiment_path(experiment_id) / rel_path).resolve()
             if not rel_path.startswith("plots/") or not pdf.is_file():
                 continue
-            stat = pdf.stat()
-            item = dict(artifact)
-            item.update(
-                {
-                    "exists": True,
-                    "size": stat.st_size,
-                    "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
-                }
-            )
-            artifacts.append(item)
+            artifacts.append(self.hydrated_plot_artifact(artifact, pdf))
         artifacts.sort(key=lambda item: item.get("created_at") or "", reverse=True)
         return {"artifacts": artifacts, "legacy": self.plots_info(experiment_id), "index_path": str(directory / PLOT_INDEX_FILE)}
 
@@ -1732,6 +1759,69 @@ class Mkexp2WebApp:
                     raise ValueError("plot artifact path escapes experiment")
                 return path
         raise ValueError("plot artifact not found")
+
+    def _delete_plot_artifact_file(self, experiment_id, artifact):
+        rel_path = str(artifact.get("path") or "")
+        root = self.active_experiment_path(experiment_id).resolve()
+        pdf = (root / rel_path).resolve()
+        if not rel_path.startswith("plots/") or root not in pdf.parents:
+            raise ValueError("plot artifact path escapes experiment")
+        pdf.unlink(missing_ok=True)
+
+    def delete_plot_artifact(self, experiment_id, artifact_id):
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", artifact_id or ""):
+            raise ValueError("invalid plot artifact id")
+        index = self.read_plot_artifacts_index(experiment_id)
+        kept = []
+        deleted = []
+        for artifact in index.get("artifacts", []):
+            if artifact.get("id") == artifact_id:
+                self._delete_plot_artifact_file(experiment_id, artifact)
+                deleted.append(artifact)
+            else:
+                kept.append(artifact)
+        if not deleted:
+            raise ValueError("plot artifact not found")
+        index["artifacts"] = kept
+        self.write_plot_artifacts_index(experiment_id, index)
+        return {"deleted": [item.get("id") for item in deleted], "artifacts": self.list_plot_artifacts(experiment_id)}
+
+    def delete_plot_artifact_set(self, experiment_id, set_id):
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", set_id or ""):
+            raise ValueError("invalid plot set id")
+        index = self.read_plot_artifacts_index(experiment_id)
+        kept = []
+        deleted = []
+        for artifact in index.get("artifacts", []):
+            if self.plot_artifact_set_id(artifact) == set_id:
+                self._delete_plot_artifact_file(experiment_id, artifact)
+                deleted.append(artifact)
+            else:
+                kept.append(artifact)
+        if not deleted:
+            raise ValueError("plot set not found")
+        index["artifacts"] = kept
+        self.write_plot_artifacts_index(experiment_id, index)
+        return {"deleted": [item.get("id") for item in deleted], "artifacts": self.list_plot_artifacts(experiment_id)}
+
+    def rename_plot_artifact_set(self, experiment_id, set_id, payload):
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", set_id or ""):
+            raise ValueError("invalid plot set id")
+        label = str((payload or {}).get("label") or "").strip()
+        if not label:
+            raise ValueError("plot set label must not be empty")
+        index = self.read_plot_artifacts_index(experiment_id)
+        matched = [artifact for artifact in index.get("artifacts", []) if self.plot_artifact_set_id(artifact) == set_id]
+        if not matched:
+            raise ValueError("plot set not found")
+        multi_plot_set = len(matched) > 1
+        for artifact in matched:
+            artifact["plot_set_id"] = set_id
+            artifact["plot_set_label"] = label
+            artifact["plot_set_created_at"] = artifact.get("plot_set_created_at") or artifact.get("created_at") or ""
+            artifact["label"] = f"{label} - {artifact.get('plot_name', artifact.get('plot_id', 'Plot'))}" if multi_plot_set else label
+        self.write_plot_artifacts_index(experiment_id, index)
+        return {"renamed": set_id, "label": label, "artifacts": self.list_plot_artifacts(experiment_id)}
 
     def resolve_plot_source(self, experiment_id, source):
         if isinstance(source, str):
@@ -1808,12 +1898,21 @@ class Mkexp2WebApp:
             created = []
             commands = []
             index = self.read_plot_artifacts_index(experiment_id)
+            set_created_at = _dt.datetime.now().isoformat(timespec="seconds")
+            source_label = ", ".join(src["metadata"].get("alias") or src["metadata"].get("name") or "" for src in resolved_sources)
+            set_label = label or f"Plot set - {source_label}"
+            set_id = "-".join(
+                [
+                    _dt.datetime.now().strftime("%Y%m%d-%H%M%S"),
+                    slugify(set_label)[:48],
+                    secrets.token_urlsafe(4).replace("_", "-"),
+                ]
+            )
+            multi_plot_set = len(plot_ids) > 1
             for plot_id in plot_ids:
                 entry = catalog[plot_id]
                 created_at = _dt.datetime.now().isoformat(timespec="seconds")
-                label_text = label or f"{entry.get('name', plot_id)} - {', '.join(src['metadata'].get('alias') or src['metadata'].get('name') or '' for src in resolved_sources)}"
-                if len(plot_ids) > 1 and label:
-                    label_text = f"{label} - {entry.get('name', plot_id)}"
+                label_text = f"{set_label} - {entry.get('name', plot_id)}" if multi_plot_set else set_label
                 artifact_id = "-".join(
                     [
                         _dt.datetime.now().strftime("%Y%m%d-%H%M%S"),
@@ -1841,6 +1940,9 @@ class Mkexp2WebApp:
                         "plot_id": plot_id,
                         "plot_name": entry.get("name", plot_id),
                         "description": entry.get("description", ""),
+                        "plot_set_id": set_id,
+                        "plot_set_label": set_label,
+                        "plot_set_created_at": set_created_at,
                         "sources": [source["metadata"] for source in resolved_sources],
                         "path": rel_output,
                         "created_at": created_at,
@@ -3319,6 +3421,35 @@ HTML = r"""<!doctype html>
       border-radius: 6px;
       background: white;
     }
+    .plot-source-row {
+      grid-template-columns: auto minmax(0, 1fr) auto;
+    }
+    .plot-source-row.external {
+      border-color: #bfdbfe;
+      background: #eff6ff;
+    }
+    .plot-source-check {
+      display: contents;
+    }
+    .plot-source-body {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+    }
+    .plot-source-remove,
+    .plot-artifact-mini-button {
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      align-self: start;
+      color: var(--muted);
+    }
+    .plot-source-remove:hover,
+    .plot-artifact-mini-button:hover {
+      color: var(--danger);
+      border-color: #fecaca;
+      background: #fff1f2;
+    }
     .plot-choice.expensive {
       border-color: #fed7aa;
       background: #fff7ed;
@@ -3352,12 +3483,78 @@ HTML = r"""<!doctype html>
       display: grid;
       gap: 8px;
     }
-    .plot-artifact-row {
+    .plot-artifact-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .plot-artifact-view-toggle {
+      display: inline-flex;
+      gap: 2px;
+      padding: 2px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: white;
+    }
+    .plot-artifact-view-toggle button {
+      height: 26px;
+      padding: 0 10px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+    }
+    .plot-artifact-view-toggle button.active {
+      background: var(--text);
+      color: white;
+    }
+    .plot-artifact-group {
+      display: grid;
+      gap: 8px;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: white;
+    }
+    .plot-artifact-group-header {
+      display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: start;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .plot-artifact-group-actions {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .plot-artifact-items {
+      display: grid;
+      gap: 6px;
+    }
+    .plot-artifact-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px;
+      align-items: stretch;
+      min-width: 0;
+    }
+    .plot-artifact-select {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: start;
+      min-width: 0;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fbfcfd;
       text-align: left;
       height: auto;
     }
-    .plot-artifact-row.active {
+    .plot-artifact-select.active {
       border-color: var(--accent);
       background: #e8f5f3;
     }
@@ -4274,7 +4471,13 @@ HTML = r"""<!doctype html>
             </label>
             <div id="plot-action-output" class="action-output"></div>
             <section class="plot-box">
-              <div class="plot-box-title">Artifacts</div>
+              <div class="plot-artifact-toolbar">
+                <div class="plot-box-title">Artifacts</div>
+                <div class="plot-artifact-view-toggle" role="group" aria-label="Plot artifact navigation">
+                  <button id="plot-view-sets" type="button" class="active">Sets</button>
+                  <button id="plot-view-types" type="button">Types</button>
+                </div>
+              </div>
               <div id="plot-artifacts" class="csv-empty">No plot artifacts loaded.</div>
             </section>
             <div id="plot-file" class="csv-empty">Select a plot artifact to preview it.</div>
@@ -4325,6 +4528,7 @@ HTML = r"""<!doctype html>
       externalPlotSources: [],
       plotArtifacts: null,
       plotArtifactsFor: null,
+      plotArtifactView: 'sets',
       selectedPlotArtifact: '',
       plotPdfUrl: '',
       plotPdfUrlFor: null,
@@ -7066,6 +7270,13 @@ HTML = r"""<!doctype html>
       const all = [...current, ...state.externalPlotSources];
       return all.filter(source => state.selectedPlotSources.has(sourceKey(source)));
     }
+    function removeExternalPlotSource(source) {
+      const key = sourceKey(source);
+      state.externalPlotSources = state.externalPlotSources.filter(item => item !== source && sourceKey(item) !== key);
+      state.selectedPlotSources.delete(key);
+      syncPlotLabelSuggestion();
+      renderPlotPanel();
+    }
     function plotById(id) {
       return (state.plotCatalog?.plots || []).find(plot => plot.id === id) || null;
     }
@@ -7151,8 +7362,10 @@ HTML = r"""<!doctype html>
       box.innerHTML = '';
       for (const source of sources) {
         const key = sourceKey(source);
-        const row = document.createElement('label');
-        row.className = 'plot-source-row';
+        const row = document.createElement('div');
+        row.className = 'plot-source-row' + (source.kind === 'csv' ? ' external' : '');
+        const checkLabel = document.createElement('label');
+        checkLabel.className = 'plot-source-check';
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.checked = state.selectedPlotSources.has(key);
@@ -7163,6 +7376,7 @@ HTML = r"""<!doctype html>
           renderPlotPanel();
         };
         const body = document.createElement('div');
+        body.className = 'plot-source-body';
         const title = document.createElement('div');
         title.className = 'plot-source-title';
         title.textContent = source.alias || source.name || source.file;
@@ -7188,10 +7402,142 @@ HTML = r"""<!doctype html>
           };
           body.appendChild(alias);
         }
-        row.appendChild(checkbox);
-        row.appendChild(body);
+        checkLabel.appendChild(checkbox);
+        checkLabel.appendChild(body);
+        row.appendChild(checkLabel);
+        if (source.kind === 'csv') {
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'icon-button plot-source-remove';
+          remove.textContent = 'x';
+          remove.title = 'Remove external CSV source';
+          remove.setAttribute('aria-label', `Remove ${source.alias || source.file}`);
+          remove.onclick = event => {
+            event.preventDefault();
+            removeExternalPlotSource(source);
+          };
+          row.appendChild(remove);
+        } else {
+          row.appendChild(document.createElement('span'));
+        }
         box.appendChild(row);
       }
+    }
+    function plotArtifactSetId(artifact) {
+      return artifact.plot_set_id || `legacy-${slugifyName(artifact.plot_set_label || artifact.label || artifact.id)}`;
+    }
+    function plotArtifactSetLabel(artifact) {
+      return artifact.plot_set_label || artifact.label || 'Plot set';
+    }
+    function plotArtifactTypeId(artifact) {
+      return artifact.plot_id || 'unknown';
+    }
+    function groupPlotArtifacts(artifacts, mode) {
+      const groups = new Map();
+      for (const artifact of artifacts) {
+        const key = mode === 'types' ? plotArtifactTypeId(artifact) : plotArtifactSetId(artifact);
+        if (!groups.has(key)) {
+          groups.set(key, {
+            id: key,
+            label: mode === 'types' ? (artifact.plot_name || artifact.plot_id || 'Unknown plot') : plotArtifactSetLabel(artifact),
+            mode,
+            artifacts: [],
+            created_at: artifact.plot_set_created_at || artifact.created_at || '',
+          });
+        }
+        groups.get(key).artifacts.push(artifact);
+      }
+      const items = Array.from(groups.values());
+      for (const group of items) {
+        group.artifacts.sort((left, right) => String(right.created_at || '').localeCompare(String(left.created_at || '')));
+        group.sources = Array.from(new Set(group.artifacts.flatMap(artifact =>
+          (artifact.sources || []).map(source => source.alias || source.name || source.file).filter(Boolean)
+        )));
+        group.size = group.artifacts.reduce((total, artifact) => total + Number(artifact.size || 0), 0);
+      }
+      items.sort((left, right) => {
+        const latestLeft = left.artifacts[0]?.created_at || left.created_at || '';
+        const latestRight = right.artifacts[0]?.created_at || right.created_at || '';
+        return String(latestRight).localeCompare(String(latestLeft));
+      });
+      return items;
+    }
+    function renderPlotArtifactItem(container, artifact) {
+      const item = document.createElement('div');
+      item.className = 'plot-artifact-item';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'plot-artifact-select' + (state.selectedPlotArtifact === artifact.id ? ' active' : '');
+      const body = document.createElement('div');
+      const title = document.createElement('div');
+      title.className = 'plot-artifact-title';
+      title.textContent = artifact.plot_name || artifact.label || artifact.id;
+      const meta = document.createElement('div');
+      meta.className = 'plot-artifact-meta';
+      const sources = (artifact.sources || []).map(source => source.alias || source.name || source.file).join(', ');
+      meta.textContent = `${artifact.label || artifact.plot_id}; ${sources}; ${formatBytes(artifact.size)}; ${artifact.created_at || artifact.modified_at || ''}`;
+      body.appendChild(title);
+      body.appendChild(meta);
+      const open = document.createElement('span');
+      open.textContent = 'Open';
+      button.appendChild(body);
+      button.appendChild(open);
+      button.onclick = () => {
+        state.selectedPlotArtifact = artifact.id;
+        clearPlotPdfUrl();
+        renderPlotPanel();
+      };
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'icon-button plot-artifact-mini-button';
+      del.textContent = 'x';
+      del.title = `Delete ${artifact.label || artifact.id}`;
+      del.setAttribute('aria-label', `Delete plot ${artifact.label || artifact.id}`);
+      del.onclick = () => deletePlotArtifact(artifact.id, del).catch(err => out(String(err)));
+      item.appendChild(button);
+      if (!state.shared) item.appendChild(del);
+      else item.appendChild(document.createElement('span'));
+      container.appendChild(item);
+    }
+    function renderPlotArtifactGroup(container, group) {
+      const section = document.createElement('section');
+      section.className = 'plot-artifact-group';
+      const header = document.createElement('div');
+      header.className = 'plot-artifact-group-header';
+      const body = document.createElement('div');
+      const title = document.createElement('div');
+      title.className = 'plot-artifact-title';
+      title.textContent = group.label;
+      const meta = document.createElement('div');
+      meta.className = 'plot-artifact-meta';
+      const nouns = group.mode === 'types' ? 'artifact' : 'plot';
+      meta.textContent = `${group.artifacts.length} ${nouns}${group.artifacts.length === 1 ? '' : 's'}; ${group.sources.join(', ') || 'no sources'}; ${formatBytes(group.size)}`;
+      body.appendChild(title);
+      body.appendChild(meta);
+      header.appendChild(body);
+      const actions = document.createElement('div');
+      actions.className = 'plot-artifact-group-actions';
+      if (!state.shared && group.mode === 'sets') {
+        const rename = document.createElement('button');
+        rename.type = 'button';
+        rename.className = 'small-button';
+        rename.textContent = 'Rename';
+        rename.onclick = () => renamePlotArtifactSet(group.id, group.label, rename).catch(err => out(String(err)));
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'small-button danger';
+        del.textContent = 'Delete set';
+        del.onclick = () => deletePlotArtifactSet(group.id, group.label, del).catch(err => out(String(err)));
+        actions.appendChild(rename);
+        actions.appendChild(del);
+      }
+      header.appendChild(actions);
+      section.appendChild(header);
+      const items = document.createElement('div');
+      items.className = 'plot-artifact-items';
+      for (const artifact of group.artifacts) renderPlotArtifactItem(items, artifact);
+      section.appendChild(items);
+      container.appendChild(section);
     }
     function renderPlotArtifacts() {
       const box = document.getElementById('plot-artifacts');
@@ -7207,31 +7553,14 @@ HTML = r"""<!doctype html>
       if (!state.selectedPlotArtifact || !artifacts.find(item => item.id === state.selectedPlotArtifact)) {
         state.selectedPlotArtifact = artifacts[0].id;
       }
+      const setToggle = document.getElementById('plot-view-sets');
+      const typeToggle = document.getElementById('plot-view-types');
+      if (setToggle) setToggle.classList.toggle('active', state.plotArtifactView !== 'types');
+      if (typeToggle) typeToggle.classList.toggle('active', state.plotArtifactView === 'types');
       box.className = 'plot-artifact-list';
       box.innerHTML = '';
-      for (const artifact of artifacts) {
-        const button = document.createElement('button');
-        button.className = 'plot-artifact-row' + (state.selectedPlotArtifact === artifact.id ? ' active' : '');
-        const body = document.createElement('div');
-        const title = document.createElement('div');
-        title.className = 'plot-artifact-title';
-        title.textContent = artifact.label || artifact.plot_name || artifact.id;
-        const meta = document.createElement('div');
-        meta.className = 'plot-artifact-meta';
-        const sources = (artifact.sources || []).map(source => source.alias || source.name || source.file).join(', ');
-        meta.textContent = `${artifact.plot_name || artifact.plot_id}; ${sources}; ${formatBytes(artifact.size)}; ${artifact.created_at || artifact.modified_at || ''}`;
-        body.appendChild(title);
-        body.appendChild(meta);
-        const open = document.createElement('span');
-        open.textContent = 'Open';
-        button.appendChild(body);
-        button.appendChild(open);
-        button.onclick = () => {
-          state.selectedPlotArtifact = artifact.id;
-          clearPlotPdfUrl();
-          renderPlotPanel();
-        };
-        box.appendChild(button);
+      for (const group of groupPlotArtifacts(artifacts, state.plotArtifactView)) {
+        renderPlotArtifactGroup(box, group);
       }
     }
     function renderSelectedPlotArtifact() {
@@ -7367,6 +7696,46 @@ HTML = r"""<!doctype html>
       state.plotPdfVersion = version;
       renderPlotPanel();
       return state.plotPdfUrl;
+    }
+    async function deletePlotArtifact(artifactId, button = null) {
+      if (!state.selected || state.shared) return;
+      if (!confirm('Delete this plot PDF?')) return;
+      await withBusyButton(button, '', async () => {
+        await api(`/api/experiments/${encodeURIComponent(state.selected)}/plot-artifacts/${encodeURIComponent(artifactId)}`, {
+          method: 'DELETE'
+        });
+        if (state.selectedPlotArtifact === artifactId) {
+          state.selectedPlotArtifact = '';
+          clearPlotPdfUrl();
+        }
+        await loadPlotInfo();
+      });
+    }
+    async function deletePlotArtifactSet(setId, label, button = null) {
+      if (!state.selected || state.shared) return;
+      if (!confirm(`Delete the plot set "${label}" and all PDFs in it?`)) return;
+      await withBusyButton(button, 'Deleting...', async () => {
+        await api(`/api/experiments/${encodeURIComponent(state.selected)}/plot-artifact-sets/${encodeURIComponent(setId)}`, {
+          method: 'DELETE'
+        });
+        state.selectedPlotArtifact = '';
+        clearPlotPdfUrl();
+        await loadPlotInfo();
+      });
+    }
+    async function renamePlotArtifactSet(setId, currentLabel, button = null) {
+      if (!state.selected || state.shared) return;
+      const label = prompt('Plot set name', currentLabel || '');
+      if (label === null) return;
+      const trimmed = label.trim();
+      if (!trimmed) return;
+      await withBusyButton(button, 'Renaming...', async () => {
+        await api(`/api/experiments/${encodeURIComponent(state.selected)}/plot-artifact-sets/${encodeURIComponent(setId)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ label: trimmed })
+        });
+        await loadPlotInfo();
+      });
     }
     async function loadPlotCatalog() {
       state.plotCatalog = await api('/api/plots/catalog');
@@ -7636,6 +8005,14 @@ HTML = r"""<!doctype html>
     document.getElementById('plot-source-close-footer').onclick = closePlotSourceDialog;
     document.getElementById('plot-label').oninput = () => {
       state.plotLabelTouched = true;
+    };
+    document.getElementById('plot-view-sets').onclick = () => {
+      state.plotArtifactView = 'sets';
+      renderPlotPanel();
+    };
+    document.getElementById('plot-view-types').onclick = () => {
+      state.plotArtifactView = 'types';
+      renderPlotPanel();
     };
     document.getElementById('plot-no-docker').onchange = () => {
       state.plotNoDockerTouched = true;
@@ -8085,6 +8462,12 @@ def make_handler(app):
                     experiment_id = urllib.parse.unquote(match.group(1))
                     json_response(self, 200, app.write_description(experiment_id, payload.get("description", "")))
                     return
+                match = re.match(r"^/api/experiments/([^/]+)/plot-artifact-sets/([^/]+)$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    set_id = urllib.parse.unquote(match.group(2))
+                    json_response(self, 200, app.rename_plot_artifact_set(experiment_id, set_id, payload))
+                    return
                 match = re.match(r"^/api/experiments/([^/]+)/experiment$", path)
                 if not match:
                     json_response(self, 404, {"error": "not found"})
@@ -8093,6 +8476,32 @@ def make_handler(app):
                 exp_path = app.active_experiment_path(experiment_id)
                 (exp_path / "Experiment").write_text(payload.get("experiment", ""), encoding="utf-8")
                 json_response(self, 200, {"saved": True, "id": experiment_id})
+            except Exception as exc:
+                json_response(self, 400, {"error": str(exc)})
+
+        def do_DELETE(self):
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path
+            try:
+                if path.startswith("/api/share/"):
+                    json_response(self, 404, {"error": "not found"})
+                    return
+                if path.startswith("/api/") and not self.require_token():
+                    json_response(self, 401, {"error": "missing or invalid token"})
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/plot-artifacts/([^/]+)$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    artifact_id = urllib.parse.unquote(match.group(2))
+                    json_response(self, 200, app.delete_plot_artifact(experiment_id, artifact_id))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/plot-artifact-sets/([^/]+)$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    set_id = urllib.parse.unquote(match.group(2))
+                    json_response(self, 200, app.delete_plot_artifact_set(experiment_id, set_id))
+                    return
+                json_response(self, 404, {"error": "not found"})
             except Exception as exc:
                 json_response(self, 400, {"error": str(exc)})
 
