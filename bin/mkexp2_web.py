@@ -2460,19 +2460,18 @@ HTML = r"""<!doctype html>
       overflow: hidden;
       display: grid;
       gap: 2px;
-      border-left: 4px solid transparent;
     }
     .experiment-row.active {
       border-color: var(--accent);
-      border-left-color: var(--accent);
+      border-left: 4px solid var(--accent);
       background: #e8f5f3;
     }
     .experiment-row.locked {
-      border-left-color: var(--danger);
+      border-left: 4px solid var(--danger);
     }
     .experiment-row.active.locked {
       border-color: var(--accent);
-      border-left-color: var(--danger);
+      border-left: 4px solid var(--danger);
       background: #e8f5f3;
     }
     .experiment-name-row {
