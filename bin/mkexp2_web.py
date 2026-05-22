@@ -3180,6 +3180,11 @@ HTML = r"""<!doctype html>
       font-size: 12px;
       overflow-wrap: anywhere;
     }
+    .stats-workspace {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+    }
     .check-json pre {
       max-height: 180px;
       overflow: auto;
@@ -3856,9 +3861,9 @@ HTML = r"""<!doctype html>
     .results-stats {
       display: grid;
       gap: 10px;
-      margin-top: 16px;
-      padding-top: 14px;
-      border-top: 1px solid var(--border);
+      margin-bottom: 16px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
     }
     .stats-inline-header {
       display: flex;
@@ -3866,6 +3871,41 @@ HTML = r"""<!doctype html>
       justify-content: space-between;
       gap: 10px;
       flex-wrap: wrap;
+    }
+    .stats-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 8px;
+    }
+    .stat-card {
+      min-width: 0;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fbfcfd;
+    }
+    .stat-card-label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 750;
+      text-transform: uppercase;
+    }
+    .stat-card-value {
+      margin-top: 4px;
+      font-size: 18px;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+    .stats-section {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+    .stats-section-title {
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--muted);
+      text-transform: uppercase;
     }
     .csv-empty {
       color: var(--muted);
@@ -4669,17 +4709,6 @@ HTML = r"""<!doctype html>
             </div>
           </div>
           <div class="panel-body">
-            <div class="csv-tools">
-              <div class="result-toolbar">
-                <div id="result-file-tabs" class="result-file-tabs"></div>
-                <div class="column-actions">
-                  <button id="columns-all">All columns</button>
-                  <button id="columns-none">No columns</button>
-                </div>
-              </div>
-              <div id="column-selector" class="column-selector"></div>
-            </div>
-            <div id="results" class="csv-empty">Select an experiment, then load CSV results.</div>
             <section class="results-stats">
               <div class="stats-inline-header">
                 <div>
@@ -4692,6 +4721,17 @@ HTML = r"""<!doctype html>
               </div>
               <div id="stats-output" class="csv-empty">Load results to summarize parsed CSV results.</div>
             </section>
+            <div class="csv-tools">
+              <div class="result-toolbar">
+                <div id="result-file-tabs" class="result-file-tabs"></div>
+                <div class="column-actions">
+                  <button id="columns-all">All columns</button>
+                  <button id="columns-none">No columns</button>
+                </div>
+              </div>
+              <div id="column-selector" class="column-selector"></div>
+            </div>
+            <div id="results" class="csv-empty">Select an experiment, then load CSV results.</div>
           </div>
         </section>
       </section>
@@ -6387,6 +6427,73 @@ HTML = r"""<!doctype html>
       if (Math.abs(parsed) >= 1000) return parsed.toLocaleString(undefined, { maximumFractionDigits: 2 });
       return parsed.toLocaleString(undefined, { maximumSignificantDigits: 6 });
     }
+    function formatStatCount(value) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed.toLocaleString() : '0';
+    }
+    function statMetric(metric) {
+      return metric || { count: 0, gmean: null, mean: null, min: null, max: null };
+    }
+    function metricField(metric, field) {
+      if (field === 'count') return formatStatCount(statMetric(metric).count);
+      return formatStatNumber(statMetric(metric)[field]);
+    }
+    function appendStatsCards(box, cards) {
+      const wrap = document.createElement('div');
+      wrap.className = 'stats-cards';
+      for (const card of cards) {
+        const item = document.createElement('div');
+        item.className = 'stat-card';
+        const label = document.createElement('div');
+        label.className = 'stat-card-label';
+        label.textContent = card.label;
+        const value = document.createElement('div');
+        value.className = 'stat-card-value';
+        value.textContent = card.value;
+        item.appendChild(label);
+        item.appendChild(value);
+        wrap.appendChild(item);
+      }
+      box.appendChild(wrap);
+    }
+    function appendStatsTable(box, title, headers, rows) {
+      const section = document.createElement('section');
+      section.className = 'stats-section';
+      const heading = document.createElement('div');
+      heading.className = 'stats-section-title';
+      heading.textContent = title;
+      section.appendChild(heading);
+      const tableWrap = document.createElement('div');
+      tableWrap.className = 'csv-table-wrap';
+      const table = document.createElement('table');
+      table.className = 'stats-table';
+      const thead = document.createElement('thead');
+      const head = document.createElement('tr');
+      for (const label of headers) {
+        const th = document.createElement('th');
+        th.textContent = label;
+        head.appendChild(th);
+      }
+      thead.appendChild(head);
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      for (const row of rows) {
+        const tr = document.createElement('tr');
+        for (const cell of row) {
+          const td = document.createElement('td');
+          const value = cell && typeof cell === 'object' ? cell.text : cell;
+          td.textContent = value == null ? '' : String(value);
+          td.title = td.textContent;
+          if (cell && typeof cell === 'object' && cell.className) td.className = cell.className;
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+      section.appendChild(tableWrap);
+      box.appendChild(section);
+    }
     function renderStatsWorkspace() {
       const summary = document.getElementById('stats-summary');
       const box = document.getElementById('stats-output');
@@ -6410,42 +6517,109 @@ HTML = r"""<!doctype html>
         box.textContent = 'No parsed CSV results found. Run Parse Logs first.';
         return;
       }
-      summary.textContent = `${algorithms.length} algorithm(s), ${algorithms.reduce((sum, item) => sum + Number(item.rows || 0), 0)} row(s)`;
-      box.className = 'csv-table-wrap';
+      const totals = stats.summary || {};
+      const common = stats.common || {};
+      summary.textContent = `${algorithms.length} algorithm(s), ${formatStatCount(totals.rows ?? algorithms.reduce((sum, item) => sum + Number(item.rows || 0), 0))} row(s)`;
+      box.className = 'stats-workspace';
       box.innerHTML = '';
-      const table = document.createElement('table');
-      table.className = 'stats-table';
-      const thead = document.createElement('thead');
-      const head = document.createElement('tr');
-      for (const label of ['Algorithm', 'Rows', 'Failed', 'GMean Cut', 'GMean Time', 'Files']) {
-        const th = document.createElement('th');
-        th.textContent = label;
-        head.appendChild(th);
-      }
-      thead.appendChild(head);
-      table.appendChild(thead);
-      const tbody = document.createElement('tbody');
-      for (const item of algorithms) {
-        const tr = document.createElement('tr');
-        const cells = [
-          item.algorithm || '',
-          String(item.rows ?? 0),
-          String(item.failed ?? 0),
-          formatStatNumber(item.avg_cut),
-          formatStatNumber(item.avg_time),
-          (item.files || []).map(csvLabel).join(', ')
-        ];
-        for (const [index, value] of cells.entries()) {
-          const td = document.createElement('td');
-          td.textContent = value;
-          td.title = value;
-          if (index === 5) td.className = 'stats-files';
-          tr.appendChild(td);
-        }
-        tbody.appendChild(tr);
-      }
-      table.appendChild(tbody);
-      box.appendChild(table);
+      appendStatsCards(box, [
+        { label: 'Algorithms', value: formatStatCount(totals.algorithms ?? algorithms.length) },
+        { label: 'Rows', value: formatStatCount(totals.rows) },
+        { label: 'Completed', value: formatStatCount(totals.completed) },
+        { label: 'Failed', value: formatStatCount(totals.failed) },
+        { label: 'Timeouts', value: formatStatCount(totals.timeouts) },
+        { label: 'Crashes', value: formatStatCount(totals.crashes) },
+        { label: 'Imbalanced', value: formatStatCount(totals.imbalanced) },
+        { label: 'Common Balanced', value: formatStatCount(common.balanced_cut_keys) },
+        { label: 'Common Time', value: formatStatCount(common.time_keys) },
+      ]);
+
+      appendStatsTable(
+        box,
+        'Run Quality',
+        ['Algorithm', 'Rows', 'Completed', 'Failed', 'Timeouts', 'Crashes', 'Imbalanced', 'Missing Cut', 'Missing Time', 'Files'],
+        algorithms.map(item => {
+          const quality = item.quality || item;
+          return [
+            item.algorithm || '',
+            formatStatCount(quality.rows ?? item.rows),
+            formatStatCount(quality.completed ?? item.completed),
+            formatStatCount(quality.failed ?? item.failed),
+            formatStatCount(quality.timeouts ?? item.timeouts),
+            formatStatCount(quality.crashes ?? item.crashes),
+            formatStatCount(quality.imbalanced ?? item.imbalanced),
+            formatStatCount(quality.missing_cut ?? item.missing_cut),
+            formatStatCount(quality.missing_time ?? item.missing_time),
+            { text: (item.files || []).map(csvLabel).join(', '), className: 'stats-files' },
+          ];
+        })
+      );
+
+      appendStatsTable(
+        box,
+        'Cut Quality',
+        ['Algorithm', 'Balanced n', 'Balanced gmean', 'Balanced mean', 'Balanced min', 'Balanced max', 'Common balanced n', 'Common balanced gmean', 'All-cut n', 'All-cut gmean', 'Common all-cut gmean'],
+        algorithms.map(item => {
+          const cuts = item.cuts || {};
+          const balanced = statMetric(cuts.balanced);
+          const commonBalanced = statMetric(cuts.common_balanced);
+          const allSuccessful = statMetric(cuts.all_successful || { count: item.cut_count, gmean: item.avg_cut });
+          const commonAll = statMetric(cuts.common_all_successful);
+          return [
+            item.algorithm || '',
+            metricField(balanced, 'count'),
+            metricField(balanced, 'gmean'),
+            metricField(balanced, 'mean'),
+            metricField(balanced, 'min'),
+            metricField(balanced, 'max'),
+            metricField(commonBalanced, 'count'),
+            metricField(commonBalanced, 'gmean'),
+            metricField(allSuccessful, 'count'),
+            metricField(allSuccessful, 'gmean'),
+            metricField(commonAll, 'gmean'),
+          ];
+        })
+      );
+
+      appendStatsTable(
+        box,
+        'Runtime',
+        ['Algorithm', 'Successful n', 'Time gmean', 'Time mean', 'Time min', 'Time max', 'Common n', 'Common gmean', 'Common mean', 'Common min', 'Common max'],
+        algorithms.map(item => {
+          const times = item.times || {};
+          const successful = statMetric(times.successful || { count: item.time_count, gmean: item.avg_time });
+          const commonSuccessful = statMetric(times.common_successful);
+          return [
+            item.algorithm || '',
+            metricField(successful, 'count'),
+            metricField(successful, 'gmean'),
+            metricField(successful, 'mean'),
+            metricField(successful, 'min'),
+            metricField(successful, 'max'),
+            metricField(commonSuccessful, 'count'),
+            metricField(commonSuccessful, 'gmean'),
+            metricField(commonSuccessful, 'mean'),
+            metricField(commonSuccessful, 'min'),
+            metricField(commonSuccessful, 'max'),
+          ];
+        })
+      );
+
+      appendStatsTable(
+        box,
+        'Balance',
+        ['Algorithm', 'Measured n', 'Imbalance mean', 'Imbalance min', 'Imbalance max'],
+        algorithms.map(item => {
+          const balance = statMetric(item.balance?.successful);
+          return [
+            item.algorithm || '',
+            metricField(balance, 'count'),
+            metricField(balance, 'mean'),
+            metricField(balance, 'min'),
+            metricField(balance, 'max'),
+          ];
+        })
+      );
     }
     function renderInstallLogWorkspace() {
       const summary = document.getElementById('install-log-summary');

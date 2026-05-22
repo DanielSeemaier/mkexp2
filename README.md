@@ -89,6 +89,12 @@ mkexp2 stats
 mkexp2 stats --json
 ```
 
+`mkexp2 stats` is backed by the R/tidyverse code in the `plots/` submodule.
+The JSON output keeps the legacy geometric-mean `avg_cut` and `avg_time`
+fields, and also reports failure/timeout/crash/imbalance counts plus common
+subsets that worked for every algorithm: all successful cuts, balanced cuts,
+and successful runtimes.
+
 Validate an `Experiment` without generating jobs:
 
 ```bash
@@ -427,7 +433,7 @@ The UI can:
   pass/fail messages
 - run `mkexp2 probe` from the Experiment page to render enabled algorithms
   below the editor as compact rows that emphasize branch/ref settings and CLI
-  arguments, with resolved settings and raw algorithm JSON collapsed by default
+  arguments, with resolved settings shown inline
 - fetch bundled init presets with `mkexp2 probe --presets` for new experiments
 - fetch algorithm names with `probe`, select all by default, and submit only the
   checked subset when the user deselects variants
@@ -435,8 +441,9 @@ The UI can:
 - commit submitted state to Git after submission
 - run `mkexp2 parse` from the Results tab and reload CSV results when parsing
   succeeds
-- view stats below Results, backed by `mkexp2 stats --json`, currently showing
-  geometric-mean cut and geometric-mean time per algorithm from parsed CSV files
+- view failure-aware stats at the top of Results, backed by `mkexp2 stats
+  --json`, including row quality counters, all successful cuts, balanced cuts,
+  successful runtimes, and common subsets that worked for every algorithm
 - refresh run progress from the Experiment page; the web backend uses generated `jobs/*.cmds.meta.tsv` files when available and falls back to `mkexp2 progress --json`; after progress has been loaded, incomplete runs auto-refresh every 15 seconds, while `.mkexp2/submit.lock` keeps the Submit button disabled
 - clear `.mkexp2/submit.lock` from the Submit panel to recover from crashed or
   abandoned submissions
@@ -498,7 +505,7 @@ The bridge exposes fixed MCP tools for:
 - running `check --json` and `probe`
 - submitting all or selected algorithms, then polling the returned action id
 - polling `progress --json`
-- running `parse` and reading `stats --json` once jobs finish
+- running `parse` and reading failure-aware `stats --json` once jobs finish
 - fetching parsed CSV results and clearing a submit lock after a crash
 
 It intentionally does not expose arbitrary shell execution. All cluster-side

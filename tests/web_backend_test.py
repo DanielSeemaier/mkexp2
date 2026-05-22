@@ -292,6 +292,13 @@ class WebBackendTest(unittest.TestCase):
         self.assertNotIn('data-view="stats-view"', mkexp2_web.HTML)
         self.assertIn('id="stats-output"', mkexp2_web.HTML)
         self.assertIn('aria-label="Reload stats"', mkexp2_web.HTML)
+        self.assertLess(
+            mkexp2_web.HTML.index('id="stats-output"'),
+            mkexp2_web.HTML.index('class="csv-tools"'),
+        )
+        self.assertIn("Run Quality", mkexp2_web.HTML)
+        self.assertIn("Cut Quality", mkexp2_web.HTML)
+        self.assertIn("Common balanced", mkexp2_web.HTML)
         self.assertIn("function renderStatsWorkspace", mkexp2_web.HTML)
         self.assertIn("async function loadStats", mkexp2_web.HTML)
         self.assertIn("/stats", mkexp2_web.HTML)

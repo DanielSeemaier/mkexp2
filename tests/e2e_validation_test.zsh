@@ -97,10 +97,16 @@ EOF
     cd "$tmp"
     mkdir -p results
     cat > results/Known.csv <<'EOF'
-Graph,Cut,Time,Failed
-a,10,1.0,false
-b,40,4.0,0
-c,30,3.0,true
+Graph,Cut,Time,Epsilon,Imbalance,Timeout,Failed
+a,10,1.0,0.03,0.02,0,false
+b,40,4.0,0.03,0.04,0,0
+c,30,3.0,0.03,0.02,0,true
+EOF
+    cat > results/Other.csv <<'EOF'
+Graph,Cut,Time,Epsilon,Imbalance,Timeout,Failed
+a,20,2.0,0.03,0.02,0,0
+b,80,8.0,0.03,0.02,0,0
+c,60,9.0,0.03,0.02,1,0
 EOF
     "$MKEXP2" stats --json > stats.json
     assert_eq "$(jq -r '.ok' stats.json)" "true" "stats --json reports ok"
@@ -109,6 +115,11 @@ EOF
     assert_eq "$(jq -r '.algorithms[0].failed' stats.json)" "1" "stats --json reports failed row count"
     assert_eq "$(jq -r '.algorithms[0].avg_cut' stats.json)" "20" "stats --json geometric-means successful cuts"
     assert_eq "$(jq -r '.algorithms[0].avg_time' stats.json)" "2" "stats --json geometric-means successful times"
+    assert_eq "$(jq -r '.summary.timeouts' stats.json)" "1" "stats --json counts timeouts"
+    assert_eq "$(jq -r '.summary.imbalanced' stats.json)" "1" "stats --json counts imbalanced runs"
+    assert_eq "$(jq -r '.common.balanced_cut_keys' stats.json)" "1" "stats --json reports common balanced subset"
+    assert_eq "$(jq -r '.algorithms[] | select(.algorithm == "Known") | .cuts.balanced.gmean' stats.json)" "10" "stats --json reports balanced-cut gmean"
+    assert_eq "$(jq -r '.algorithms[] | select(.algorithm == "Other") | .timeouts' stats.json)" "1" "stats --json reports per-algorithm timeouts"
     "$MKEXP2" stats > stats.out
     assert_file_contains stats.out "GMean Cut" "stats text output includes gmean cut"
   )

@@ -271,7 +271,7 @@ class Mkexp2McpServer:
                 "handler": self.parse_results,
             },
             "mkexp2_get_stats": {
-                "description": "Run mkexp2 stats --json for an experiment and return geometric-mean cut/time summaries.",
+                "description": "Run mkexp2 stats --json for an experiment and return failure-aware cut/runtime summaries.",
                 "inputSchema": input_schema(
                     {"experiment_id": string_schema("Repo-relative experiment id.")},
                     ["experiment_id"],
