@@ -2481,7 +2481,6 @@ HTML = r"""<!doctype html>
     }
     .experiment-row.active {
       border-color: var(--accent);
-      border-left: 4px solid var(--accent);
       background: #e8f5f3;
     }
     .experiment-row.locked {

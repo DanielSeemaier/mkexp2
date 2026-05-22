@@ -375,7 +375,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("function renderSubmitButton", mkexp2_web.HTML)
         self.assertIn(".experiment-row.locked", mkexp2_web.HTML)
         self.assertNotIn("border-left: 4px solid transparent", mkexp2_web.HTML)
-        self.assertIn("border-left: 4px solid var(--accent)", mkexp2_web.HTML)
+        self.assertNotIn(".experiment-row.active {\n      border-color: var(--accent);\n      border-left: 4px solid var(--accent)", mkexp2_web.HTML)
         self.assertIn("border-left: 4px solid var(--danger)", mkexp2_web.HTML)
         self.assertIn("function updateSelectedExperimentLock", mkexp2_web.HTML)
         self.assertIn("function submitLockText", mkexp2_web.HTML)
