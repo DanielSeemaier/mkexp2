@@ -825,8 +825,15 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("selectedSelections: allSelectedBeforeSave ? null : priorSelection.selections", mkexp2_web.HTML)
         self.assertIn("data-experiment", mkexp2_web.HTML)
         self.assertIn("submit-algorithm-group", mkexp2_web.HTML)
+        self.assertIn('<div class="panel-title">Algorithm Selection</div>', mkexp2_web.HTML)
+        self.assertIn('id="submit-preview-open"', mkexp2_web.HTML)
+        self.assertIn('id="submit-preview-modal"', mkexp2_web.HTML)
         self.assertIn('id="submit" aria-label="Submit selected algorithms"', mkexp2_web.HTML)
-        self.assertIn("function submitPlayIconHtml", mkexp2_web.HTML)
+        self.assertIn('>Submit</button>', mkexp2_web.HTML)
+        self.assertIn("async function openSubmitPreviewDialog", mkexp2_web.HTML)
+        self.assertIn("/submit-preview", mkexp2_web.HTML)
+        self.assertIn("function shellCommand", mkexp2_web.HTML)
+        self.assertNotIn("function submitPlayIconHtml", mkexp2_web.HTML)
         self.assertNotIn("Submit Selected", mkexp2_web.HTML)
         self.assertNotIn(".submit-algorithm-group {\n      display: grid;\n      gap: 8px;\n      min-width: 0;\n      border: 1px solid var(--border);", mkexp2_web.HTML)
         self.assertIn("JSON.stringify({ selections, force })", mkexp2_web.HTML)
@@ -1630,6 +1637,27 @@ class WebBackendTest(unittest.TestCase):
         self.assertTrue(any(call[0][:4] == ["zsh", "./submit.sh", "--install", "--selection-file"] for call in calls))
         self.assertTrue(any(call[0][:3] == ["git", "commit", "-m"] and "ExperimentA:MockA" in call[0][3] for call in calls))
         self.assertTrue(all(call[1] in (exp_cwd, str(repo.resolve())) for call in calls))
+
+    def test_submit_preview_describes_command_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "exp").mkdir()
+            (repo / "exp" / "Experiment").write_text("ExperimentA() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+            preview = app.submit_preview("exp", {
+                "selections": [
+                    {"experiment": "ExperimentA", "algorithm": "MockA"},
+                    {"experiment": "ExperimentB", "algorithm": "MockB"},
+                ],
+            })
+
+        self.assertEqual([step["name"] for step in preview["steps"]], ["Check", "Probe", "Generate", "Submit"])
+        self.assertEqual(preview["steps"][0]["argv"], ["/fake/mkexp2", "check", "--json"])
+        self.assertEqual(preview["steps"][2]["argv"], ["/fake/mkexp2", "generate"])
+        self.assertEqual(preview["steps"][3]["argv"][:4], ["zsh", "./submit.sh", "--install", "--selection-file"])
+        self.assertEqual(preview["selection_file"], ".mkexp2/web-submit-selection-<temporary>.tsv")
+        self.assertIn("ExperimentA\tMockA\n", preview["selection_tsv"])
+        self.assertIn("ExperimentB\tMockB\n", preview["selection_tsv"])
 
     def test_parse_action_uses_argv_array(self):
         calls = []

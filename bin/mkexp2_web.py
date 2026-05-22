@@ -1940,6 +1940,28 @@ class Mkexp2WebApp:
                 handle.write(f"{item['experiment']}\t{item['algorithm']}\n")
         return path
 
+    def submit_preview(self, experiment_id, payload):
+        algorithms, selections = self.normalize_submit_selections(payload)
+        exp_path = self.active_experiment_path(experiment_id)
+        submit_argv = ["zsh", "./submit.sh", "--install", *algorithms]
+        selection_file = None
+        if selections:
+            selection_file = f"{WEB_STATE_DIR}/web-submit-selection-<temporary>.tsv"
+            submit_argv.extend(["--selection-file", selection_file])
+        return {
+            "cwd": str(exp_path),
+            "algorithms": algorithms,
+            "selections": selections,
+            "selection_file": selection_file,
+            "selection_tsv": "".join(f"{item['experiment']}\t{item['algorithm']}\n" for item in selections),
+            "steps": [
+                {"name": "Check", "argv": [str(self.mkexp2), "check", "--json"], "cwd": str(exp_path)},
+                {"name": "Probe", "argv": [str(self.mkexp2), "probe"], "cwd": str(exp_path)},
+                {"name": "Generate", "argv": [str(self.mkexp2), "generate"], "cwd": str(exp_path)},
+                {"name": "Submit", "argv": submit_argv, "cwd": str(exp_path)},
+            ],
+        }
+
     def submit_action(self, experiment_id, payload):
         algorithms, selections = self.normalize_submit_selections(payload)
         force = bool(payload.get("force"))
@@ -4173,14 +4195,39 @@ HTML = r"""<!doctype html>
       padding: 4px 7px;
       font-size: 12px;
     }
+    .submit-header-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      min-width: 0;
+    }
+    .submit-preview-list {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+    }
+    .submit-preview-step {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+    }
+    .submit-preview-title {
+      font-weight: 750;
+    }
+    .submit-preview-code {
+      overflow: auto;
+      white-space: pre;
+      border-radius: 6px;
+      background: var(--code-bg);
+      color: var(--code-fg);
+      padding: 9px 10px;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
     .algorithm-loading {
       grid-column: 1 / -1;
       color: var(--muted);
       justify-content: flex-start;
-    }
-    .submit-play-button svg {
-      width: 16px;
-      height: 16px;
     }
     .loading-spinner {
       width: 13px;
@@ -5636,6 +5683,22 @@ HTML = r"""<!doctype html>
         </div>
       </div>
     </div>
+    <div id="submit-preview-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="submit-preview-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="submit-preview-modal-title" class="modal-title">Submit Commands</div>
+            <div id="submit-preview-summary" class="csv-summary">No submit command preview loaded.</div>
+          </div>
+          <button id="submit-preview-close" class="icon-button" aria-label="Close submit command preview" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div id="submit-preview-output" class="csv-empty">Open the dialog to inspect submit commands.</div>
+        </div>
+      </div>
+    </div>
     <div id="plot-generate-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="plot-generate-modal-title">
       <div class="modal plot-generate-modal">
         <div class="modal-header">
@@ -5738,10 +5801,13 @@ HTML = r"""<!doctype html>
           <div class="stack">
             <section class="panel submit-panel">
               <div class="panel-header">
-                <div class="panel-title">Submit</div>
-                <button class="primary icon-button submit-play-button" id="submit" aria-label="Submit selected algorithms" title="Submit selected algorithms">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"/></svg>
-                </button>
+                <div class="panel-title">Algorithm Selection</div>
+                <div class="submit-header-actions">
+                  <button id="submit-preview-open" class="icon-button" aria-label="Show submit commands" title="Show submit commands">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                  </button>
+                  <button class="primary" id="submit" aria-label="Submit selected algorithms" title="Submit selected algorithms">Submit</button>
+                </div>
               </div>
               <div class="panel-body stack">
                 <div id="algorithm-list" class="chips"></div>
@@ -6580,6 +6646,14 @@ HTML = r"""<!doctype html>
       return String(value ?? '').replace(/[&<>"']/g, char => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
       }[char]));
+    }
+    function shellQuote(value) {
+      const text = String(value ?? '');
+      if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(text)) return text || "''";
+      return `'${text.replace(/'/g, `'\"'\"'`)}'`;
+    }
+    function shellCommand(argv) {
+      return Array.from(argv || []).map(shellQuote).join(' ');
     }
     function slugifyName(value) {
       return String(value || 'experiment')
@@ -9193,9 +9267,6 @@ HTML = r"""<!doctype html>
     function submitLockMessage() {
       return submitLockText(state.submitLock);
     }
-    function submitPlayIconHtml() {
-      return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"/></svg>';
-    }
     function renderSubmitButton() {
       const submitButton = document.getElementById('submit');
       if (!submitButton) return;
@@ -9204,18 +9275,23 @@ HTML = r"""<!doctype html>
       submitButton.disabled = state.submitBusy || loadingAlgorithms || locked || !state.selected || state.selectedArchived;
       submitButton.classList.toggle('is-busy', state.submitBusy || loadingAlgorithms);
       if (state.submitBusy) {
-        submitButton.innerHTML = '';
+        submitButton.textContent = 'Submitting...';
         submitButton.title = 'Submitting experiment...';
         submitButton.setAttribute('aria-label', 'Submitting experiment');
       } else if (loadingAlgorithms) {
-        submitButton.innerHTML = '';
+        submitButton.textContent = 'Loading...';
         submitButton.title = 'Loading submit choices...';
         submitButton.setAttribute('aria-label', 'Loading submit choices');
       } else {
-        submitButton.innerHTML = submitPlayIconHtml();
+        submitButton.textContent = 'Submit';
         const submitTitle = state.selectedArchived ? 'Unarchive before submitting.' : (locked ? submitLockMessage() : 'Submit selected algorithms');
         submitButton.title = submitTitle;
         submitButton.setAttribute('aria-label', submitTitle);
+      }
+      const previewButton = document.getElementById('submit-preview-open');
+      if (previewButton && previewButton.dataset.busy !== '1') {
+        previewButton.disabled = loadingAlgorithms || !state.selected || state.selectedArchived;
+        previewButton.title = loadingAlgorithms ? 'Loading submit choices...' : 'Show submit commands';
       }
       const clearButton = document.getElementById('clear-submit-lock');
       if (clearButton) clearButton.disabled = !locked || !state.selected || state.selectedArchived;
@@ -9637,6 +9713,75 @@ HTML = r"""<!doctype html>
     }
     async function downloadExperiment() {
       await withBusyButton('download-experiment', '', openDownloadDialog);
+    }
+    function closeSubmitPreviewDialog() {
+      document.getElementById('submit-preview-modal').classList.add('hidden');
+    }
+    function appendSubmitPreviewCode(container, title, code) {
+      const item = document.createElement('div');
+      item.className = 'submit-preview-step';
+      const label = document.createElement('div');
+      label.className = 'submit-preview-title';
+      label.textContent = title;
+      const block = document.createElement('pre');
+      block.className = 'submit-preview-code';
+      block.textContent = code;
+      item.appendChild(label);
+      item.appendChild(block);
+      container.appendChild(item);
+    }
+    function renderSubmitPreview(data, editorWillSave) {
+      const summary = document.getElementById('submit-preview-summary');
+      const output = document.getElementById('submit-preview-output');
+      const steps = Array.isArray(data?.steps) ? data.steps : [];
+      summary.textContent = `${steps.length} command(s) will run in ${data?.cwd || 'the experiment directory'}.`;
+      output.className = 'submit-preview-list';
+      output.innerHTML = '';
+      if (editorWillSave) {
+        const note = document.createElement('div');
+        note.className = 'csv-empty';
+        note.textContent = 'The current editor contents will be saved before these commands run.';
+        output.appendChild(note);
+      }
+      for (const step of steps) {
+        appendSubmitPreviewCode(output, step.name || 'Command', shellCommand(step.argv || []));
+      }
+      if (data?.selection_file) {
+        appendSubmitPreviewCode(
+          output,
+          `Temporary selection file: ${data.selection_file}`,
+          data.selection_tsv || '(empty)'
+        );
+      }
+    }
+    async function openSubmitPreviewDialog() {
+      if (!state.selected || state.selectedArchived) return;
+      const modal = document.getElementById('submit-preview-modal');
+      const summary = document.getElementById('submit-preview-summary');
+      const output = document.getElementById('submit-preview-output');
+      modal.classList.remove('hidden');
+      if (state.algorithmLoading) {
+        summary.textContent = 'Submit choices are still loading.';
+        output.className = 'csv-empty';
+        output.textContent = 'Wait for algorithm loading to finish before previewing submit commands.';
+        return;
+      }
+      const submitSelection = collectSubmitSelections();
+      if (submitSelection.total > 0 && submitSelection.selected === 0) {
+        summary.textContent = 'No algorithms selected.';
+        output.className = 'csv-empty';
+        output.textContent = 'Select at least one algorithm before previewing submit commands.';
+        return;
+      }
+      summary.textContent = 'Loading submit command preview...';
+      output.className = 'csv-empty';
+      output.textContent = 'Loading...';
+      const selections = submitSelection.allSelected ? [] : submitSelection.selections;
+      const data = await api(`/api/experiments/${encodeURIComponent(state.selected)}/submit-preview`, {
+        method: 'POST',
+        body: JSON.stringify({ selections })
+      });
+      renderSubmitPreview(data, state.editorDirty && !state.shared);
     }
     async function deleteExperiment() {
       if (!state.selected || state.selectedArchived) return;
@@ -10779,6 +10924,7 @@ HTML = r"""<!doctype html>
       const modalIds = [
         'plot-source-modal',
         'plot-generate-modal',
+        'submit-preview-modal',
         'settings-modal',
         'queue-modal',
         'share-modal',
@@ -10997,6 +11143,8 @@ HTML = r"""<!doctype html>
     document.getElementById('description-edit').onclick = editDescription;
     document.getElementById('description-cancel').onclick = cancelDescriptionEdit;
     document.getElementById('description-save').onclick = saveDescription;
+    document.getElementById('submit-preview-open').onclick = () => withBusyButton('submit-preview-open', '', openSubmitPreviewDialog).catch(err => out(String(err)));
+    document.getElementById('submit-preview-close').onclick = closeSubmitPreviewDialog;
     document.getElementById('submit').onclick = submitExperiment;
     document.getElementById('clear-submit-lock').onclick = clearSubmitLock;
     document.getElementById('rename-experiment').onclick = renameExperiment;
@@ -11487,7 +11635,7 @@ def make_handler(app):
                     else:
                         json_response(self, 200, app.unarchive_experiment(experiment_id))
                     return
-                match = re.match(r"^/api/experiments/([^/]+)/(check|probe|submit|parse|plot)$", path)
+                match = re.match(r"^/api/experiments/([^/]+)/(check|probe|submit|submit-preview|parse|plot)$", path)
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
                     action = match.group(2)
@@ -11499,6 +11647,9 @@ def make_handler(app):
                         return
                     if action == "submit":
                         json_response(self, 202, app.submit_action(experiment_id, payload))
+                        return
+                    if action == "submit-preview":
+                        json_response(self, 200, app.submit_preview(experiment_id, payload))
                         return
                     if action == "parse":
                         json_response(self, 202, app.parse_action(experiment_id))
