@@ -3488,7 +3488,7 @@ HTML = r"""<!doctype html>
     }
     .plot-artifact-browser {
       display: grid;
-      grid-template-columns: minmax(260px, 28%) minmax(0, 1fr);
+      grid-template-columns: minmax(220px, 26%) minmax(0, 1fr);
       gap: 14px;
       align-items: start;
       min-width: 0;

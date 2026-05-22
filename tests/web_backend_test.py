@@ -342,7 +342,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('class="plot-artifact-browser"', mkexp2_web.HTML)
         self.assertIn('class="plot-box plot-artifact-sidebar"', mkexp2_web.HTML)
         self.assertLess(mkexp2_web.HTML.index('id="plot-artifacts"'), mkexp2_web.HTML.index('id="plot-file"'))
-        self.assertIn("grid-template-columns: minmax(260px, 28%) minmax(0, 1fr);", mkexp2_web.HTML)
+        self.assertIn("grid-template-columns: minmax(220px, 26%) minmax(0, 1fr);", mkexp2_web.HTML)
         self.assertIn("plot-artifact-open", mkexp2_web.HTML)
         self.assertIn("renamePlotArtifactSet", mkexp2_web.HTML)
         self.assertIn("deletePlotArtifactSet", mkexp2_web.HTML)
