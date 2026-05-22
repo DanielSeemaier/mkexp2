@@ -298,6 +298,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('data-view="logs-view"', mkexp2_web.HTML)
         self.assertIn('id="logs-list"', mkexp2_web.HTML)
         self.assertIn('id="log-content"', mkexp2_web.HTML)
+        self.assertNotIn('id="logs-summary"', mkexp2_web.HTML)
         self.assertIn('aria-label="Reload logs"', mkexp2_web.HTML)
         self.assertIn("async function loadLogs", mkexp2_web.HTML)
         self.assertIn("async function loadLogFile", mkexp2_web.HTML)

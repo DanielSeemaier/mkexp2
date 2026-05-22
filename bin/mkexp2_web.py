@@ -4716,7 +4716,6 @@ HTML = r"""<!doctype html>
           <div class="panel-header">
             <div>
               <div class="panel-title">Logs</div>
-              <div id="logs-summary" class="csv-summary">No log directory loaded.</div>
             </div>
             <button id="reload-logs" class="icon-button" aria-label="Reload logs" title="Reload logs">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
@@ -6488,19 +6487,16 @@ HTML = r"""<!doctype html>
       return parts.join('/');
     }
     function renderLogsWorkspace() {
-      const summary = document.getElementById('logs-summary');
       const pathLabel = document.getElementById('logs-path');
       const list = document.getElementById('logs-list');
       const content = document.getElementById('log-content');
       if (!state.selected) {
-        summary.textContent = 'No experiment selected.';
         pathLabel.textContent = 'logs/';
         list.innerHTML = '<div class="csv-empty">Select an experiment first.</div>';
         content.innerHTML = '<div class="csv-empty">Select an experiment first.</div>';
         return;
       }
       if (state.logsFor !== state.selected || !state.logsListing) {
-        summary.textContent = 'No log directory loaded.';
         pathLabel.textContent = 'logs/';
         list.innerHTML = '<div class="csv-empty">Open the Logs tab to load the log directory.</div>';
         content.innerHTML = '<div class="csv-empty">Select a log file to load its content.</div>';
@@ -6510,15 +6506,10 @@ HTML = r"""<!doctype html>
       const dir = listing.dir || '';
       pathLabel.textContent = `logs/${dir}${dir ? '/' : ''}`;
       if (!listing.exists) {
-        summary.textContent = 'logs/ does not exist.';
         list.innerHTML = '<div class="csv-empty">No logs directory exists for this experiment yet.</div>';
         content.innerHTML = '<div class="csv-empty">Run experiments first, then reload logs.</div>';
         return;
       }
-      const countText = listing.has_more
-        ? `${listing.entries.length} of ${listing.total} entries shown`
-        : `${listing.total} entries`;
-      summary.textContent = `${pathLabel.textContent}, ${countText}`;
       list.innerHTML = '';
       if (dir) {
         const up = document.createElement('button');
@@ -6562,9 +6553,7 @@ HTML = r"""<!doctype html>
         list.appendChild(more);
       }
       if (state.logContent && state.logContent.relative_path === state.selectedLog) {
-        const suffix = state.logContent.truncated ? ' (truncated)' : '';
         content.innerHTML = `<pre>${esc(state.logContent.content || '')}</pre>`;
-        summary.textContent = `${state.logContent.relative_path}, ${formatBytes(state.logContent.size)}${suffix}`;
       } else {
         content.innerHTML = '<div class="csv-empty">Select a log file to load its content.</div>';
       }
