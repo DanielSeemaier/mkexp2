@@ -913,35 +913,40 @@ class Mkexp2WebApp:
     def columns_path(self):
         return self.repo / WEB_STATE_DIR / WEB_COLUMNS_FILE
 
-    def _normalize_column_visibility_payload(self, payload):
+    def _normalize_column_visibility_map(self, signatures):
+        if not isinstance(signatures, dict):
+            return {}
+        normalized_signatures = {}
+        for signature, columns in signatures.items():
+            signature = str(signature or "")
+            if not signature or not isinstance(columns, list):
+                continue
+            normalized_columns = []
+            seen = set()
+            for column in columns:
+                column = str(column)
+                if column not in seen:
+                    normalized_columns.append(column)
+                    seen.add(column)
+            normalized_signatures[signature] = normalized_columns
+        return normalized_signatures
+
+    def _legacy_column_visibility_map(self, payload):
         raw_experiments = payload.get("experiments") if isinstance(payload, dict) else None
         if not isinstance(raw_experiments, dict):
-            raw_experiments = {}
-        experiments = {}
-        for experiment_id, signatures in raw_experiments.items():
-            experiment_id = str(experiment_id or "").strip().strip("/")
-            try:
-                self.experiment_path(experiment_id)
-            except ValueError:
-                continue
-            if not isinstance(signatures, dict):
-                continue
-            normalized_signatures = {}
-            for signature, columns in signatures.items():
-                signature = str(signature or "")
-                if not signature or not isinstance(columns, list):
-                    continue
-                normalized_columns = []
-                seen = set()
-                for column in columns:
-                    column = str(column)
-                    if column not in seen:
-                        normalized_columns.append(column)
-                        seen.add(column)
-                normalized_signatures[signature] = normalized_columns
-            if normalized_signatures:
-                experiments[experiment_id] = normalized_signatures
-        return experiments
+            return {}
+        visibility = {}
+        for _, signatures in sorted(raw_experiments.items()):
+            for signature, columns in self._normalize_column_visibility_map(signatures).items():
+                visibility.setdefault(signature, columns)
+        return visibility
+
+    def _normalize_column_visibility_payload(self, payload):
+        payload = payload if isinstance(payload, dict) else {}
+        visibility = self._normalize_column_visibility_map(payload.get("visibility"))
+        for signature, columns in self._legacy_column_visibility_map(payload).items():
+            visibility.setdefault(signature, columns)
+        return visibility
 
     def read_column_visibility_state(self):
         path = self.columns_path()
@@ -952,16 +957,16 @@ class Mkexp2WebApp:
                 payload = json.loads(path.read_text(encoding="utf-8") or "{}")
             except json.JSONDecodeError as exc:
                 raise ValueError(f"invalid column visibility JSON: {exc}") from exc
-        return {"experiments": self._normalize_column_visibility_payload(payload), "path": str(path)}
+        return {"visibility": self._normalize_column_visibility_payload(payload), "path": str(path)}
 
-    def write_column_visibility_state(self, experiments):
-        normalized = self._normalize_column_visibility_payload({"experiments": experiments})
+    def write_column_visibility_state(self, visibility):
+        normalized = self._normalize_column_visibility_payload({"visibility": visibility})
         path = self.columns_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(json.dumps({"experiments": normalized}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.write_text(json.dumps({"visibility": normalized}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         tmp.replace(path)
-        return {"experiments": normalized, "path": str(path), "saved": True}
+        return {"visibility": normalized, "path": str(path), "saved": True}
 
     def column_visibility(self, experiment_id):
         experiment_id = str(experiment_id or "").strip().strip("/")
@@ -971,7 +976,7 @@ class Mkexp2WebApp:
         state = self.read_column_visibility_state()
         return {
             "id": experiment_id,
-            "visibility": dict((state.get("experiments") or {}).get(experiment_id) or {}),
+            "visibility": dict(state.get("visibility") or {}),
             "path": state.get("path", ""),
         }
 
@@ -983,34 +988,20 @@ class Mkexp2WebApp:
         visibility = payload.get("visibility") if isinstance(payload, dict) else None
         if not isinstance(visibility, dict):
             raise ValueError("visibility must be an object")
-        state = self.read_column_visibility_state()
-        experiments = dict(state.get("experiments") or {})
-        normalized = self._normalize_column_visibility_payload({"experiments": {experiment_id: visibility}})
-        if normalized.get(experiment_id):
-            experiments[experiment_id] = normalized[experiment_id]
-        else:
-            experiments.pop(experiment_id, None)
-        saved = self.write_column_visibility_state(experiments)
+        normalized = self._normalize_column_visibility_payload({"visibility": visibility})
+        saved = self.write_column_visibility_state(normalized)
         return {
             "id": experiment_id,
-            "visibility": dict((saved.get("experiments") or {}).get(experiment_id) or {}),
+            "visibility": dict(saved.get("visibility") or {}),
             "path": saved.get("path", ""),
             "saved": True,
         }
 
     def move_column_visibility(self, old_id, new_id):
-        state = self.read_column_visibility_state()
-        experiments = dict(state.get("experiments") or {})
-        if old_id in experiments:
-            experiments[new_id] = experiments.pop(old_id)
-            self.write_column_visibility_state(experiments)
+        return None
 
     def remove_column_visibility(self, experiment_id):
-        state = self.read_column_visibility_state()
-        experiments = dict(state.get("experiments") or {})
-        if experiment_id in experiments:
-            experiments.pop(experiment_id, None)
-            self.write_column_visibility_state(experiments)
+        return None
 
     def tags_path(self):
         return self.repo / WEB_STATE_DIR / WEB_TAGS_FILE
@@ -7019,7 +7010,6 @@ HTML = r"""<!doctype html>
     }
     function visibleColumns(headers) {
       const all = uniqueHeaders(headers);
-      if (state.columnVisibilityFor !== state.selected) return all;
       const saved = state.columnVisibility?.[columnSignature(all)];
       if (!Array.isArray(saved)) return all;
       const allowed = new Set(all);
@@ -7031,7 +7021,7 @@ HTML = r"""<!doctype html>
       state.columnVisibility = Object.assign({}, state.columnVisibility || {}, {
         [signature]: uniqueHeaders(columns),
       });
-      state.columnVisibilityFor = state.selected;
+      state.columnVisibilityFor = 'global';
       if (state.shared) return;
       api(`/api/experiments/${encodeURIComponent(state.selected)}/columns`, {
         method: 'PUT',
@@ -10213,7 +10203,7 @@ HTML = r"""<!doctype html>
       state.results = (data.files || []).map(prepareCsvFile);
       state.resultsFor = experimentId;
       state.columnVisibility = columns.visibility || {};
-      state.columnVisibilityFor = experimentId;
+      state.columnVisibilityFor = 'global';
       const availableNames = state.results.map(file => file.name);
       const preservedSelection = availableNames.filter(name => previousSelection.has(name));
       state.selectedResults = preservedSelection.length

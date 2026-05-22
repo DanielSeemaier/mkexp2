@@ -244,6 +244,9 @@ class WebBackendTest(unittest.TestCase):
             exp = repo / "exp"
             exp.mkdir()
             (exp / "Experiment").write_text("ExperimentA() { :; }\n", encoding="utf-8")
+            other = repo / "other"
+            other.mkdir()
+            (other / "Experiment").write_text("ExperimentA() { :; }\n", encoding="utf-8")
             app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "%Y.%m.%d-<name>", "token")
 
             saved = app.write_column_visibility("exp", {
@@ -257,11 +260,13 @@ class WebBackendTest(unittest.TestCase):
             self.assertEqual(saved["visibility"]["A\u001fB\u001fC"], ["A", "C"])
             self.assertEqual(saved["visibility"]["D"], [])
             self.assertEqual(app.column_visibility("exp")["visibility"]["A\u001fB\u001fC"], ["A", "C"])
+            self.assertEqual(app.column_visibility("other")["visibility"]["A\u001fB\u001fC"], ["A", "C"])
             self.assertTrue((repo / ".mkexp2" / "web-column-visibility.json").is_file())
 
             renamed = app.rename_experiment("exp", {"new_id": "renamed"})
             self.assertEqual(renamed["new_id"], "renamed")
             self.assertEqual(app.column_visibility("renamed")["visibility"]["A\u001fB\u001fC"], ["A", "C"])
+            self.assertEqual(app.column_visibility("other")["visibility"]["A\u001fB\u001fC"], ["A", "C"])
             archived = app.archive_experiment("renamed")
             self.assertEqual(archived["archived_id"], "renamed.archived")
             unarchived = app.unarchive_experiment("renamed.archived")
@@ -269,12 +274,32 @@ class WebBackendTest(unittest.TestCase):
             self.assertEqual(app.column_visibility("renamed")["visibility"]["A\u001fB\u001fC"], ["A", "C"])
 
             app.delete_experiment("renamed")
-            self.assertEqual(app.read_column_visibility_state()["experiments"], {})
+            self.assertEqual(app.column_visibility("other")["visibility"]["A\u001fB\u001fC"], ["A", "C"])
 
             with self.assertRaises(ValueError):
                 app.write_column_visibility("missing", {"visibility": {}})
             with self.assertRaises(ValueError):
                 app.write_column_visibility("exp", {"visibility": []})
+
+    def test_legacy_column_visibility_file_is_read_as_global(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            exp.mkdir()
+            (exp / "Experiment").write_text("ExperimentA() { :; }\n", encoding="utf-8")
+            other = repo / "other"
+            other.mkdir()
+            (other / "Experiment").write_text("ExperimentA() { :; }\n", encoding="utf-8")
+            state_dir = repo / ".mkexp2"
+            state_dir.mkdir()
+            (state_dir / "web-column-visibility.json").write_text(json.dumps({
+                "experiments": {
+                    "exp": {"A\u001fB": ["A"]},
+                }
+            }), encoding="utf-8")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "%Y.%m.%d-<name>", "token")
+
+            self.assertEqual(app.column_visibility("other")["visibility"]["A\u001fB"], ["A"])
 
     def test_web_settings_persist_theme(self):
         with tempfile.TemporaryDirectory() as tmp:
