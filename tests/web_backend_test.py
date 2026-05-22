@@ -303,6 +303,8 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("function describeAliasMatches", mkexp2_web.HTML)
         self.assertNotIn("Direct plugin name, no alias CLI arguments.", mkexp2_web.HTML)
         self.assertIn(".describe-chip.copyable", mkexp2_web.HTML)
+        self.assertIn(".describe-chip.copied", mkexp2_web.HTML)
+        self.assertIn("Copied value", mkexp2_web.HTML)
         self.assertIn("copyTextToClipboard(value)", mkexp2_web.HTML)
         self.assertIn("{ copyValue: value }", mkexp2_web.HTML)
         self.assertNotIn("base ${alias.base", mkexp2_web.HTML)
@@ -604,6 +606,8 @@ class WebBackendTest(unittest.TestCase):
         self.assertNotIn(".git-status-column.added", mkexp2_web.HTML)
         self.assertIn("async function openGitDialog", mkexp2_web.HTML)
         self.assertIn("async function pushGitChanges", mkexp2_web.HTML)
+        self.assertIn("function closeVisibleModal", mkexp2_web.HTML)
+        self.assertIn("event.key === 'Escape'", mkexp2_web.HTML)
         self.assertIn("/api/git/status", mkexp2_web.HTML)
         self.assertIn("/api/git/push", mkexp2_web.HTML)
         self.assertNotIn('id="plot"', mkexp2_web.HTML)
@@ -612,6 +616,10 @@ class WebBackendTest(unittest.TestCase):
         self.assertNotIn("Submit is unlocked", mkexp2_web.HTML)
         self.assertNotIn('id="submit-lock-status"', mkexp2_web.HTML)
         self.assertIn("mkexp2 check failed. Submit anyway?", mkexp2_web.HTML)
+        self.assertIn("state.editorDirty = true", mkexp2_web.HTML)
+        self.assertIn("await persistExperiment();", mkexp2_web.HTML)
+        self.assertIn("loadAlgorithms(experimentId, {", mkexp2_web.HTML)
+        self.assertIn("selectedNames: allSelectedBeforeSave ? null : priorSelected", mkexp2_web.HTML)
 
     def test_empty_token_bypass_is_explicitly_opt_in(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -664,6 +672,8 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("mkexp2-columns:", mkexp2_web.HTML)
         self.assertIn("renderCsvTable", mkexp2_web.HTML)
         self.assertIn("selectedResults", mkexp2_web.HTML)
+        self.assertIn("previousSelection", mkexp2_web.HTML)
+        self.assertIn("preservedSelection", mkexp2_web.HTML)
         self.assertIn("aria-pressed", mkexp2_web.HTML)
         self.assertIn("results-stats", mkexp2_web.HTML)
         self.assertNotIn("state.compareEnabled", mkexp2_web.HTML)

@@ -428,9 +428,8 @@ The UI can:
   placeholder, plus a colleague username field that generates a single
   copyable command to start the tunnel in the background and open the share
   link in the browser.
-- open the header settings button to manage the session token and inspect the
-  full browser-session command log, including argv/cwd/stdout/stderr payloads
-  returned by web API actions
+- open the header settings button to manage the session token, experiment tags,
+  and the native plotting Spack/R cache
 - show a disabled busy state with a spinner on controls that trigger backend
   work, including reloads, checks, probes, parsing, plotting, Git push, and
   destructive recovery actions
@@ -440,10 +439,13 @@ The UI can:
 - open the collapsed Reference panel on demand, which runs one
   `mkexp2 describe --all --json` command and renders searchable/filterable DSL
   commands, systems, partitioners, aliases, defaults, parsers, and presets for
-  manual experiment authoring
+  manual experiment authoring; clicking a property value chip copies its value
+  with a short visual acknowledgement
 - save the current editor contents before running `mkexp2 check --json`, then
   render per-experiment errors, warnings, and summary counts with clear
   pass/fail messages
+- save the current editor contents before Submit as well, then refresh the
+  algorithm list from the saved file before deriving the selected subset
 - run `mkexp2 probe` from the Experiment page to render enabled algorithms
   below the editor as compact rows that emphasize branch/ref settings and CLI
   arguments, with resolved settings shown inline
@@ -476,7 +478,9 @@ The UI can:
   automatically shows them side by side, locks scrolling across every selected
   table, requires matching row counts, and supports header-click numeric
   coloring for lower-is-better or higher-is-better columns, including orange
-  middle values in three-way-or-larger comparisons
+  middle values in three-way-or-larger comparisons; reloading CSVs preserves
+  the selected algorithm set when those files still exist and clears stale
+  stats
 - manage plots from the Plots tab: discover supported plot types from
   `mkexp2 plot --list --json`, select current-experiment CSV sources or CSVs
   from other experiments, validate source-count restrictions, generate one

@@ -3413,6 +3413,11 @@ HTML = r"""<!doctype html>
     .describe-chip.copyable {
       cursor: copy;
     }
+    .describe-chip.copied {
+      border-color: var(--accent);
+      background: #e8f5f3;
+      color: var(--accent);
+    }
     .describe-chip.copyable:focus {
       outline: 2px solid var(--accent);
       outline-offset: 2px;
@@ -5141,6 +5146,7 @@ HTML = r"""<!doctype html>
       algorithmLoadingFor: '',
       algorithmLoadSeq: 0,
       selectionSeq: 0,
+      editorDirty: false,
       presets: [],
       describeCatalog: null,
       describeLoaded: false,
@@ -6318,7 +6324,11 @@ HTML = r"""<!doctype html>
       editor.value = value;
       updateEditorHighlight();
     }
-    editor.addEventListener('input', updateEditorHighlight);
+    editor.addEventListener('input', () => {
+      state.editorDirty = true;
+      clearCheckIndicator();
+      updateEditorHighlight();
+    });
     editor.addEventListener('scroll', syncEditorHighlight);
     updateEditorHighlight();
     function parseCsv(text) {
@@ -7657,7 +7667,21 @@ HTML = r"""<!doctype html>
         chip.setAttribute('role', 'button');
         chip.tabIndex = 0;
         chip.title = `${chip.title || text} — click to copy value`;
-        const copy = () => copyTextToClipboard(value).catch(err => out(String(err)));
+        const baseTitle = chip.title;
+        const copy = async () => {
+          try {
+            const copied = await copyTextToClipboard(value);
+            if (!copied) return;
+            chip.classList.add('copied');
+            chip.title = 'Copied value';
+            window.setTimeout(() => {
+              chip.classList.remove('copied');
+              chip.title = baseTitle;
+            }, 1100);
+          } catch (err) {
+            out(String(err));
+          }
+        };
         chip.onclick = copy;
         chip.onkeydown = event => {
           if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -8006,18 +8030,19 @@ HTML = r"""<!doctype html>
       list.appendChild(row);
       renderSubmitButton();
     }
-    function renderAlgorithmChoices(names) {
+    function renderAlgorithmChoices(names, selectedNames = null) {
       state.algorithms = Array.from(names || []).sort();
       state.algorithmLoading = false;
       state.algorithmLoadingFor = '';
       const list = document.getElementById('algorithm-list');
       list.innerHTML = '';
+      const selectedSet = Array.isArray(selectedNames) ? new Set(selectedNames) : null;
       for (const name of state.algorithms) {
         const label = document.createElement('label');
         label.className = 'chip';
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.checked = true;
+        checkbox.checked = selectedSet ? selectedSet.has(name) : true;
         checkbox.value = name;
         const text = document.createElement('span');
         text.className = 'chip-label';
@@ -8060,6 +8085,7 @@ HTML = r"""<!doctype html>
     }
     function clearSelectedExperiment() {
       state.selected = null;
+      state.editorDirty = false;
       clearCheckIndicator();
       clearPlotIndicator();
       clearAlgorithmChoices();
@@ -8371,6 +8397,7 @@ HTML = r"""<!doctype html>
       const selectionId = ++state.selectionSeq;
       state.selected = id;
       state.algorithmLoadSeq += 1;
+      state.editorDirty = false;
       clearCheckIndicator();
       clearPlotIndicator();
       state.results = [];
@@ -8422,6 +8449,7 @@ HTML = r"""<!doctype html>
       document.getElementById('selected-title').textContent = id;
       document.getElementById('selected-path').textContent = selectedPathText(data.path, data);
       setEditorValue(data.experiment);
+      state.editorDirty = false;
       setExperimentTagInState(id, data.tag || null);
       renderSubmitLock(data.submit_lock);
       renderTagSelect();
@@ -8445,6 +8473,7 @@ HTML = r"""<!doctype html>
       document.getElementById('selected-title').textContent = id;
       document.getElementById('selected-path').textContent = selectedPathText(data.path, data);
       setEditorValue(data.experiment);
+      state.editorDirty = false;
       renderSubmitLock(data.submit_lock);
       renderProgress(null);
       loadProgress({ experimentId: id }).catch(err => {
@@ -8485,6 +8514,7 @@ HTML = r"""<!doctype html>
         await withBusyButton(button, 'Checking...', async () => {
           out('Saving and checking...');
           const saved = await persistExperiment();
+          state.editorDirty = false;
           if (state.selected !== experimentId) return;
           const result = await api(`/api/experiments/${encodeURIComponent(experimentId)}/check`, { method: 'POST' });
           if (state.selected !== experimentId) return;
@@ -8528,10 +8558,11 @@ HTML = r"""<!doctype html>
         await loadAlgorithms(experimentId);
       });
     }
-    async function loadAlgorithms(experimentId = state.selected) {
+    async function loadAlgorithms(experimentId = state.selected, options = {}) {
       if (!experimentId) return;
       const loadId = ++state.algorithmLoadSeq;
       const isCurrent = () => state.selected === experimentId && state.algorithmLoadSeq === loadId;
+      const selectedNames = Array.isArray(options.selectedNames) ? options.selectedNames : null;
       renderAlgorithmLoading(experimentId);
       try {
         const probe = await api(`/api/experiments/${encodeURIComponent(experimentId)}/probe`, {
@@ -8545,7 +8576,7 @@ HTML = r"""<!doctype html>
           for (const alg of (item.resolved?.algorithms || [])) names.add(alg.name);
         }
         if (!isCurrent()) return;
-        renderAlgorithmChoices(names);
+        renderAlgorithmChoices(names, selectedNames);
       } catch (err) {
         if (!isCurrent()) return;
         state.algorithmLoading = false;
@@ -8558,6 +8589,7 @@ HTML = r"""<!doctype html>
     }
     async function submitExperiment(force = false) {
       if (!state.selected) return;
+      const experimentId = state.selected;
       if (state.algorithmLoading) {
         out('Wait for algorithm loading to finish before submitting.');
         renderSubmitButton();
@@ -8567,16 +8599,27 @@ HTML = r"""<!doctype html>
         renderSubmitButton();
         return;
       }
-      const selectedAlgorithms = Array.from(document.querySelectorAll('#algorithm-list input:checked')).map(item => item.value);
-      if (state.algorithms.length && selectedAlgorithms.length === 0) {
-        out('Select at least one algorithm.');
-        return;
-      }
-      const algorithms = selectedAlgorithms.length === state.algorithms.length ? [] : selectedAlgorithms;
       state.submitBusy = true;
       renderSubmitButton();
       try {
-        const action = await api(`/api/experiments/${encodeURIComponent(state.selected)}/submit`, {
+        if (state.editorDirty && !state.shared) {
+          const priorSelected = Array.from(document.querySelectorAll('#algorithm-list input:checked')).map(item => item.value);
+          const allSelectedBeforeSave = !state.algorithms.length || priorSelected.length === state.algorithms.length;
+          await persistExperiment();
+          state.editorDirty = false;
+          if (state.selected !== experimentId) return;
+          await loadAlgorithms(experimentId, {
+            selectedNames: allSelectedBeforeSave ? null : priorSelected,
+          });
+          if (state.selected !== experimentId) return;
+        }
+        const selectedAlgorithms = Array.from(document.querySelectorAll('#algorithm-list input:checked')).map(item => item.value);
+        if (state.algorithms.length && selectedAlgorithms.length === 0) {
+          out('Select at least one algorithm.');
+          return;
+        }
+        const algorithms = selectedAlgorithms.length === state.algorithms.length ? [] : selectedAlgorithms;
+        const action = await api(`/api/experiments/${encodeURIComponent(experimentId)}/submit`, {
           method: 'POST',
           body: JSON.stringify({ algorithms, force })
         });
@@ -9194,6 +9237,25 @@ HTML = r"""<!doctype html>
     function closePlotSourceDialog() {
       document.getElementById('plot-source-modal').classList.add('hidden');
     }
+    function closeVisibleModal() {
+      const modalIds = [
+        'plot-source-modal',
+        'settings-modal',
+        'queue-modal',
+        'share-modal',
+        'git-modal',
+        'archive-modal',
+        'create-modal',
+      ];
+      for (const id of modalIds) {
+        const modal = document.getElementById(id);
+        if (modal && !modal.classList.contains('hidden')) {
+          modal.classList.add('hidden');
+          return true;
+        }
+      }
+      return false;
+    }
     async function plotExperiment() {
       if (!state.selected) return;
       setView('plots-view').catch(err => out(String(err)));
@@ -9238,13 +9300,23 @@ HTML = r"""<!doctype html>
     }
     async function loadResults() {
       if (!state.selected) return;
+      const previousSelection = new Set(state.selectedResults || []);
       const data = await api(`/api/experiments/${encodeURIComponent(state.selected)}/results`);
       clearTransientOutput();
       state.results = (data.files || []).map(prepareCsvFile);
       state.resultsFor = state.selected;
-      state.selectedResults = state.results[0] ? [state.results[0].name] : [];
-      state.compareColumnModes = {};
+      const availableNames = state.results.map(file => file.name);
+      const preservedSelection = availableNames.filter(name => previousSelection.has(name));
+      state.selectedResults = preservedSelection.length
+        ? preservedSelection
+        : (state.results[0] ? [state.results[0].name] : []);
+      if (!preservedSelection.length || preservedSelection.length !== previousSelection.size) {
+        state.compareColumnModes = {};
+      }
+      state.stats = null;
+      state.statsFor = null;
       renderResultsWorkspace();
+      renderStatsWorkspace();
     }
     async function loadStats() {
       if (!state.selected) return;
@@ -9379,6 +9451,11 @@ HTML = r"""<!doctype html>
     document.getElementById('load-stats').onclick = () => withBusyButton('load-stats', 'Generating...', loadStats).catch(err => out(String(err)));
     document.getElementById('load-install-log').onclick = () => withBusyButton('load-install-log', '', loadInstallLog).catch(err => out(String(err)));
     document.getElementById('reload-logs').onclick = () => withBusyButton('reload-logs', '', () => loadLogs(state.logsDir || '')).catch(err => out(String(err)));
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && closeVisibleModal()) {
+        event.preventDefault();
+      }
+    });
     document.querySelectorAll('.view-tab').forEach(button => {
       button.onclick = () => withBusyButton(button, 'Loading...', () => setView(button.dataset.view)).catch(err => out(String(err)));
     });
