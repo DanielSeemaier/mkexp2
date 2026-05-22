@@ -795,6 +795,10 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("selectedSelections: allSelectedBeforeSave ? null : priorSelection.selections", mkexp2_web.HTML)
         self.assertIn("data-experiment", mkexp2_web.HTML)
         self.assertIn("submit-algorithm-group", mkexp2_web.HTML)
+        self.assertIn('id="submit" aria-label="Submit selected algorithms"', mkexp2_web.HTML)
+        self.assertIn("function submitPlayIconHtml", mkexp2_web.HTML)
+        self.assertNotIn("Submit Selected", mkexp2_web.HTML)
+        self.assertNotIn(".submit-algorithm-group {\n      display: grid;\n      gap: 8px;\n      min-width: 0;\n      border: 1px solid var(--border);", mkexp2_web.HTML)
         self.assertIn("JSON.stringify({ selections, force })", mkexp2_web.HTML)
 
     def test_empty_token_bypass_is_explicitly_opt_in(self):

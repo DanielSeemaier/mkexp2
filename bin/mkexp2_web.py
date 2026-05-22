@@ -4017,10 +4017,7 @@ HTML = r"""<!doctype html>
       display: grid;
       gap: 8px;
       min-width: 0;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 8px;
-      background: var(--surface);
+      padding: 0;
     }
     .submit-algorithm-header {
       display: grid;
@@ -4050,6 +4047,10 @@ HTML = r"""<!doctype html>
       grid-column: 1 / -1;
       color: var(--muted);
       justify-content: flex-start;
+    }
+    .submit-play-button svg {
+      width: 16px;
+      height: 16px;
     }
     .loading-spinner {
       width: 13px;
@@ -5518,10 +5519,12 @@ HTML = r"""<!doctype html>
             <section class="panel submit-panel">
               <div class="panel-header">
                 <div class="panel-title">Submit</div>
+                <button class="primary icon-button submit-play-button" id="submit" aria-label="Submit selected algorithms" title="Submit selected algorithms">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"/></svg>
+                </button>
               </div>
               <div class="panel-body stack">
                 <div id="algorithm-list" class="chips"></div>
-                <button class="primary" id="submit">Submit Selected</button>
               </div>
             </section>
             <section class="panel">
@@ -8741,6 +8744,9 @@ HTML = r"""<!doctype html>
     function submitLockMessage() {
       return submitLockText(state.submitLock);
     }
+    function submitPlayIconHtml() {
+      return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z"/></svg>';
+    }
     function renderSubmitButton() {
       const submitButton = document.getElementById('submit');
       if (!submitButton) return;
@@ -8749,14 +8755,17 @@ HTML = r"""<!doctype html>
       submitButton.disabled = state.submitBusy || loadingAlgorithms || locked || !state.selected;
       submitButton.classList.toggle('is-busy', state.submitBusy || loadingAlgorithms);
       if (state.submitBusy) {
-        submitButton.textContent = 'Submitting...';
+        submitButton.innerHTML = '';
         submitButton.title = 'Submitting experiment...';
+        submitButton.setAttribute('aria-label', 'Submitting experiment');
       } else if (loadingAlgorithms) {
-        submitButton.textContent = 'Loading algorithms...';
+        submitButton.innerHTML = '';
         submitButton.title = 'Loading submit choices...';
+        submitButton.setAttribute('aria-label', 'Loading submit choices');
       } else {
-        submitButton.textContent = 'Submit Selected';
-        submitButton.title = locked ? submitLockMessage() : '';
+        submitButton.innerHTML = submitPlayIconHtml();
+        submitButton.title = locked ? submitLockMessage() : 'Submit selected algorithms';
+        submitButton.setAttribute('aria-label', locked ? submitLockMessage() : 'Submit selected algorithms');
       }
       const clearButton = document.getElementById('clear-submit-lock');
       if (clearButton) clearButton.disabled = !locked || !state.selected;
