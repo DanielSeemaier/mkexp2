@@ -199,6 +199,30 @@ class WebBackendTest(unittest.TestCase):
         self.assertEqual(presets[0]["name"], "Default")
         self.assertEqual(calls, [(["/fake/mkexp2", "probe", "--presets"], str(repo.resolve()))])
 
+    def test_describe_catalog_uses_single_json_command(self):
+        original_run_command = mkexp2_web.run_command
+        calls = []
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            calls.append((list(argv), str(cwd) if cwd else None, timeout))
+            return {
+                "returncode": 0,
+                "stdout": '{"ok":true,"partitioners":[{"name":"KaMinPar","aliases":[]}],"systems":[{"name":"local"}]}',
+                "stderr": "",
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "fixed-<name>", "token")
+            mkexp2_web.run_command = fake_run_command
+            try:
+                catalog = app.describe_catalog()
+            finally:
+                mkexp2_web.run_command = original_run_command
+
+        self.assertEqual(catalog["partitioners"][0]["name"], "KaMinPar")
+        self.assertEqual(calls, [(["/fake/mkexp2", "describe", "--all", "--json"], str(repo.resolve()), 45)])
+
     def test_create_experiment_from_preset_uses_mkexp2_init(self):
         original_run_command = mkexp2_web.run_command
         calls = []
@@ -268,6 +292,11 @@ class WebBackendTest(unittest.TestCase):
         self.assertNotIn("Probe JSON", mkexp2_web.HTML)
         self.assertIn("async function persistExperiment", mkexp2_web.HTML)
         self.assertIn("function renderCheckResult", mkexp2_web.HTML)
+        self.assertIn('class="panel describe-panel"', mkexp2_web.HTML)
+        self.assertIn('id="describe-toggle"', mkexp2_web.HTML)
+        self.assertIn('id="describe-output"', mkexp2_web.HTML)
+        self.assertIn("async function loadDescribeCatalog", mkexp2_web.HTML)
+        self.assertIn("/api/describe", mkexp2_web.HTML)
         self.assertIn("function parseCheckJson", mkexp2_web.HTML)
         self.assertIn("flags: ['--all', '--algorithms']", mkexp2_web.HTML)
         self.assertIn("selectMostRecent: true", mkexp2_web.HTML)

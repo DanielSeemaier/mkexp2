@@ -1147,6 +1147,19 @@ class Mkexp2WebApp:
             raise ValueError("invalid preset JSON: presets is not an array")
         return presets
 
+    def describe_catalog(self):
+        result = run_command([str(self.mkexp2), "describe", "--all", "--json"], cwd=self.repo, timeout=45)
+        if result["returncode"] != 0:
+            message = result["stderr"].strip() or result["stdout"].strip() or "mkexp2 describe --all --json failed"
+            raise ValueError(message)
+        try:
+            payload = json.loads(result["stdout"] or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid describe JSON: {exc}") from exc
+        if not isinstance(payload.get("partitioners"), list) or not isinstance(payload.get("systems"), list):
+            raise ValueError("invalid describe JSON: expected partitioners and systems arrays")
+        return payload
+
     def config(self):
         return {
             "repo": str(self.repo),
@@ -3232,6 +3245,122 @@ HTML = r"""<!doctype html>
       color: #e7eef2;
       font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
+    .describe-panel {
+      margin-top: 14px;
+    }
+    .app.share-mode .describe-panel {
+      display: none !important;
+    }
+    .describe-output {
+      display: grid;
+      gap: 16px;
+      min-width: 0;
+      max-height: 620px;
+      overflow: auto;
+    }
+    .describe-section {
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+    }
+    .describe-section-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      font-weight: 800;
+      font-size: 15px;
+    }
+    .describe-section-count {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .describe-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 10px;
+      min-width: 0;
+    }
+    .describe-card {
+      display: grid;
+      gap: 9px;
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fbfcfd;
+      padding: 10px;
+    }
+    .describe-card-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: baseline;
+      min-width: 0;
+    }
+    .describe-card-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 800;
+    }
+    .describe-card-meta {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .describe-command-list,
+    .describe-alias-list {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+    .describe-command,
+    .describe-alias {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+      border-top: 1px solid var(--border);
+      padding-top: 6px;
+    }
+    .describe-command:first-child,
+    .describe-alias:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+    .describe-name {
+      font-weight: 750;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .describe-code {
+      overflow-wrap: anywhere;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .describe-muted {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .describe-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      min-width: 0;
+    }
+    .describe-chip {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: white;
+      padding: 3px 7px;
+      font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
     .probe-output {
       display: grid;
       gap: 16px;
@@ -4711,6 +4840,19 @@ HTML = r"""<!doctype html>
             </section>
           </div>
         </section>
+        <section class="panel describe-panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Reference</div>
+            </div>
+            <button id="describe-toggle">Show Reference</button>
+          </div>
+          <div id="describe-body" class="panel-body hidden">
+            <div id="describe-output" class="describe-output">
+              <div class="probe-placeholder">Open the reference to load available systems, partitioners, aliases, presets, and DSL commands.</div>
+            </div>
+          </div>
+        </section>
         <section class="panel probe-panel">
           <div class="panel-header">
             <div>
@@ -4899,6 +5041,9 @@ HTML = r"""<!doctype html>
       algorithmLoadSeq: 0,
       selectionSeq: 0,
       presets: [],
+      describeCatalog: null,
+      describeLoaded: false,
+      describeOpen: false,
       config: { name_template: '%Y.%m.%d-<name>' },
       openDirs: new Set(),
       archivedOpenDirs: new Set(),
@@ -7359,6 +7504,233 @@ HTML = r"""<!doctype html>
         select.appendChild(option);
       }
     }
+    function describeValue(value, fallback = 'none') {
+      const text = String(value ?? '').trim();
+      return text || fallback;
+    }
+    function appendDescribeChip(container, text, title = '') {
+      const chip = document.createElement('span');
+      chip.className = 'describe-chip';
+      chip.textContent = text;
+      chip.title = title || text;
+      container.appendChild(chip);
+    }
+    function appendDescribeProperties(container, properties, emptyText = 'No defaults') {
+      const row = document.createElement('div');
+      row.className = 'describe-chip-row';
+      const props = Array.isArray(properties) ? properties : [];
+      if (!props.length) {
+        appendDescribeChip(row, emptyText);
+      } else {
+        for (const prop of props) {
+          const allowed = prop.closed && Array.isArray(prop.values) && prop.values.length
+            ? ` values: ${prop.values.join('|')}`
+            : (prop.allowed && prop.allowed !== 'any' ? ` values: ${prop.allowed}` : '');
+          appendDescribeChip(row, `${prop.key}=${describeValue(prop.value, '')}`, `${prop.key}${allowed}${prop.when ? `; ${prop.when}` : ''}`);
+        }
+      }
+      container.appendChild(row);
+    }
+    function describeSection(title, countText = '') {
+      const section = document.createElement('section');
+      section.className = 'describe-section';
+      const header = document.createElement('div');
+      header.className = 'describe-section-title';
+      const label = document.createElement('div');
+      label.textContent = title;
+      header.appendChild(label);
+      if (countText) {
+        const count = document.createElement('div');
+        count.className = 'describe-section-count';
+        count.textContent = countText;
+        header.appendChild(count);
+      }
+      section.appendChild(header);
+      return section;
+    }
+    function renderDescribeDsl(container, dsl) {
+      const commands = Array.isArray(dsl?.commands) ? dsl.commands : [];
+      const section = describeSection('Experiment DSL', `${commands.length} commands`);
+      const grid = document.createElement('div');
+      grid.className = 'describe-grid';
+      const card = document.createElement('div');
+      card.className = 'describe-card';
+      const list = document.createElement('div');
+      list.className = 'describe-command-list';
+      for (const command of commands) {
+        const row = document.createElement('div');
+        row.className = 'describe-command';
+        const name = document.createElement('div');
+        name.className = 'describe-name';
+        name.textContent = command.name || '';
+        const usage = document.createElement('div');
+        usage.className = 'describe-code';
+        usage.textContent = command.usage || '';
+        const description = document.createElement('div');
+        description.className = 'describe-muted';
+        description.textContent = command.description || '';
+        row.appendChild(name);
+        row.appendChild(usage);
+        row.appendChild(description);
+        list.appendChild(row);
+      }
+      card.appendChild(list);
+      const common = Array.isArray(dsl?.common_properties) ? dsl.common_properties : [];
+      if (common.length) {
+        const title = document.createElement('div');
+        title.className = 'describe-muted';
+        title.textContent = 'Common properties';
+        card.appendChild(title);
+        const row = document.createElement('div');
+        row.className = 'describe-chip-row';
+        for (const property of common) appendDescribeChip(row, property);
+        card.appendChild(row);
+      }
+      grid.appendChild(card);
+      section.appendChild(grid);
+      container.appendChild(section);
+    }
+    function renderDescribeSystems(container, systems) {
+      const items = Array.isArray(systems) ? systems : [];
+      const section = describeSection('Systems', `${items.length} available`);
+      const grid = document.createElement('div');
+      grid.className = 'describe-grid';
+      for (const system of items) {
+        const card = document.createElement('div');
+        card.className = 'describe-card';
+        const header = document.createElement('div');
+        header.className = 'describe-card-header';
+        const title = document.createElement('div');
+        title.className = 'describe-card-title';
+        title.textContent = system.name || '';
+        const meta = document.createElement('div');
+        meta.className = 'describe-card-meta';
+        meta.textContent = (system.hooks || []).join(', ');
+        header.appendChild(title);
+        header.appendChild(meta);
+        card.appendChild(header);
+        appendDescribeProperties(card, system.defaults || []);
+        grid.appendChild(card);
+      }
+      section.appendChild(grid);
+      container.appendChild(section);
+    }
+    function renderDescribePartitioners(container, partitioners) {
+      const items = Array.isArray(partitioners) ? partitioners : [];
+      const section = describeSection('Partitioners and Algorithms', `${items.length} partitioners`);
+      const grid = document.createElement('div');
+      grid.className = 'describe-grid';
+      for (const partitioner of items) {
+        const card = document.createElement('div');
+        card.className = 'describe-card';
+        const header = document.createElement('div');
+        header.className = 'describe-card-header';
+        const title = document.createElement('div');
+        title.className = 'describe-card-title';
+        title.textContent = partitioner.name || '';
+        const aliases = Array.isArray(partitioner.aliases) ? partitioner.aliases : [];
+        const meta = document.createElement('div');
+        meta.className = 'describe-card-meta';
+        meta.textContent = aliases.length ? `${aliases.length} aliases` : 'base algorithm';
+        header.appendChild(title);
+        header.appendChild(meta);
+        card.appendChild(header);
+        appendDescribeProperties(card, partitioner.defaults || []);
+        const list = document.createElement('div');
+        list.className = 'describe-alias-list';
+        const baseRow = document.createElement('div');
+        baseRow.className = 'describe-alias';
+        const baseName = document.createElement('div');
+        baseName.className = 'describe-name';
+        baseName.textContent = partitioner.name || '';
+        const baseMeta = document.createElement('div');
+        baseMeta.className = 'describe-muted';
+        baseMeta.textContent = 'Direct plugin name, no alias CLI arguments.';
+        baseRow.appendChild(baseName);
+        baseRow.appendChild(baseMeta);
+        list.appendChild(baseRow);
+        for (const alias of aliases) {
+          const row = document.createElement('div');
+          row.className = 'describe-alias';
+          const name = document.createElement('div');
+          name.className = 'describe-name';
+          name.textContent = alias.name || '';
+          const args = document.createElement('div');
+          args.className = 'describe-code';
+          args.textContent = describeValue(alias.args, 'no CLI args');
+          const metaLine = document.createElement('div');
+          metaLine.className = 'describe-muted';
+          metaLine.textContent = alias.parent && alias.parent !== alias.base ? `${alias.parent} -> ${alias.base}` : `base ${alias.base || partitioner.name || ''}`;
+          row.appendChild(name);
+          row.appendChild(args);
+          row.appendChild(metaLine);
+          const properties = Array.isArray(alias.properties) ? alias.properties : [];
+          if (properties.length) appendDescribeProperties(row, properties, '');
+          list.appendChild(row);
+        }
+        card.appendChild(list);
+        grid.appendChild(card);
+      }
+      section.appendChild(grid);
+      container.appendChild(section);
+    }
+    function renderDescribeSimpleLists(container, title, items) {
+      const list = Array.isArray(items) ? items : [];
+      const section = describeSection(title, `${list.length} available`);
+      const row = document.createElement('div');
+      row.className = 'describe-chip-row';
+      for (const item of list) appendDescribeChip(row, item.name || String(item));
+      if (!list.length) appendDescribeChip(row, 'none');
+      section.appendChild(row);
+      container.appendChild(section);
+    }
+    function renderDescribeCatalog() {
+      const body = document.getElementById('describe-body');
+      const button = document.getElementById('describe-toggle');
+      body.classList.toggle('hidden', !state.describeOpen);
+      button.textContent = state.describeOpen ? 'Hide Reference' : 'Show Reference';
+      const box = document.getElementById('describe-output');
+      if (!state.describeOpen || !state.describeLoaded || !state.describeCatalog) return;
+      box.className = 'describe-output';
+      box.innerHTML = '';
+      renderDescribeDsl(box, state.describeCatalog.dsl || {});
+      renderDescribeSystems(box, state.describeCatalog.systems || []);
+      renderDescribePartitioners(box, state.describeCatalog.partitioners || []);
+      renderDescribeSimpleLists(box, 'Parsers', state.describeCatalog.parsers || []);
+      renderDescribeSimpleLists(box, 'Presets', state.describeCatalog.presets || []);
+    }
+    async function loadDescribeCatalog() {
+      const box = document.getElementById('describe-output');
+      box.className = 'describe-output';
+      box.innerHTML = '';
+      const loading = document.createElement('div');
+      loading.className = 'progress-loading';
+      const spinner = document.createElement('span');
+      spinner.className = 'loading-spinner';
+      const text = document.createElement('span');
+      text.textContent = 'Loading reference...';
+      loading.appendChild(spinner);
+      loading.appendChild(text);
+      box.appendChild(loading);
+      try {
+        state.describeCatalog = await api('/api/describe');
+        state.describeLoaded = true;
+        renderDescribeCatalog();
+      } catch (err) {
+        state.describeLoaded = false;
+        box.className = 'csv-empty';
+        box.textContent = `Reference failed: ${firstLines(err?.message || String(err), 3)}`;
+        throw err;
+      }
+    }
+    async function toggleDescribePanel() {
+      state.describeOpen = !state.describeOpen;
+      renderDescribeCatalog();
+      if (state.describeOpen && !state.describeLoaded) {
+        await withBusyButton('describe-toggle', 'Loading...', loadDescribeCatalog);
+        renderDescribeCatalog();
+      }
+    }
     async function openCreateDialog() {
       document.getElementById('create-modal').classList.remove('hidden');
       document.getElementById('create-name').focus();
@@ -8755,6 +9127,7 @@ HTML = r"""<!doctype html>
     document.getElementById('settings-close').onclick = closeSettingsDialog;
     document.getElementById('spack-cache-refresh').onclick = () => refreshSpackCache().catch(err => out(String(err)));
     document.getElementById('check').onclick = checkExperiment;
+    document.getElementById('describe-toggle').onclick = () => toggleDescribePanel().catch(err => out(String(err)));
     document.getElementById('probe-run').onclick = probeExperiment;
     document.getElementById('description-edit').onclick = editDescription;
     document.getElementById('description-cancel').onclick = cancelDescriptionEdit;
@@ -8990,6 +9363,9 @@ def make_handler(app):
                     return
                 if path == "/api/presets":
                     json_response(self, 200, {"presets": app.list_presets()})
+                    return
+                if path == "/api/describe":
+                    json_response(self, 200, app.describe_catalog())
                     return
                 if path == "/api/git/status":
                     json_response(self, 200, app.git_status())

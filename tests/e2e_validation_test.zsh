@@ -57,7 +57,7 @@ EOF
   )
 
   (
-    cd "$ROOT"
+    cd "$tmp"
     "$MKEXP2" describe TestHarness > describe.out
     assert_file_contains describe.out "Partitioner: TestHarness" "describe shows test harness plugin"
     assert_file_contains describe.out "mode=baseline | values: baseline|debug|custom|stress (closed)" "describe prints closed-set defaults"
@@ -67,6 +67,16 @@ EOF
     assert_file_contains describe.out "MtKaHyPar-G-Default" "describe prints nested plugin alias"
     assert_file_contains describe.out "args: --preset-type=default" "describe prints inherited alias args"
     assert_file_contains describe.out "property: file_format=metis" "describe prints nested alias properties"
+
+    "$MKEXP2" describe --all --json > describe-all.json
+    assert_eq "$(jq -r '.ok' describe-all.json)" "true" "describe --all --json reports ok"
+    assert_eq "$(jq -r '.partitioners[] | select(.name == "KaMinPar") | .aliases[] | select(.name == "KaMinPar-Fast") | .args' describe-all.json)" "-P fast" "describe --all --json reports algorithm aliases"
+    assert_eq "$(jq -r '.systems[] | select(.name == "local") | .defaults[] | select(.key == "local.call_wrapper") | .value' describe-all.json)" "taskset" "describe --all --json reports system defaults"
+    assert_eq "$(jq -r '.dsl.commands[] | select(.name == "DefineAlgorithm") | .usage' describe-all.json)" "DefineAlgorithm Name Base [CLI args...]" "describe --all --json reports DSL help"
+
+    "$MKEXP2" describe TestHarness --json > describe-plugin.json
+    assert_eq "$(jq -r '.name' describe-plugin.json)" "TestHarness" "describe --json reports plugin name"
+    assert_eq "$(jq -r '.defaults[] | select(.key == "mode") | .closed' describe-plugin.json)" "true" "describe --json reports closed-set metadata"
   )
 
   cat > "$tmp/Experiment" <<'EOF'

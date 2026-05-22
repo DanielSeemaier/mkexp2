@@ -127,6 +127,8 @@ Inspect a plugin (partitioner or system/launcher):
 
 ```bash
 mkexp2 describe MtKaHIP
+mkexp2 describe MtKaHIP --json
+mkexp2 describe --all --json
 # alias:
 mkexp2 describe-partitioner MtKaHIP
 # system:
@@ -432,6 +434,10 @@ The UI can:
 - create a new directory from the header `+` dialog, selecting a preset and
   optionally overriding the configured name template for that experiment
 - edit the raw `Experiment` file with lightweight syntax highlighting
+- open the collapsed Reference panel on demand, which runs one
+  `mkexp2 describe --all --json` command and renders DSL commands, systems,
+  partitioners, aliases, defaults, parsers, and presets for manual experiment
+  authoring
 - save the current editor contents before running `mkexp2 check --json`, then
   render per-experiment errors, warnings, and summary counts with clear
   pass/fail messages

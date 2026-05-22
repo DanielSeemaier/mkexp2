@@ -36,9 +36,9 @@ Options:
   --run-properties           With `probe`, return resolved run properties only
   --jobs                     With `probe`, return detailed job metadata
   --calls                    With `probe`, return expanded call details
-  --all                      With `probe`, apply aspect flags to every experiment function
+  --all                      With `probe`, apply aspect flags to every experiment function; with `describe --json`, include every plugin
   --presets                  With `probe`, return init presets as JSON
-  --json                     With `check`, `progress`, `stats`, or `plot --list`, return structured JSON
+  --json                     With `check`, `progress`, `stats`, `describe`, or `plot --list`, return structured JSON
   --property A[.B]           With `probe`, print algorithm properties or one resolved property
   --list                     With `plot`, list supported plot types
   --plot ID                  With `plot`, include one supported plot type
@@ -450,7 +450,11 @@ ParseCli() {
         shift
         ;;
       --all)
-        MKEXP2_PROBE_ALL=1
+        if [[ "$MKEXP2_MODE" == "describe" ]]; then
+          MKEXP2_DESCRIBE_ALL=1
+        else
+          MKEXP2_PROBE_ALL=1
+        fi
         shift
         ;;
       --presets)
@@ -460,6 +464,8 @@ ParseCli() {
       --json)
         if [[ "$MKEXP2_MODE" == "plot" ]]; then
           MKEXP2_PLOT_JSON=1
+        elif [[ "$MKEXP2_MODE" == "describe" ]]; then
+          MKEXP2_DESCRIBE_JSON=1
         else
           MKEXP2_CHECK_JSON=1
           MKEXP2_PROGRESS_JSON=1
@@ -749,7 +755,20 @@ ParseCli() {
   fi
 
   if [[ "$MKEXP2_MODE" == "describe" ]]; then
-    if [[ -z "$MKEXP2_DESCRIBE_TARGET" ]]; then
+    if (( MKEXP2_DESCRIBE_ALL )); then
+      if [[ -n "$MKEXP2_DESCRIBE_TARGET" ]]; then
+        EchoFatal "describe --all cannot be combined with a plugin name"
+        exit 1
+      fi
+      if [[ -n "$MKEXP2_DESCRIBE_KIND" ]]; then
+        EchoFatal "describe --all cannot be combined with --partitioner/--system"
+        exit 1
+      fi
+      if (( ! MKEXP2_DESCRIBE_JSON )); then
+        EchoFatal "describe --all is only supported with --json"
+        exit 1
+      fi
+    elif [[ -z "$MKEXP2_DESCRIBE_TARGET" ]]; then
       EchoFatal "describe requires a plugin name (e.g. mkexp2 describe MtKaHIP)"
       exit 1
     fi
@@ -792,6 +811,10 @@ ParseCli() {
     EchoFatal "probe aspect flags can only be used with probe"
     exit 1
   fi
+  if (( MKEXP2_DESCRIBE_ALL )) && [[ "$MKEXP2_MODE" != "describe" ]]; then
+    EchoFatal "describe --all can only be used with describe"
+    exit 1
+  fi
   if (( MKEXP2_PROBE_PRESETS )) && [[ "$MKEXP2_MODE" != "probe" ]]; then
     EchoFatal "--presets can only be used with probe"
     exit 1
@@ -800,8 +823,8 @@ ParseCli() {
     EchoFatal "--property can only be used with probe"
     exit 1
   fi
-  if (( MKEXP2_CHECK_JSON || MKEXP2_PROGRESS_JSON || MKEXP2_STATS_JSON || MKEXP2_PLOT_JSON )) && [[ "$MKEXP2_MODE" != "check" && "$MKEXP2_MODE" != "progress" && "$MKEXP2_MODE" != "stats" && "$MKEXP2_MODE" != "plot" ]]; then
-    EchoFatal "--json can only be used with check, progress, stats, or plot --list"
+  if (( MKEXP2_CHECK_JSON || MKEXP2_PROGRESS_JSON || MKEXP2_STATS_JSON || MKEXP2_PLOT_JSON || MKEXP2_DESCRIBE_JSON )) && [[ "$MKEXP2_MODE" != "check" && "$MKEXP2_MODE" != "progress" && "$MKEXP2_MODE" != "stats" && "$MKEXP2_MODE" != "plot" && "$MKEXP2_MODE" != "describe" ]]; then
+    EchoFatal "--json can only be used with check, progress, stats, describe, or plot --list"
     exit 1
   fi
 
