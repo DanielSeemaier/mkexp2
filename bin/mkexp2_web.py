@@ -4126,49 +4126,6 @@ HTML = r"""<!doctype html>
       margin-bottom: 12px;
       border-top: 1px solid var(--border);
     }
-    .console-log {
-      display: grid;
-      gap: 10px;
-      max-height: calc(100vh - 190px);
-      overflow: auto;
-    }
-    .console-entry {
-      display: grid;
-      gap: 6px;
-      min-width: 0;
-      padding: 10px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: #fbfcfd;
-    }
-    .console-entry-header {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 10px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .console-entry-title {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      color: var(--text);
-      font-weight: 750;
-    }
-    .console-entry pre {
-      margin: 0;
-      max-height: 320px;
-      overflow: auto;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      border-radius: 6px;
-      background: #101820;
-      color: #e7eef2;
-      padding: 10px;
-      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    }
     .logs-browser {
       display: grid;
       grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
@@ -4536,7 +4493,6 @@ HTML = r"""<!doctype html>
         <div class="modal-header">
           <div>
             <div id="settings-modal-title" class="modal-title">Settings</div>
-            <div id="console-summary" class="csv-summary">No commands logged yet.</div>
           </div>
           <button id="settings-close" class="icon-button" aria-label="Close settings" title="Close">x</button>
         </div>
@@ -4568,10 +4524,6 @@ HTML = r"""<!doctype html>
             </div>
             <button id="spack-cache-refresh">Refresh Spack R library cache</button>
           </div>
-          <div id="console-log" class="console-log"></div>
-        </div>
-        <div class="modal-footer">
-          <button id="console-clear">Clear</button>
         </div>
       </div>
     </div>
@@ -4900,8 +4852,6 @@ HTML = r"""<!doctype html>
       plotLabelTouched: false,
       plotNoDockerTouched: false,
       spackCache: null,
-      consoleEntries: [],
-      consoleOpen: false,
       progressTimer: null,
       description: null,
       descriptionFor: null,
@@ -4996,9 +4946,6 @@ HTML = r"""<!doctype html>
         setSidebarWidth(current, false);
       });
     }
-    function consoleText(value) {
-      return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-    }
     function setButtonBusy(buttonOrId, label = undefined) {
       const button = typeof buttonOrId === 'string' ? document.getElementById(buttonOrId) : buttonOrId;
       if (!button) return () => {};
@@ -5034,55 +4981,12 @@ HTML = r"""<!doctype html>
       }
     }
     function appendConsoleLog(title, value) {
-      state.consoleEntries.push({
-        time: new Date().toLocaleTimeString(),
-        title,
-        text: consoleText(value)
-      });
-      if (state.consoleEntries.length > 300) state.consoleEntries.splice(0, state.consoleEntries.length - 300);
-      renderConsoleLog();
+      if (window.console && console.debug) console.debug(title, value);
     }
     function out(value) {
       appendConsoleLog('Message', value);
     }
-    function renderConsoleLog() {
-      const summary = document.getElementById('console-summary');
-      const box = document.getElementById('console-log');
-      if (!summary || !box) return;
-      summary.textContent = state.consoleEntries.length
-        ? `${state.consoleEntries.length} log entr${state.consoleEntries.length === 1 ? 'y' : 'ies'} in this browser session.`
-        : 'No commands logged yet.';
-      box.innerHTML = '';
-      if (!state.consoleEntries.length) {
-        const empty = document.createElement('div');
-        empty.className = 'csv-empty';
-        empty.textContent = 'Commands and their output will appear here after actions run.';
-        box.appendChild(empty);
-        return;
-      }
-      for (const entry of state.consoleEntries) {
-        const item = document.createElement('section');
-        item.className = 'console-entry';
-        const header = document.createElement('div');
-        header.className = 'console-entry-header';
-        const title = document.createElement('div');
-        title.className = 'console-entry-title';
-        title.textContent = entry.title;
-        const time = document.createElement('div');
-        time.textContent = entry.time;
-        header.appendChild(title);
-        header.appendChild(time);
-        const pre = document.createElement('pre');
-        pre.textContent = entry.text;
-        item.appendChild(header);
-        item.appendChild(pre);
-        box.appendChild(item);
-      }
-      box.scrollTop = box.scrollHeight;
-    }
     function clearTransientOutput() {
-      state.consoleEntries = state.consoleEntries.filter(entry => !/session token|missing or invalid token/i.test(entry.text));
-      renderConsoleLog();
     }
     function stripAnsi(text) {
       return String(text || '').replace(/\x1b\[[0-9;]*m/g, '');
@@ -5727,19 +5631,12 @@ HTML = r"""<!doctype html>
       });
     }
     function openSettingsDialog() {
-      state.consoleOpen = true;
       document.getElementById('settings-modal').classList.remove('hidden');
       refreshTags().catch(err => out(String(err)));
       loadSpackCacheInfo().catch(err => out(String(err)));
-      renderConsoleLog();
     }
     function closeSettingsDialog() {
-      state.consoleOpen = false;
       document.getElementById('settings-modal').classList.add('hidden');
-    }
-    function clearConsoleLog() {
-      state.consoleEntries = [];
-      renderConsoleLog();
     }
     function renderSpackCacheInfo() {
       const summary = document.getElementById('spack-cache-summary');
@@ -8574,7 +8471,6 @@ HTML = r"""<!doctype html>
     document.getElementById('settings-open').onclick = openSettingsDialog;
     document.getElementById('settings-close').onclick = closeSettingsDialog;
     document.getElementById('spack-cache-refresh').onclick = () => refreshSpackCache().catch(err => out(String(err)));
-    document.getElementById('console-clear').onclick = clearConsoleLog;
     document.getElementById('check').onclick = checkExperiment;
     document.getElementById('probe-run').onclick = probeExperiment;
     document.getElementById('description-edit').onclick = editDescription;
