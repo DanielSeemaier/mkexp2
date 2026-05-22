@@ -393,7 +393,18 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn(".experiment-row.locked", mkexp2_web.HTML)
         self.assertNotIn("border-left: 4px solid transparent", mkexp2_web.HTML)
         self.assertNotIn(".experiment-row.active {\n      border-color: var(--accent);\n      border-left: 4px solid var(--accent)", mkexp2_web.HTML)
-        self.assertIn("border-left: 4px solid var(--danger)", mkexp2_web.HTML)
+        self.assertNotIn(".experiment-row.locked {\n      border-left: 4px solid var(--danger)", mkexp2_web.HTML)
+        self.assertNotIn(".experiment-row.active.locked", mkexp2_web.HTML)
+        self.assertIn(".experiment-row.locked .experiment-name", mkexp2_web.HTML)
+        self.assertIn("color: var(--danger);", mkexp2_web.HTML)
+        self.assertIn('id="experiment-tag-select"', mkexp2_web.HTML)
+        self.assertIn('id="tag-modal"', mkexp2_web.HTML)
+        self.assertIn('id="tag-open"', mkexp2_web.HTML)
+        self.assertIn('id="tag-save"', mkexp2_web.HTML)
+        self.assertIn(".experiment-row.tagged", mkexp2_web.HTML)
+        self.assertIn("border-left: 4px solid var(--experiment-tag-color)", mkexp2_web.HTML)
+        self.assertIn("/api/tags", mkexp2_web.HTML)
+        self.assertIn("/tag", mkexp2_web.HTML)
         self.assertIn("function updateSelectedExperimentLock", mkexp2_web.HTML)
         self.assertIn("function submitLockText", mkexp2_web.HTML)
         self.assertIn("async function renameExperiment", mkexp2_web.HTML)
@@ -729,6 +740,39 @@ class WebBackendTest(unittest.TestCase):
 
             loaded = app.read_pins()
             self.assertEqual(loaded["pinned"], ["b", "a"])
+
+    def test_experiment_tags_are_stored_server_side(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "a").mkdir()
+            (repo / "b").mkdir()
+            (repo / "a" / "Experiment").write_text("ExperimentA() { :; }\n")
+            (repo / "b" / "Experiment").write_text("ExperimentB() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            defaults = app.read_tags()
+            self.assertIn({"name": "Codex", "color": "#2563eb"}, defaults["tags"])
+
+            updated = app.upsert_tag({"name": "Review", "color": "#0f766e"})
+            self.assertIn({"name": "Review", "color": "#0f766e"}, updated["tags"])
+            assigned = app.assign_experiment_tag("a", "Codex")
+            self.assertEqual(assigned["tag"]["name"], "Codex")
+            listed = {item["id"]: item for item in app.list_experiments(force=True)}
+            self.assertEqual(listed["a"]["tag"]["name"], "Codex")
+            self.assertEqual(listed["a"]["tag"]["color"], "#2563eb")
+
+            renamed = app.rename_experiment("a", {"new_id": "renamed"})
+            self.assertEqual(renamed["new_id"], "renamed")
+            self.assertIsNone(app.tag_for_experiment("a"))
+            self.assertEqual(app.tag_for_experiment("renamed")["name"], "Codex")
+
+            created = app.create_experiment({"name": "Generated", "tag": "Codex"})
+            self.assertEqual(created["tag"]["name"], "Codex")
+            self.assertEqual(app.tag_for_experiment(created["id"])["color"], "#2563eb")
+
+            cleared = app.assign_experiment_tag("renamed", "")
+            self.assertIsNone(cleared["tag"])
+            self.assertNotIn("renamed", app.read_tags()["assignments"])
 
     def test_submit_lock_helpers(self):
         with tempfile.TemporaryDirectory() as tmp:

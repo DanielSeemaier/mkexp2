@@ -30,10 +30,14 @@ SQUEUE_TABLE_FORMAT = "%i|%P|%j|%u|%T|%M|%D|%R"
 WEB_STATE_DIR = ".mkexp2"
 WEB_PINS_FILE = "web-pins.json"
 WEB_SHARES_FILE = "web-shares.json"
+WEB_TAGS_FILE = "web-tags.json"
 PLOT_INDEX_FILE = "index.json"
 ARCHIVE_SUFFIX = ".archived"
 EXPERIMENT_SKIP_DIRS = {".git", ".mkexp2", "jobs", "logs", "plots", "results", "slurm"}
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+TAG_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$")
+TAG_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+DEFAULT_TAGS = [{"name": "Codex", "color": "#2563eb"}]
 SINFO_LONG_FALLBACK = """Sat May 16 15:57:01 2026
 NODELIST    NODES PARTITION       STATE CPUS    S:C:T MEMORY TMP_DISK WEIGHT AVAIL_FE REASON
 backus          1      all*   allocated 128    1:64:2 101939        0      1   (null) none
@@ -71,6 +75,22 @@ def slugify(value):
 def download_filename(value):
     value = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value or "experiment")).strip("-._")
     return value or "experiment"
+
+
+def normalize_tag_name(value):
+    name = str(value or "").strip()
+    if not name:
+        return ""
+    if not TAG_NAME_RE.fullmatch(name):
+        raise ValueError("invalid tag name")
+    return name
+
+
+def normalize_tag_color(value):
+    color = str(value or "").strip()
+    if not TAG_COLOR_RE.fullmatch(color):
+        raise ValueError("invalid tag color")
+    return color.lower()
 
 
 def render_name_template(template, name, now=None):
@@ -770,11 +790,11 @@ class Mkexp2WebApp:
             and self._experiments_cache is not None
             and now - self._experiments_cache_at < EXPERIMENT_CACHE_SECONDS
         ):
-            return self.with_submit_lock_summaries(self._experiments_cache)
+            return self.with_tag_summaries(self.with_submit_lock_summaries(self._experiments_cache))
         experiments = self._discover_experiments(archived=False)
         self._experiments_cache = experiments
         self._experiments_cache_at = now
-        return self.with_submit_lock_summaries(experiments)
+        return self.with_tag_summaries(self.with_submit_lock_summaries(experiments))
 
     def list_archived_experiments(self, force=False):
         now = time.time()
@@ -835,6 +855,139 @@ class Mkexp2WebApp:
         tmp.write_text(json.dumps({"pinned": filtered}, indent=2) + "\n", encoding="utf-8")
         tmp.replace(path)
         return {"pinned": filtered, "path": str(path), "saved": True}
+
+    def tags_path(self):
+        return self.repo / WEB_STATE_DIR / WEB_TAGS_FILE
+
+    def _normalize_tags_payload(self, payload):
+        tag_map = {}
+        raw_tags = payload.get("tags") if isinstance(payload, dict) else None
+        if isinstance(raw_tags, dict):
+            raw_tags = [{"name": name, "color": color} for name, color in raw_tags.items()]
+        if not isinstance(raw_tags, list):
+            raw_tags = []
+        for item in [*DEFAULT_TAGS, *raw_tags]:
+            if not isinstance(item, dict):
+                continue
+            try:
+                name = normalize_tag_name(item.get("name"))
+                color = normalize_tag_color(item.get("color") or "#64748b")
+            except ValueError:
+                continue
+            if name:
+                tag_map[name] = {"name": name, "color": color}
+
+        assignments = {}
+        raw_assignments = payload.get("assignments") if isinstance(payload, dict) else None
+        if isinstance(raw_assignments, dict):
+            for experiment_id, tag_name in raw_assignments.items():
+                experiment_id = str(experiment_id or "").strip().strip("/")
+                try:
+                    self.experiment_path(experiment_id)
+                    tag_name = normalize_tag_name(tag_name)
+                except ValueError:
+                    continue
+                if tag_name in tag_map:
+                    assignments[experiment_id] = tag_name
+        return {
+            "tags": sorted(tag_map.values(), key=lambda item: item["name"].casefold()),
+            "assignments": assignments,
+        }
+
+    def read_tags(self):
+        path = self.tags_path()
+        if not path.is_file():
+            payload = {}
+        else:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8") or "{}")
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid tags JSON: {exc}") from exc
+        state = self._normalize_tags_payload(payload)
+        state["path"] = str(path)
+        return state
+
+    def write_tags_state(self, tags, assignments):
+        state = self._normalize_tags_payload({"tags": tags, "assignments": assignments})
+        path = self.tags_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(
+            json.dumps({"tags": state["tags"], "assignments": state["assignments"]}, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        tmp.replace(path)
+        state["path"] = str(path)
+        state["saved"] = True
+        return state
+
+    def upsert_tag(self, payload):
+        name = normalize_tag_name((payload or {}).get("name"))
+        if not name:
+            raise ValueError("tag name is required")
+        color = normalize_tag_color((payload or {}).get("color"))
+        state = self.read_tags()
+        tags = [tag for tag in state["tags"] if tag["name"] != name]
+        tags.append({"name": name, "color": color})
+        return self.write_tags_state(tags, state["assignments"])
+
+    def tag_for_experiment(self, experiment_id, tags_state=None):
+        tags_state = tags_state or self.read_tags()
+        tag_name = (tags_state.get("assignments") or {}).get(experiment_id)
+        if not tag_name:
+            return None
+        by_name = {tag["name"]: tag for tag in tags_state.get("tags") or []}
+        return by_name.get(tag_name)
+
+    def with_tag_summaries(self, experiments):
+        tags_state = self.read_tags()
+        summarized = []
+        for experiment in experiments:
+            item = dict(experiment)
+            tag = self.tag_for_experiment(item["id"], tags_state)
+            item["tag"] = tag
+            item["tag_name"] = tag["name"] if tag else ""
+            summarized.append(item)
+        return summarized
+
+    def assign_experiment_tag(self, experiment_id, tag_name, require_active=True):
+        experiment_id = str(experiment_id or "").strip().strip("/")
+        if require_active:
+            known = {experiment["id"] for experiment in self.list_experiments(force=True)}
+            if experiment_id not in known:
+                raise ValueError(f"experiment not found: {experiment_id}")
+            path = self.active_experiment_path(experiment_id)
+            if not path.is_dir() or not (path / "Experiment").is_file():
+                raise ValueError(f"experiment not found: {experiment_id}")
+        else:
+            self.experiment_path(experiment_id)
+
+        state = self.read_tags()
+        assignments = dict(state["assignments"])
+        tag_name = normalize_tag_name(tag_name)
+        if tag_name:
+            tags_by_name = {tag["name"]: tag for tag in state["tags"]}
+            if tag_name not in tags_by_name:
+                raise ValueError(f"unknown tag: {tag_name}")
+            assignments[experiment_id] = tag_name
+        else:
+            assignments.pop(experiment_id, None)
+        updated = self.write_tags_state(state["tags"], assignments)
+        return {"experiment_id": experiment_id, "tag": self.tag_for_experiment(experiment_id, updated), "tags": updated}
+
+    def move_experiment_tag(self, old_id, new_id):
+        state = self.read_tags()
+        assignments = dict(state["assignments"])
+        if old_id in assignments:
+            assignments[new_id] = assignments.pop(old_id)
+            self.write_tags_state(state["tags"], assignments)
+
+    def remove_experiment_tag(self, experiment_id):
+        state = self.read_tags()
+        assignments = dict(state["assignments"])
+        if experiment_id in assignments:
+            assignments.pop(experiment_id, None)
+            self.write_tags_state(state["tags"], assignments)
 
     def shares_path(self):
         return self.repo / WEB_STATE_DIR / WEB_SHARES_FILE
@@ -967,6 +1120,7 @@ class Mkexp2WebApp:
         if path.exists():
             raise ValueError(f"experiment already exists: {experiment_id}")
         preset = str(payload.get("preset") or "").strip()
+        tag_name = str(payload.get("tag") or "").strip()
         path.mkdir(parents=True)
         try:
             if preset:
@@ -974,15 +1128,17 @@ class Mkexp2WebApp:
                 if init["returncode"] != 0:
                     message = init["stderr"].strip() or init["stdout"].strip() or f"failed to initialize preset {preset}"
                     raise ValueError(message)
+                tag = self.assign_experiment_tag(experiment_id, tag_name, require_active=False)["tag"] if tag_name else None
                 self.invalidate_experiments_cache()
-                return {"id": experiment_id, "path": str(path), "preset": preset, "init": init}
+                return {"id": experiment_id, "path": str(path), "preset": preset, "init": init, "tag": tag}
 
             raw = payload.get("experiment")
             if not raw:
                 raw = experiment_from_form(name, payload.get("form") or {})
             (path / "Experiment").write_text(raw, encoding="utf-8")
+            tag = self.assign_experiment_tag(experiment_id, tag_name, require_active=False)["tag"] if tag_name else None
             self.invalidate_experiments_cache()
-            return {"id": experiment_id, "path": str(path)}
+            return {"id": experiment_id, "path": str(path), "tag": tag}
         except Exception:
             shutil.rmtree(path, ignore_errors=True)
             raise
@@ -1116,6 +1272,7 @@ class Mkexp2WebApp:
         pins = self.read_pins().get("pinned") or []
         if experiment_id in pins:
             self.write_pins([item for item in pins if item != experiment_id])
+        self.remove_experiment_tag(experiment_id)
         return {"deleted": True, "id": experiment_id, "path": str(path)}
 
     def rename_experiment(self, experiment_id, payload):
@@ -1144,6 +1301,7 @@ class Mkexp2WebApp:
         pins = self.read_pins().get("pinned") or []
         if experiment_id in pins:
             self.write_pins([new_id if item == experiment_id else item for item in pins])
+        self.move_experiment_tag(experiment_id, new_id)
         return {
             "renamed": True,
             "id": experiment_id,
@@ -1171,6 +1329,7 @@ class Mkexp2WebApp:
         pins = self.read_pins().get("pinned") or []
         if experiment_id in pins:
             self.write_pins([item for item in pins if item != experiment_id])
+        self.move_experiment_tag(experiment_id, archived_id)
         return {
             "archived": True,
             "id": experiment_id,
@@ -1194,6 +1353,7 @@ class Mkexp2WebApp:
         target_id = target_path.relative_to(self.repo).as_posix()
         path.rename(target_path)
         self.invalidate_experiments_cache()
+        self.move_experiment_tag(experiment_id, target_id)
         return {
             "unarchived": True,
             "id": experiment_id,
@@ -2294,6 +2454,7 @@ HTML = r"""<!doctype html>
     .app.share-mode .danger-zone,
     .app.share-mode #check,
     .app.share-mode #share-experiment,
+    .app.share-mode .tag-controls,
     .app.share-mode #add-plot-source {
       display: none !important;
     }
@@ -2483,13 +2644,12 @@ HTML = r"""<!doctype html>
       border-color: var(--accent);
       background: #e8f5f3;
     }
-    .experiment-row.locked {
-      border-left: 4px solid var(--danger);
+    .experiment-row.tagged {
+      border-left: 4px solid var(--experiment-tag-color);
+      padding-left: 7px;
     }
-    .experiment-row.active.locked {
-      border-color: var(--accent);
-      border-left: 4px solid var(--danger);
-      background: #e8f5f3;
+    .experiment-row.locked .experiment-name {
+      color: var(--danger);
     }
     .experiment-name-row {
       display: flex;
@@ -2706,6 +2866,26 @@ HTML = r"""<!doctype html>
       min-width: 20px;
     }
     .view-tabs .icon-button {
+      flex: 0 0 auto;
+    }
+    .tag-controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .tag-controls select {
+      width: 150px;
+      height: 34px;
+      padding: 0 8px;
+      font-size: 13px;
+    }
+    .tag-dot {
+      width: 11px;
+      height: 11px;
+      border: 1px solid rgba(15, 23, 42, 0.18);
+      border-radius: 999px;
+      background: var(--tag-color, var(--border));
       flex: 0 0 auto;
     }
     .view-tab {
@@ -3704,6 +3884,37 @@ HTML = r"""<!doctype html>
       gap: 12px;
       padding: 14px;
     }
+    .tag-manager-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 120px auto;
+      gap: 8px;
+      align-items: end;
+    }
+    .tag-list {
+      display: grid;
+      gap: 6px;
+    }
+    .tag-row {
+      width: 100%;
+      height: auto;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      text-align: left;
+      min-height: 34px;
+      padding: 7px 9px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fbfcfd;
+    }
+    .tag-row-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 700;
+    }
     .git-status-grid {
       display: grid;
       gap: 10px;
@@ -4220,6 +4431,30 @@ HTML = r"""<!doctype html>
         </div>
       </div>
     </div>
+    <div id="tag-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="tag-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="tag-modal-title" class="modal-title">Tag Manager</div>
+          </div>
+          <button id="tag-close" class="icon-button" aria-label="Close tag manager" title="Close">x</button>
+        </div>
+        <div class="modal-body">
+          <div class="tag-manager-grid">
+            <label>
+              <span class="csv-summary">Tag name</span>
+              <input id="tag-name" type="text" placeholder="Codex">
+            </label>
+            <label>
+              <span class="csv-summary">Border color</span>
+              <input id="tag-color" type="color" value="#2563eb">
+            </label>
+            <button id="tag-save">Save Tag</button>
+          </div>
+          <div id="tag-list" class="tag-list"></div>
+        </div>
+      </div>
+    </div>
     <div id="queue-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="queue-modal-title">
       <div class="modal">
         <div class="modal-header">
@@ -4293,6 +4528,12 @@ HTML = r"""<!doctype html>
         <button class="view-tab" data-view="logs-view">Logs</button>
         <button class="view-tab" data-view="plots-view">Plots</button>
         <span class="view-tabs-spacer"></span>
+        <div class="tag-controls" aria-label="Experiment tag controls">
+          <select id="experiment-tag-select" title="Experiment tag"></select>
+          <button id="tag-open" class="icon-button" aria-label="Manage tags" title="Manage tags">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.2 13.2 20.6a2 2 0 0 1-2.8 0L3 13.2V3h10.2l7.4 7.4a2 2 0 0 1 0 2.8Z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>
+          </button>
+        </div>
         <button id="share-experiment" class="icon-button" aria-label="Share experiment" title="Share experiment">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.6 6.8-4.2"/><path d="m8.6 13.4 6.8 4.2"/></svg>
         </button>
@@ -4532,6 +4773,8 @@ HTML = r"""<!doctype html>
       archivedExperiments: [],
       selected: null,
       pinnedExperiments: new Set(),
+      tags: [],
+      tagAssignments: {},
       algorithms: [],
       algorithmLoading: false,
       algorithmLoadingFor: '',
@@ -6470,6 +6713,129 @@ HTML = r"""<!doctype html>
         state.openDirs.add(current);
       }
     }
+    function validTagColor(color) {
+      return /^#[0-9a-f]{6}$/i.test(String(color || ''));
+    }
+    function tagByName(name) {
+      return (state.tags || []).find(tag => tag.name === name) || null;
+    }
+    function experimentTag(exp) {
+      if (exp?.tag?.name) return exp.tag;
+      const tagName = exp?.tag_name || state.tagAssignments?.[exp?.id || ''] || '';
+      return tagName ? tagByName(tagName) : null;
+    }
+    function setExperimentTagInState(experimentId, tag) {
+      const tagName = tag?.name || '';
+      if (tagName) state.tagAssignments[experimentId] = tagName;
+      else delete state.tagAssignments[experimentId];
+      const experiment = state.experiments.find(item => item.id === experimentId);
+      if (experiment) {
+        experiment.tag = tag || null;
+        experiment.tag_name = tagName;
+      }
+    }
+    function renderTagSelect() {
+      const select = document.getElementById('experiment-tag-select');
+      if (!select) return;
+      const currentExperiment = state.experiments.find(item => item.id === state.selected);
+      const currentTag = currentExperiment ? experimentTag(currentExperiment) : null;
+      select.innerHTML = '';
+      const none = document.createElement('option');
+      none.value = '';
+      none.textContent = 'No tag';
+      select.appendChild(none);
+      for (const tag of state.tags || []) {
+        const option = document.createElement('option');
+        option.value = tag.name;
+        option.textContent = tag.name;
+        select.appendChild(option);
+      }
+      select.value = currentTag?.name || '';
+      select.disabled = !state.selected || state.shared;
+      select.title = state.selected ? 'Experiment tag' : 'Select an experiment first';
+    }
+    function renderTagManager() {
+      const list = document.getElementById('tag-list');
+      if (!list) return;
+      list.innerHTML = '';
+      if (!state.tags.length) {
+        list.className = 'csv-empty';
+        list.textContent = 'No tags configured.';
+        return;
+      }
+      list.className = 'tag-list';
+      for (const tag of state.tags) {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'tag-row';
+        const dot = document.createElement('span');
+        dot.className = 'tag-dot';
+        if (validTagColor(tag.color)) dot.style.setProperty('--tag-color', tag.color);
+        const name = document.createElement('span');
+        name.className = 'tag-row-name';
+        name.textContent = tag.name;
+        const color = document.createElement('span');
+        color.className = 'muted';
+        color.textContent = tag.color;
+        row.appendChild(dot);
+        row.appendChild(name);
+        row.appendChild(color);
+        row.onclick = () => {
+          document.getElementById('tag-name').value = tag.name;
+          document.getElementById('tag-color').value = validTagColor(tag.color) ? tag.color : '#2563eb';
+        };
+        list.appendChild(row);
+      }
+    }
+    async function refreshTags() {
+      const data = await api('/api/tags');
+      state.tags = data.tags || [];
+      state.tagAssignments = data.assignments || {};
+      renderTagSelect();
+      renderTagManager();
+      renderExperimentsList();
+      return data;
+    }
+    async function assignSelectedTag() {
+      const select = document.getElementById('experiment-tag-select');
+      if (!state.selected || state.shared || !select) return;
+      select.disabled = true;
+      try {
+        const result = await api(`/api/experiments/${encodeURIComponent(state.selected)}/tag`, {
+          method: 'PUT',
+          body: JSON.stringify({ tag: select.value || '' })
+        });
+        state.tags = result.tags?.tags || state.tags;
+        state.tagAssignments = result.tags?.assignments || state.tagAssignments;
+        setExperimentTagInState(state.selected, result.tag || null);
+      } finally {
+        renderTagSelect();
+        renderExperimentsList();
+      }
+    }
+    async function saveTag() {
+      const name = document.getElementById('tag-name').value.trim();
+      const color = document.getElementById('tag-color').value;
+      await withBusyButton('tag-save', 'Saving...', async () => {
+        const result = await api('/api/tags', {
+          method: 'POST',
+          body: JSON.stringify({ name, color })
+        });
+        state.tags = result.tags || [];
+        state.tagAssignments = result.assignments || {};
+        renderTagManager();
+        renderTagSelect();
+        renderExperimentsList();
+      });
+    }
+    async function openTagDialog() {
+      document.getElementById('tag-modal').classList.remove('hidden');
+      await refreshTags();
+      document.getElementById('tag-name').focus();
+    }
+    function closeTagDialog() {
+      document.getElementById('tag-modal').classList.add('hidden');
+    }
     function renderExperimentTree(container, node, prefix = '') {
       const folders = Array.from(node.folders.entries()).sort((left, right) => {
         return (right[1].latest || 0) - (left[1].latest || 0) || left[0].localeCompare(right[0]);
@@ -6508,12 +6874,17 @@ HTML = r"""<!doctype html>
     function renderExperimentItem(container, exp, label) {
       const pinned = state.pinnedExperiments.has(exp.id);
       const locked = Boolean(exp.submit_lock?.locked);
+      const tag = experimentTag(exp);
       const item = document.createElement('div');
       item.className = 'experiment-item';
       const button = document.createElement('button');
       button.className = 'experiment-row'
         + (state.selected === exp.id ? ' active' : '')
-        + (locked ? ' locked' : '');
+        + (locked ? ' locked' : '')
+        + (tag ? ' tagged' : '');
+      if (tag && validTagColor(tag.color)) {
+        button.style.setProperty('--experiment-tag-color', tag.color);
+      }
       const nameRow = document.createElement('span');
       nameRow.className = 'experiment-name-row';
       const name = document.createElement('span');
@@ -6524,7 +6895,7 @@ HTML = r"""<!doctype html>
       date.className = 'experiment-date';
       const created = formatExperimentDate(exp);
       date.textContent = created || 'unknown';
-      const title = [exp.id, created, locked ? submitLockText(exp.submit_lock) : ''].filter(Boolean).join('\n');
+      const title = [exp.id, created, tag ? `Tag: ${tag.name}` : '', locked ? submitLockText(exp.submit_lock) : ''].filter(Boolean).join('\n');
       button.title = title || exp.id;
       button.appendChild(nameRow);
       button.appendChild(date);
@@ -6675,13 +7046,17 @@ HTML = r"""<!doctype html>
     }
     async function refreshExperiments(options = {}) {
       const query = options.force ? '?refresh=1' : '';
-      const [data, pins] = await Promise.all([
+      const [data, pins, tags] = await Promise.all([
         api(`/api/experiments${query}`),
-        api('/api/pins')
+        api('/api/pins'),
+        api('/api/tags')
       ]);
       clearTransientOutput();
       state.experiments = data.experiments;
       state.pinnedExperiments = new Set(pins.pinned || []);
+      state.tags = tags.tags || [];
+      state.tagAssignments = tags.assignments || {};
+      renderTagSelect();
       renderExperimentsList();
       if (options.selectMostRecent && !state.selected && state.experiments.length) {
         const latest = mostRecentExperiment(state.experiments);
@@ -6895,6 +7270,7 @@ HTML = r"""<!doctype html>
       renderSubmitLock({ locked: false });
       renderProgress(null);
       document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
+      renderTagSelect();
       renderExperimentsList();
     }
     async function archiveExperiment() {
@@ -7125,6 +7501,7 @@ HTML = r"""<!doctype html>
       renderAlgorithmLoading(id);
       document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
       openExperimentAncestors(id);
+      renderTagSelect();
       renderExperimentsList();
       const data = await api(`/api/experiments/${encodeURIComponent(id)}/experiment`);
       if (state.selected !== id || state.selectionSeq !== selectionId) return;
@@ -7132,7 +7509,9 @@ HTML = r"""<!doctype html>
       document.getElementById('selected-title').textContent = id;
       document.getElementById('selected-path').textContent = selectedPathText(data.path, data);
       setEditorValue(data.experiment);
+      setExperimentTagInState(id, data.tag || null);
       renderSubmitLock(data.submit_lock);
+      renderTagSelect();
       loadDescription().catch(err => out(String(err)));
       await loadAlgorithms(id);
     }
@@ -8030,6 +8409,10 @@ HTML = r"""<!doctype html>
     document.getElementById('share-experiment').onclick = shareExperiment;
     document.getElementById('download-experiment').onclick = downloadExperiment;
     document.getElementById('share-close').onclick = closeShareDialog;
+    document.getElementById('experiment-tag-select').onchange = () => assignSelectedTag().catch(err => out(String(err)));
+    document.getElementById('tag-open').onclick = () => withBusyButton('tag-open', '', openTagDialog).catch(err => out(String(err)));
+    document.getElementById('tag-close').onclick = closeTagDialog;
+    document.getElementById('tag-save').onclick = () => saveTag().catch(err => out(String(err)));
     document.getElementById('settings-open').onclick = openSettingsDialog;
     document.getElementById('settings-close').onclick = closeSettingsDialog;
     document.getElementById('spack-cache-refresh').onclick = () => refreshSpackCache().catch(err => out(String(err)));
@@ -8277,6 +8660,9 @@ def make_handler(app):
                 if path == "/api/pins":
                     json_response(self, 200, app.read_pins())
                     return
+                if path == "/api/tags":
+                    json_response(self, 200, app.read_tags())
+                    return
                 if path == "/api/plot/backend":
                     json_response(self, 200, app.plot_backend_status())
                     return
@@ -8305,6 +8691,7 @@ def make_handler(app):
                         "path": str(exp_path),
                         "experiment": (exp_path / "Experiment").read_text(encoding="utf-8"),
                         "submit_lock": app.submit_lock(experiment_id),
+                        "tag": app.tag_for_experiment(experiment_id),
                     }
                     payload.update(app.experiment_time_metadata(exp_path))
                     json_response(
@@ -8447,6 +8834,9 @@ def make_handler(app):
                 if path == "/api/pins":
                     json_response(self, 200, app.write_pins(payload.get("pinned") or []))
                     return
+                if path == "/api/tags":
+                    json_response(self, 200, app.upsert_tag(payload))
+                    return
                 match = re.match(r"^/api/experiments/([^/]+)/rename$", path)
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
@@ -8506,6 +8896,11 @@ def make_handler(app):
                 payload = read_json(self)
                 if path == "/api/pins":
                     json_response(self, 200, app.write_pins(payload.get("pinned") or []))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/tag$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    json_response(self, 200, app.assign_experiment_tag(experiment_id, payload.get("tag") or ""))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/description$", path)
                 if match:

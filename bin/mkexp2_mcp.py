@@ -18,6 +18,7 @@ Connection model:
 
 Typical workflow:
 1. Call `mkexp2_list_presets`, then `mkexp2_create_experiment` with a short name and optional preset.
+   The bridge automatically tags experiments it creates as `Codex` in the web UI.
 2. Write or edit the Experiment file with `mkexp2_write_experiment`.
 3. Validate with `mkexp2_check_experiment`.
 4. Inspect algorithms with `mkexp2_probe_experiment`, usually with `flags: ["--algorithms"]`.
@@ -308,7 +309,7 @@ class Mkexp2McpServer:
     def create_experiment(self, args):
         if args.get("preset") and args.get("experiment"):
             raise ValueError("create with either preset or experiment, not both")
-        payload = {"name": args["name"]}
+        payload = {"name": args["name"], "tag": "Codex"}
         if args.get("preset"):
             payload["preset"] = args["preset"]
         if args.get("experiment"):

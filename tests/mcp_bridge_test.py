@@ -53,6 +53,24 @@ class McpBridgeTest(unittest.TestCase):
         self.assertIn("mkexp2_get_progress", names)
         self.assertIn("mkexp2_get_stats", names)
 
+    def test_create_experiment_auto_tags_codex(self):
+        client = FakeClient()
+        server = mkexp2_mcp.Mkexp2McpServer(client)
+
+        server.call_tool("mkexp2_create_experiment", {"name": "My Change"})
+
+        self.assertEqual(
+            client.calls[0],
+            (
+                "POST",
+                "/api/experiments",
+                {"name": "My Change", "tag": "Codex"},
+                None,
+            ),
+        )
+        guide = server.call_tool("mkexp2_get_experiment_guide", {})
+        self.assertIn("automatically tags experiments it creates as `Codex`", guide["guide"])
+
     def test_write_experiment_routes_through_web_api_with_encoded_id(self):
         client = FakeClient()
         server = mkexp2_mcp.Mkexp2McpServer(client)
