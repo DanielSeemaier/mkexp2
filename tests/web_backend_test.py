@@ -239,6 +239,12 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('class="panel probe-panel"', mkexp2_web.HTML)
         self.assertIn('id="probe-output"', mkexp2_web.HTML)
         self.assertIn('id="probe-run"', mkexp2_web.HTML)
+        self.assertNotIn('id="probe-summary"', mkexp2_web.HTML)
+        self.assertNotIn('id="progress-summary"', mkexp2_web.HTML)
+        self.assertNotIn('id="danger-summary"', mkexp2_web.HTML)
+        self.assertNotIn("No probe loaded.", mkexp2_web.HTML)
+        self.assertNotIn("No progress loaded.", mkexp2_web.HTML)
+        self.assertNotIn("Manual recovery, rename", mkexp2_web.HTML)
         self.assertIn("Running mkexp2 probe...", mkexp2_web.HTML)
         self.assertNotIn("Saving and probing", mkexp2_web.HTML)
         self.assertNotIn("Saving the Experiment file and running mkexp2 probe", mkexp2_web.HTML)
@@ -554,7 +560,7 @@ class WebBackendTest(unittest.TestCase):
 
     def test_html_contains_description_panel(self):
         self.assertIn("Description", mkexp2_web.HTML)
-        self.assertIn('id="description-summary"', mkexp2_web.HTML)
+        self.assertNotIn('id="description-summary"', mkexp2_web.HTML)
         self.assertIn('id="description-rendered"', mkexp2_web.HTML)
         self.assertIn('id="description-editor"', mkexp2_web.HTML)
         self.assertIn('id="description-edit"', mkexp2_web.HTML)
@@ -565,7 +571,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("function editDescription", mkexp2_web.HTML)
         self.assertIn("async function saveDescription", mkexp2_web.HTML)
         self.assertIn("/description", mkexp2_web.HTML)
-        self.assertIn("description.md does not exist yet.", mkexp2_web.HTML)
+        self.assertNotIn("description.md does not exist yet.", mkexp2_web.HTML)
         self.assertIn(".app.share-mode .description-edit-actions", mkexp2_web.HTML)
 
     def test_install_log_result_handles_missing_and_existing_files(self):

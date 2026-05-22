@@ -4351,7 +4351,6 @@ HTML = r"""<!doctype html>
               <div class="panel-header">
                 <div>
                   <div class="panel-title">Progress</div>
-                  <div id="progress-summary" class="csv-summary">No progress loaded.</div>
                 </div>
                 <button id="refresh-progress" class="icon-button" aria-label="Reload progress" title="Reload progress">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
@@ -4365,7 +4364,6 @@ HTML = r"""<!doctype html>
               <div class="panel-header">
                 <div>
                   <div class="panel-title">Description</div>
-                  <div id="description-summary" class="csv-summary">No description loaded.</div>
                 </div>
                 <div class="actions description-edit-actions">
                   <button id="description-edit">Edit</button>
@@ -4386,7 +4384,6 @@ HTML = r"""<!doctype html>
           <div class="panel-header">
             <div>
               <div class="panel-title">Probe</div>
-              <div id="probe-summary" class="csv-summary">No probe loaded.</div>
             </div>
             <button id="probe-run">Run Probe</button>
           </div>
@@ -4400,7 +4397,6 @@ HTML = r"""<!doctype html>
           <div class="panel-header">
             <div>
               <div class="panel-title">Danger Zone</div>
-              <div id="danger-summary" class="csv-summary">Manual recovery, rename, and deletion actions.</div>
             </div>
           </div>
           <div class="panel-body">
@@ -5086,13 +5082,10 @@ HTML = r"""<!doctype html>
     }
     function renderProbeResult(results, saveResult) {
       const box = document.getElementById('probe-output');
-      const summaryBox = document.getElementById('probe-summary');
       box.innerHTML = '';
       box.className = 'probe-output';
       const root = document.createElement('div');
       root.className = 'probe-output';
-
-      summaryBox.textContent = saveResult?.path ? `Source: ${saveResult.path}` : '';
 
       for (const result of results) {
         const section = document.createElement('section');
@@ -5595,14 +5588,12 @@ HTML = r"""<!doctype html>
       flushList();
     }
     function renderDescriptionWorkspace() {
-      const summary = document.getElementById('description-summary');
       const rendered = document.getElementById('description-rendered');
       const editorNode = document.getElementById('description-editor');
       const actions = document.getElementById('description-actions');
       const editButton = document.getElementById('description-edit');
       if (!state.selected) {
         state.descriptionEditing = false;
-        summary.textContent = 'No experiment selected.';
         rendered.className = 'csv-empty';
         rendered.textContent = 'Select an experiment first.';
         editorNode.classList.add('hidden');
@@ -5613,7 +5604,6 @@ HTML = r"""<!doctype html>
       editButton.disabled = state.descriptionFor !== state.selected || state.shared;
       if (state.descriptionFor !== state.selected || !state.description) {
         state.descriptionEditing = false;
-        summary.textContent = 'No description loaded.';
         rendered.className = 'csv-empty';
         rendered.textContent = 'Loading description...';
         editorNode.classList.add('hidden');
@@ -5621,10 +5611,6 @@ HTML = r"""<!doctype html>
         return;
       }
       const content = state.description.content || '';
-      const suffix = state.description.truncated ? ' (truncated)' : '';
-      summary.textContent = state.description.exists
-        ? `description.md, ${state.description.size || 0} bytes, modified ${state.description.modified_at || 'unknown'}${suffix}`
-        : 'description.md does not exist yet.';
       if (state.descriptionEditing && !state.shared) {
         rendered.classList.add('hidden');
         editorNode.classList.remove('hidden');
@@ -6817,14 +6803,6 @@ HTML = r"""<!doctype html>
         deleteButton.disabled = locked || !state.selected;
         deleteButton.title = locked ? 'Cannot delete while submit is locked.' : '';
       }
-      const dangerSummary = document.getElementById('danger-summary');
-      if (dangerSummary) {
-        if (locked) {
-          dangerSummary.textContent = `${submitLockMessage()}.`;
-        } else {
-          dangerSummary.textContent = 'Manual recovery, rename, archive, and deletion actions.';
-        }
-      }
     }
     function renderAlgorithmLoading(experimentId) {
       state.algorithms = [];
@@ -6937,7 +6915,6 @@ HTML = r"""<!doctype html>
       renderLogsWorkspace();
       renderSubmitLock({ locked: false });
       renderProgress(null);
-      document.getElementById('probe-summary').textContent = 'No probe loaded.';
       document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
       renderExperimentsList();
     }
@@ -7048,29 +7025,22 @@ HTML = r"""<!doctype html>
       state.progressTimer = null;
     }
     function renderProgress(result) {
-      const summary = document.getElementById('progress-summary');
       const box = document.getElementById('progress-output');
       const command = result?.progress || result;
       const progress = result?.progress_json || null;
       if (!state.selected) {
         stopProgressPolling();
-        summary.textContent = 'No experiment selected.';
         box.className = 'csv-empty';
         box.textContent = 'Select an experiment first.';
         return;
       }
       if (!result) {
         stopProgressPolling();
-        summary.textContent = 'No progress loaded.';
         box.className = 'csv-empty';
         box.textContent = 'Run progress to count finished log files against expected runs.';
         return;
       }
       if (progress) {
-        const done = Number(progress.done || 0);
-        const total = Number(progress.total || 0);
-        const percent = Number(progress.percent || 0);
-        summary.textContent = `${done} / ${total} finished (${percent}%). Refreshed in ${command?.elapsed_seconds ?? '?'}s.`;
         box.className = 'progress-output';
         box.innerHTML = '';
         for (const experiment of progress.experiments || []) {
@@ -7123,16 +7093,11 @@ HTML = r"""<!doctype html>
       }
       stopProgressPolling();
       const text = stripAnsi(`${command?.stdout || ''}${command?.stderr ? `\n${command.stderr}` : ''}`).trim();
-      summary.textContent = command?.returncode === 0
-        ? `Progress refreshed in ${command.elapsed_seconds ?? '?'}s.`
-        : `Progress failed with return code ${command?.returncode ?? 'unknown'}.`;
       box.className = text ? 'progress-output' : 'csv-empty';
       box.textContent = text || 'No progress output.';
     }
     async function loadProgress(options = {}) {
       if (!state.selected) return;
-      const summary = document.getElementById('progress-summary');
-      if (!options.quiet) summary.textContent = 'Refreshing progress...';
       const result = await api(`/api/experiments/${encodeURIComponent(state.selected)}/progress`);
       renderSubmitLock(result.submit_lock);
       renderProgress(result);
@@ -7178,7 +7143,6 @@ HTML = r"""<!doctype html>
       renderSubmitLock({ locked: false });
       renderProgress(null);
       renderAlgorithmLoading(id);
-      document.getElementById('probe-summary').textContent = 'No probe loaded.';
       document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
       openExperimentAncestors(id);
       renderExperimentsList();
@@ -7269,7 +7233,6 @@ HTML = r"""<!doctype html>
       if (!state.selected) return;
       const experimentId = state.selected;
       await withBusyButton('probe-run', 'Running...', async () => {
-        document.getElementById('probe-summary').textContent = 'Running mkexp2 probe...';
         document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Running mkexp2 probe...</div>';
         const listing = await api(`/api/experiments/${encodeURIComponent(experimentId)}/probe`, {
           method: 'POST',
