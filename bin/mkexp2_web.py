@@ -2982,55 +2982,6 @@ HTML = r"""<!doctype html>
       color: #e7eef2;
       font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
-    .action-output:empty {
-      display: none;
-    }
-    .action-card {
-      display: grid;
-      gap: 8px;
-      margin-bottom: 12px;
-      padding: 10px 12px;
-      border: 1px solid var(--border);
-      border-left: 4px solid var(--border);
-      border-radius: 6px;
-      background: #fbfcfd;
-    }
-    .action-card.running {
-      border-left-color: var(--accent);
-    }
-    .action-card.ok {
-      border-left-color: var(--ok);
-    }
-    .action-card.fail {
-      border-left-color: var(--danger);
-    }
-    .action-title {
-      font-weight: 750;
-    }
-    .action-card.running .action-title {
-      color: var(--accent);
-    }
-    .action-card.ok .action-title {
-      color: var(--ok);
-    }
-    .action-card.fail .action-title {
-      color: var(--danger);
-    }
-    .action-message {
-      color: var(--muted);
-    }
-    .action-json pre {
-      max-height: 180px;
-      overflow: auto;
-      overflow-wrap: anywhere;
-      white-space: pre-wrap;
-      margin: 8px 0 0;
-      padding: 8px;
-      border-radius: 6px;
-      background: #101820;
-      color: #e7eef2;
-      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    }
     .probe-output {
       display: grid;
       gap: 16px;
@@ -3410,6 +3361,7 @@ HTML = r"""<!doctype html>
     }
     .plot-actions {
       justify-content: flex-end;
+      align-items: center;
     }
     .plot-option {
       display: inline-flex;
@@ -3454,10 +3406,6 @@ HTML = r"""<!doctype html>
       display: grid;
       gap: 8px;
       min-width: 0;
-      padding: 12px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: #fbfcfd;
     }
     .plot-box-title {
       font-weight: 750;
@@ -4496,14 +4444,14 @@ HTML = r"""<!doctype html>
           <div class="panel-header">
             <div>
               <div class="panel-title">Plots</div>
-              <div id="plots-summary" class="csv-summary">No plot action started.</div>
             </div>
-            <div class="actions plot-actions">
+            <div class="actions plot-actions check-action">
+              <span id="plot-indicator" class="check-indicator hidden" aria-live="polite"></span>
+              <button id="plot-results">Generate Plots</button>
               <label class="plot-option" id="plot-no-docker-label" title="Use host R instead of Docker">
                 <input id="plot-no-docker" type="checkbox">
                 <span>No docker</span>
               </label>
-              <button id="plot-results">Generate Plots</button>
             </div>
           </div>
           <div class="panel-body plot-manager">
@@ -4524,7 +4472,6 @@ HTML = r"""<!doctype html>
               <span class="csv-summary">Artifact label</span>
               <input id="plot-label" type="text" placeholder="Auto-generated label">
             </label>
-            <div id="plot-action-output" class="action-output"></div>
             <section class="plot-box">
               <div class="plot-artifact-toolbar">
                 <div class="plot-box-title">Artifacts</div>
@@ -4822,6 +4769,22 @@ HTML = r"""<!doctype html>
       indicator.title = '';
       indicator.removeAttribute('aria-label');
     }
+    function setPlotIndicator(ok, tooltip) {
+      const indicator = document.getElementById('plot-indicator');
+      if (!indicator) return;
+      indicator.className = `check-indicator ${ok ? 'ok' : 'bad'}`;
+      indicator.textContent = ok ? '✓' : '!';
+      indicator.title = tooltip || (ok ? 'Plot generation completed.' : 'Plot generation failed.');
+      indicator.setAttribute('aria-label', indicator.title);
+    }
+    function clearPlotIndicator() {
+      const indicator = document.getElementById('plot-indicator');
+      if (!indicator) return;
+      indicator.className = 'check-indicator hidden';
+      indicator.textContent = '';
+      indicator.title = '';
+      indicator.removeAttribute('aria-label');
+    }
     function firstLines(text, limit = 6) {
       return stripAnsi(String(text || ''))
         .split(/\r?\n/)
@@ -4856,44 +4819,22 @@ HTML = r"""<!doctype html>
       if (kind === 'plot-artifacts') return action?.result?.commands?.[0]?.command || null;
       return null;
     }
-    function renderActionStatus(targetId, title, action, kind) {
-      const target = document.getElementById(targetId);
-      if (!target) return;
-      const done = action?.status && action.status !== 'running';
-      const ok = done && actionSucceeded(action, kind);
-      const failed = done && !ok;
-      const command = actionCommand(action, kind);
-      target.innerHTML = '';
-      const card = document.createElement('div');
-      card.className = 'action-card ' + (action?.status === 'running' ? 'running' : ok ? 'ok' : failed ? 'fail' : 'running');
-      const header = document.createElement('div');
-      header.className = 'action-title';
-      header.textContent = action?.status === 'running'
-        ? `${title} running...`
-        : ok
-          ? `${title} completed`
-          : `${title} failed`;
-      card.appendChild(header);
-      const message = document.createElement('div');
-      message.className = 'action-message';
-      if (action?.status === 'running') {
-        message.textContent = 'The command is still running on the server.';
-      } else if (command) {
-        message.textContent = `Return code ${command.returncode}; elapsed ${command.elapsed_seconds ?? '?'}s.`;
-      } else {
-        message.textContent = 'No command details available.';
+    function plotActionTooltip(action) {
+      const command = actionCommand(action, 'plot-artifacts');
+      const prefix = actionSucceeded(action, 'plot-artifacts')
+        ? 'Plot generation completed.'
+        : 'Plot generation failed.';
+      const details = [];
+      if (command) {
+        details.push(`Return code ${command.returncode}; elapsed ${command.elapsed_seconds ?? '?'}s.`);
+        const stderr = firstLines(command.stderr || '', 4);
+        const stdout = firstLines(command.stdout || '', 4);
+        if (stderr) details.push(stderr);
+        else if (stdout && !actionSucceeded(action, 'plot-artifacts')) details.push(stdout);
+      } else if (action?.error) {
+        details.push(String(action.error));
       }
-      card.appendChild(message);
-      const details = document.createElement('details');
-      details.className = 'action-json';
-      const summary = document.createElement('summary');
-      summary.textContent = 'Action JSON';
-      const pre = document.createElement('pre');
-      pre.textContent = JSON.stringify(action, null, 2);
-      details.appendChild(summary);
-      details.appendChild(pre);
-      card.appendChild(details);
-      target.appendChild(card);
+      return [prefix, ...details].filter(Boolean).join('\n');
     }
     function renderCheckResult(result, saveResult) {
       const payload = parseCheckJson(result);
@@ -6875,6 +6816,7 @@ HTML = r"""<!doctype html>
     function clearSelectedExperiment() {
       state.selected = null;
       clearCheckIndicator();
+      clearPlotIndicator();
       clearAlgorithmChoices();
       state.results = [];
       state.resultsFor = null;
@@ -7106,6 +7048,7 @@ HTML = r"""<!doctype html>
       state.selected = id;
       state.algorithmLoadSeq += 1;
       clearCheckIndicator();
+      clearPlotIndicator();
       state.results = [];
       state.resultsFor = null;
       state.stats = null;
@@ -7161,6 +7104,7 @@ HTML = r"""<!doctype html>
       document.querySelector('.app').classList.add('share-mode');
       editor.readOnly = true;
       clearCheckIndicator();
+      clearPlotIndicator();
       const data = await api(`/api/share/${encodeURIComponent(shareId)}/experiment`);
       const id = data.id;
       state.selected = id;
@@ -7688,8 +7632,6 @@ HTML = r"""<!doctype html>
       }
     }
     function renderPlotPanel(action = null) {
-      const summary = document.getElementById('plots-summary');
-      if (!summary) return;
       applyPlotBackendStatus();
       renderPlotCatalog();
       renderPlotSources();
@@ -7702,22 +7644,14 @@ HTML = r"""<!doctype html>
         button.title = error || 'Generate selected plot artifacts';
       }
       if (!state.selected) {
-        summary.textContent = 'No experiment selected.';
+        clearPlotIndicator();
         return;
       }
-      const actionOutput = document.getElementById('plot-action-output');
       if (action?.status === 'running') {
-        if (actionOutput) actionOutput.innerHTML = '';
+        clearPlotIndicator();
       } else if (action) {
-        renderActionStatus('plot-action-output', 'Plot generation', action, 'plot-artifacts');
+        setPlotIndicator(actionSucceeded(action, 'plot-artifacts'), plotActionTooltip(action));
       }
-      summary.textContent = action?.status === 'running'
-        ? 'Plot generation is running.'
-        : action?.status === 'completed'
-          ? (actionSucceeded(action, 'plot-artifacts') ? 'Plot generation completed.' : 'Plot generation failed.')
-          : (state.plotArtifactsFor === state.selected
-              ? `${(state.plotArtifacts?.artifacts || []).length} managed artifact(s).`
-              : 'Loading plot artifacts...');
       renderSelectedPlotArtifact();
     }
     function applyPlotBackendStatus() {
@@ -7928,6 +7862,7 @@ HTML = r"""<!doctype html>
       if (!state.selected) return;
       setView('plots-view').catch(err => out(String(err)));
       applyPlotBackendStatus();
+      clearPlotIndicator();
       const error = validatePlotSelection();
       if (error) {
         out(error);
