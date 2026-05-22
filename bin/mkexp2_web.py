@@ -2464,7 +2464,7 @@ HTML = r"""<!doctype html>
     }
     .experiment-row.active {
       border-color: var(--accent);
-      border-left-color: transparent;
+      border-left-color: var(--accent);
       background: #e8f5f3;
     }
     .experiment-row.locked {
