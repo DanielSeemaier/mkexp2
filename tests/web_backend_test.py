@@ -619,10 +619,16 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('aria-label="Archived experiments"', mkexp2_web.HTML)
         self.assertIn('id="archive-modal"', mkexp2_web.HTML)
         self.assertIn('id="archive-refresh"', mkexp2_web.HTML)
+        self.assertIn('id="archive-search"', mkexp2_web.HTML)
         self.assertIn('id="archive-experiment"', mkexp2_web.HTML)
         self.assertIn("archivedOpenDirs", mkexp2_web.HTML)
+        self.assertIn("archiveQuery", mkexp2_web.HTML)
+        self.assertIn("function fuzzyMatch", mkexp2_web.HTML)
+        self.assertIn("function selectArchivedExperiment", mkexp2_web.HTML)
         self.assertIn("renderArchivedExperimentTree", mkexp2_web.HTML)
         self.assertIn("/api/experiments/archived", mkexp2_web.HTML)
+        self.assertIn("/api/experiments/subdirectories", mkexp2_web.HTML)
+        self.assertIn("/api/experiments/archive-subdirectory", mkexp2_web.HTML)
         self.assertIn("/archive", mkexp2_web.HTML)
         self.assertIn("/unarchive", mkexp2_web.HTML)
         self.assertIn('Danger Zone', mkexp2_web.HTML)
@@ -648,7 +654,10 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("async function deleteTag", mkexp2_web.HTML)
         self.assertIn("/api/tags/${encodeURIComponent(name)}", mkexp2_web.HTML)
         self.assertIn('id="archive-codex-experiments"', mkexp2_web.HTML)
+        self.assertIn('id="archive-subdir-select"', mkexp2_web.HTML)
+        self.assertIn('id="archive-subdir-experiments"', mkexp2_web.HTML)
         self.assertIn("async function archiveCodexExperiments", mkexp2_web.HTML)
+        self.assertIn("async function archiveSubdirectoryExperiments", mkexp2_web.HTML)
         self.assertIn("/api/tags/Codex/archive-experiments", mkexp2_web.HTML)
         self.assertIn("starred or submit-locked", mkexp2_web.HTML)
         self.assertLess(mkexp2_web.HTML.index('class="tag-controls"'), mkexp2_web.HTML.index('id="share-experiment"'))
@@ -1243,8 +1252,9 @@ class WebBackendTest(unittest.TestCase):
             self.assertEqual([item["id"] for item in app.list_experiments(force=True)], ["other"])
             self.assertEqual([item["id"] for item in app.list_archived_experiments(force=True)], ["2026/exp.archived"])
             self.assertEqual(app.read_pins()["pinned"], ["other"])
-            with self.assertRaises(ValueError):
-                app.results("2026/exp.archived")
+            self.assertEqual(app.results("2026/exp.archived")["files"], [])
+            self.assertFalse(app.description("2026/exp.archived")["exists"])
+            self.assertEqual(app.experiment_download_options("2026/exp.archived")["id"], "2026/exp.archived")
 
             restored = app.unarchive_experiment("2026/exp.archived")
             self.assertTrue(restored["unarchived"])
@@ -1298,6 +1308,36 @@ class WebBackendTest(unittest.TestCase):
                 [item["id"] for item in app.list_experiments(force=True)],
                 ["codex-locked", "codex-pinned", "manual"],
             )
+
+    def test_archive_subdirectory_skips_pinned_and_locked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            for experiment_id in ["2026/free", "2026/pinned", "2026/locked", "2025/old"]:
+                path = repo / experiment_id
+                path.mkdir(parents=True)
+                (path / "Experiment").write_text("ExperimentX() { :; }\n")
+            (repo / "2026" / "locked" / ".mkexp2").mkdir()
+            (repo / "2026" / "locked" / ".mkexp2" / "submit.lock").write_text("started_at=now\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+            app.write_pins(["2026/pinned"])
+
+            subdirs = app.experiment_subdirectories()["directories"]
+            self.assertEqual({item["id"] for item in subdirs}, {"2026", "2025"})
+
+            result = app.archive_subdirectory_experiments("2026")
+
+            self.assertEqual(result["matching"], 3)
+            self.assertEqual([item["id"] for item in result["archived"]], ["2026/free"])
+            self.assertEqual([item["id"] for item in result["skipped_pinned"]], ["2026/pinned"])
+            self.assertEqual([item["id"] for item in result["skipped_locked"]], ["2026/locked"])
+            self.assertEqual(result["failed"], [])
+            self.assertTrue((repo / "2026" / "free.archived" / "Experiment").is_file())
+            self.assertTrue((repo / "2026" / "pinned" / "Experiment").is_file())
+            self.assertTrue((repo / "2026" / "locked" / "Experiment").is_file())
+            self.assertTrue((repo / "2025" / "old" / "Experiment").is_file())
+
+            with self.assertRaisesRegex(ValueError, "invalid directory"):
+                app.archive_subdirectory_experiments("../escape")
 
     def test_archive_and_unarchive_reject_collisions_and_bad_paths(self):
         with tempfile.TemporaryDirectory() as tmp:

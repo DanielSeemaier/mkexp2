@@ -717,6 +717,13 @@ class Mkexp2WebApp:
             raise ValueError(f"experiment is archived: {experiment_id}")
         return self.experiment_path(experiment_id)
 
+    def readable_experiment_path(self, experiment_id):
+        experiment_id = str(experiment_id or "").strip().strip("/")
+        path = self.experiment_path(experiment_id)
+        if not path.is_dir() or not (path / "Experiment").is_file():
+            raise ValueError(f"experiment not found: {experiment_id}")
+        return path
+
     def validate_visible_experiment_id(self, experiment_id):
         parts = str(experiment_id or "").split("/")
         if any(part in EXPERIMENT_SKIP_DIRS or part.startswith(".") for part in parts):
@@ -828,6 +835,22 @@ class Mkexp2WebApp:
         self._archived_experiments_cache = experiments
         self._archived_experiments_cache_at = now
         return experiments
+
+    def experiment_subdirectories(self):
+        directories = {}
+        for experiment in self.list_experiments(force=True):
+            parts = experiment["id"].split("/")[:-1]
+            for index in range(1, len(parts) + 1):
+                directory = "/".join(parts[:index])
+                item = directories.setdefault(directory, {"id": directory, "count": 0, "latest": 0})
+                item["count"] += 1
+                item["latest"] = max(item["latest"], float(experiment.get("created_at_epoch") or 0))
+        return {
+            "directories": sorted(
+                directories.values(),
+                key=lambda item: (-item["latest"], item["id"].casefold()),
+            )
+        }
 
     def invalidate_experiments_cache(self):
         self._experiments_cache = None
@@ -970,7 +993,7 @@ class Mkexp2WebApp:
 
     def column_visibility(self, experiment_id):
         experiment_id = str(experiment_id or "").strip().strip("/")
-        path = self.active_experiment_path(experiment_id)
+        path = self.readable_experiment_path(experiment_id)
         if not path.is_dir() or not (path / "Experiment").is_file():
             raise ValueError(f"experiment not found: {experiment_id}")
         state = self.read_column_visibility_state()
@@ -1391,6 +1414,9 @@ class Mkexp2WebApp:
     def command(self, experiment_id, argv, timeout=60):
         return run_command([str(self.mkexp2), *argv], cwd=self.active_experiment_path(experiment_id), timeout=timeout)
 
+    def read_command(self, experiment_id, argv, timeout=60):
+        return run_command([str(self.mkexp2), *argv], cwd=self.readable_experiment_path(experiment_id), timeout=timeout)
+
     def probe_payload(self, experiment_id, payload):
         selector = payload.get("selector")
         flags = payload.get("flags") or []
@@ -1410,7 +1436,7 @@ class Mkexp2WebApp:
             if flag not in allowed_flags:
                 raise ValueError(f"unsupported probe flag: {flag}")
             argv.append(flag)
-        result = self.command(experiment_id, argv, timeout=60)
+        result = self.read_command(experiment_id, argv, timeout=60)
         if result["returncode"] == 0 and result["stdout"].strip():
             try:
                 parsed = json.loads(result["stdout"])
@@ -1628,6 +1654,62 @@ class Mkexp2WebApp:
 
         return {
             "tag": tag_name,
+            "matching": matching,
+            "archived": archived,
+            "skipped_locked": skipped_locked,
+            "skipped_pinned": skipped_pinned,
+            "failed": failed,
+            "archived_count": len(archived),
+            "skipped_locked_count": len(skipped_locked),
+            "skipped_pinned_count": len(skipped_pinned),
+            "failed_count": len(failed),
+        }
+
+    def archive_subdirectory_experiments(self, directory):
+        directory = str(directory or "").strip().strip("/")
+        if not directory:
+            raise ValueError("directory is required")
+        parts = directory.split("/")
+        if (
+            any(part in ("", ".", "..") for part in parts)
+            or any(part in EXPERIMENT_SKIP_DIRS or part.startswith(".") for part in parts)
+            or not all(re.match(r"^[A-Za-z0-9._-]+$", part) for part in parts)
+        ):
+            raise ValueError("invalid directory")
+
+        pinned = set(self.read_pins().get("pinned") or [])
+        archived = []
+        skipped_locked = []
+        skipped_pinned = []
+        failed = []
+        matching = 0
+
+        prefix = f"{directory}/"
+        for experiment in list(self.list_experiments(force=True)):
+            experiment_id = experiment["id"]
+            if not experiment_id.startswith(prefix):
+                continue
+            matching += 1
+            if experiment_id in pinned:
+                skipped_pinned.append({"id": experiment_id, "reason": "pinned"})
+                continue
+            lock = experiment.get("submit_lock") or {}
+            if lock.get("locked"):
+                skipped_locked.append(
+                    {
+                        "id": experiment_id,
+                        "reason": "submit_locked",
+                        "submit_lock": lock,
+                    }
+                )
+                continue
+            try:
+                archived.append(self.archive_experiment(experiment_id))
+            except Exception as exc:  # keep bulk maintenance useful despite per-item collisions
+                failed.append({"id": experiment_id, "error": str(exc)})
+
+        return {
+            "directory": directory,
             "matching": matching,
             "archived": archived,
             "skipped_locked": skipped_locked,
@@ -2063,7 +2145,7 @@ class Mkexp2WebApp:
         }
 
     def results(self, experiment_id):
-        path = self.active_experiment_path(experiment_id)
+        path = self.readable_experiment_path(experiment_id)
         results_dir = path / "results"
         files = []
         if results_dir.is_dir():
@@ -2082,7 +2164,7 @@ class Mkexp2WebApp:
         return {"files": files}
 
     def description(self, experiment_id):
-        path = self.active_experiment_path(experiment_id)
+        path = self.readable_experiment_path(experiment_id)
         description_file = path / "description.md"
         if not description_file.is_file():
             return {"exists": False, "path": str(description_file), "content": ""}
@@ -2106,7 +2188,7 @@ class Mkexp2WebApp:
         return result
 
     def experiment_download_options(self, experiment_id):
-        path = self.active_experiment_path(experiment_id)
+        path = self.readable_experiment_path(experiment_id)
         directories = []
         root_files = []
         for child in sorted(path.iterdir(), key=lambda item: item.name.lower()):
@@ -2149,7 +2231,7 @@ class Mkexp2WebApp:
         return root_files + selected
 
     def experiment_archive(self, experiment_id, include_dirs=None):
-        path = self.active_experiment_path(experiment_id)
+        path = self.readable_experiment_path(experiment_id)
         base = download_filename(path.name)
         entries = self.archive_entries(path, include_dirs)
         tar_command = shutil.which("tar")
@@ -2202,7 +2284,7 @@ class Mkexp2WebApp:
             raise
 
     def plots_info(self, experiment_id):
-        path = self.active_experiment_path(experiment_id)
+        path = self.readable_experiment_path(experiment_id)
         pdf = path / "plots.pdf"
         if not pdf.is_file():
             return {"exists": False, "path": str(pdf)}
@@ -2264,7 +2346,7 @@ class Mkexp2WebApp:
         return payload
 
     def plot_artifacts_dir(self, experiment_id):
-        return self.active_experiment_path(experiment_id) / "plots"
+        return self.readable_experiment_path(experiment_id) / "plots"
 
     def plot_artifacts_index_path(self, experiment_id):
         return self.plot_artifacts_dir(experiment_id) / PLOT_INDEX_FILE
@@ -2332,7 +2414,7 @@ class Mkexp2WebApp:
         artifacts = []
         for artifact in index.get("artifacts", []):
             rel_path = str(artifact.get("path") or "")
-            pdf = (self.active_experiment_path(experiment_id) / rel_path).resolve()
+            pdf = (self.readable_experiment_path(experiment_id) / rel_path).resolve()
             if not rel_path.startswith("plots/") or not pdf.is_file():
                 continue
             artifacts.append(self.hydrated_plot_artifact(artifact, pdf))
@@ -2344,8 +2426,8 @@ class Mkexp2WebApp:
             raise ValueError("invalid plot artifact id")
         for artifact in self.list_plot_artifacts(experiment_id).get("artifacts", []):
             if artifact.get("id") == artifact_id:
-                path = (self.active_experiment_path(experiment_id) / artifact.get("path", "")).resolve()
-                root = self.active_experiment_path(experiment_id).resolve()
+                path = (self.readable_experiment_path(experiment_id) / artifact.get("path", "")).resolve()
+                root = self.readable_experiment_path(experiment_id).resolve()
                 if root not in path.parents:
                     raise ValueError("plot artifact path escapes experiment")
                 return path
@@ -2575,7 +2657,7 @@ class Mkexp2WebApp:
         return self.create_plot_artifacts_action(experiment_id, payload)
 
     def logs_root(self, experiment_id):
-        return self.active_experiment_path(experiment_id) / "logs"
+        return self.readable_experiment_path(experiment_id) / "logs"
 
     def log_path(self, experiment_id, rel_path):
         logs_root = self.logs_root(experiment_id).resolve()
@@ -3001,6 +3083,9 @@ HTML = r"""<!doctype html>
       max-height: 60vh;
       overflow: auto;
     }
+    .archive-search {
+      margin-bottom: 10px;
+    }
     .archive-item {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
@@ -3022,6 +3107,11 @@ HTML = r"""<!doctype html>
       color: var(--muted);
       font-size: 12px;
       overflow-wrap: anywhere;
+    }
+    .archive-actions {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
     }
     .share-fields {
       display: grid;
@@ -4956,6 +5046,15 @@ HTML = r"""<!doctype html>
     .settings-tool button {
       flex: 0 0 auto;
     }
+    .settings-inline-tool {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      flex: 0 0 auto;
+    }
+    .settings-inline-tool select {
+      max-width: 260px;
+    }
     .settings-section {
       display: grid;
       gap: 8px;
@@ -5292,6 +5391,7 @@ HTML = r"""<!doctype html>
           </button>
         </div>
         <div class="modal-body">
+          <input id="archive-search" class="archive-search" type="search" placeholder="Search archived experiments">
           <div id="archive-list" class="archive-list csv-empty">Open the dialog to load archived experiments.</div>
         </div>
         <div class="modal-footer">
@@ -5442,6 +5542,20 @@ HTML = r"""<!doctype html>
             </button>
           </div>
           <div id="archive-codex-output" class="csv-empty hidden"></div>
+          <div class="settings-tool">
+            <div>
+              <div class="settings-tool-title">Archive subdirectory</div>
+              <div class="csv-summary">Archive active experiments in one subdirectory, skipping starred or submit-locked experiments.</div>
+            </div>
+            <div class="settings-inline-tool">
+              <select id="archive-subdir-select" title="Subdirectory"></select>
+              <button id="archive-subdir-experiments" class="icon-text-button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+                <span>Archive</span>
+              </button>
+            </div>
+          </div>
+          <div id="archive-subdir-output" class="csv-empty hidden"></div>
           <div class="settings-tool">
             <div>
               <div class="settings-tool-title">Spack R library cache</div>
@@ -5837,6 +5951,7 @@ HTML = r"""<!doctype html>
       experiments: [],
       archivedExperiments: [],
       selected: null,
+      selectedArchived: false,
       pinnedExperiments: new Set(),
       tags: [],
       tagPalette: DEFAULT_TAG_COLOR_PALETTE,
@@ -5858,6 +5973,8 @@ HTML = r"""<!doctype html>
       config: { name_template: '%Y.%m.%d-<name>' },
       openDirs: new Set(),
       archivedOpenDirs: new Set(),
+      archiveQuery: '',
+      experimentSubdirectories: [],
       results: [],
       resultsFor: null,
       stats: null,
@@ -6861,6 +6978,7 @@ HTML = r"""<!doctype html>
       loadUiSettings().catch(err => out(String(err)));
       loadSettingsColumnVisibility().catch(err => out(String(err)));
       refreshTags().catch(err => out(String(err)));
+      loadExperimentSubdirectories().catch(err => out(String(err)));
       loadSpackCacheInfo().catch(err => out(String(err)));
     }
     function closeSettingsDialog() {
@@ -7029,7 +7147,7 @@ HTML = r"""<!doctype html>
         editButton.disabled = true;
         return;
       }
-      editButton.disabled = state.descriptionFor !== state.selected || state.shared;
+      editButton.disabled = state.descriptionFor !== state.selected || state.shared || state.selectedArchived;
       if (state.descriptionFor !== state.selected || !state.description) {
         state.descriptionEditing = false;
         rendered.className = 'csv-empty';
@@ -7039,7 +7157,7 @@ HTML = r"""<!doctype html>
         return;
       }
       const content = state.description.content || '';
-      if (state.descriptionEditing && !state.shared) {
+      if (state.descriptionEditing && !state.shared && !state.selectedArchived) {
         rendered.classList.add('hidden');
         editorNode.classList.remove('hidden');
         actions.classList.remove('hidden');
@@ -7068,7 +7186,7 @@ HTML = r"""<!doctype html>
       renderDescriptionWorkspace();
     }
     function editDescription() {
-      if (!state.selected || state.shared || state.descriptionFor !== state.selected) return;
+      if (!state.selected || state.shared || state.selectedArchived || state.descriptionFor !== state.selected) return;
       const editorNode = document.getElementById('description-editor');
       editorNode.value = state.description?.content || '';
       state.descriptionEditing = true;
@@ -7080,7 +7198,7 @@ HTML = r"""<!doctype html>
       renderDescriptionWorkspace();
     }
     async function saveDescription() {
-      if (!state.selected || state.shared) return;
+      if (!state.selected || state.shared || state.selectedArchived) return;
       const experimentId = state.selected;
       const description = document.getElementById('description-editor').value;
       await withBusyButton('description-save', 'Saving...', async () => {
@@ -7528,6 +7646,16 @@ HTML = r"""<!doctype html>
       const selector = document.getElementById('column-selector');
       const allButton = document.getElementById('columns-all');
       const noneButton = document.getElementById('columns-none');
+      const parseButton = document.getElementById('parse-results');
+      const statsButton = document.getElementById('load-stats');
+      if (parseButton && parseButton.dataset.busy !== '1') {
+        parseButton.disabled = !state.selected || state.selectedArchived;
+        parseButton.title = state.selectedArchived ? 'Unarchive before parsing logs.' : 'Parse logs';
+      }
+      if (statsButton && statsButton.dataset.busy !== '1') {
+        statsButton.disabled = !state.selected || state.selectedArchived;
+        statsButton.title = state.selectedArchived ? 'Unarchive before generating stats.' : 'Generate stats';
+      }
       state.selectedResults = (state.selectedResults || []).filter(name => findResult(name));
       renderResultFileTabs();
       allButton.disabled = true;
@@ -8093,24 +8221,26 @@ HTML = r"""<!doctype html>
         select.appendChild(option);
       }
       select.value = currentTag?.name || '';
-      select.disabled = !state.selected || state.shared;
-      select.title = state.selected ? 'Experiment tag' : 'Select an experiment first';
+      select.disabled = !state.selected || state.shared || state.selectedArchived;
+      select.title = state.selectedArchived
+        ? 'Unarchive before changing tags.'
+        : (state.selected ? 'Experiment tag' : 'Select an experiment first');
       renderExperimentActionButtons();
     }
     function renderExperimentActionButtons() {
       const copyButton = document.getElementById('copy-experiment');
       if (copyButton) {
-        copyButton.disabled = !state.selected || state.shared;
+        copyButton.disabled = !state.selected || state.shared || state.selectedArchived;
         copyButton.title = state.shared
           ? 'Shared experiments cannot be copied from this view.'
-          : (state.selected ? 'Copy experiment' : 'Select an experiment first');
+          : (state.selectedArchived ? 'Unarchive before copying.' : (state.selected ? 'Copy experiment' : 'Select an experiment first'));
       }
       const shareButton = document.getElementById('share-experiment');
       if (shareButton) {
-        shareButton.disabled = !state.selected || state.shared;
+        shareButton.disabled = !state.selected || state.shared || state.selectedArchived;
         shareButton.title = state.shared
           ? 'Already viewing a shared experiment.'
-          : (state.selected ? 'Share experiment' : 'Select an experiment first');
+          : (state.selectedArchived ? 'Unarchive before sharing.' : (state.selected ? 'Share experiment' : 'Select an experiment first'));
       }
       const downloadButton = document.getElementById('download-experiment');
       if (downloadButton) {
@@ -8297,6 +8427,24 @@ HTML = r"""<!doctype html>
         output.title = '';
       }
     }
+    function renderArchiveBulkResult(outputId, result) {
+      const output = document.getElementById(outputId);
+      if (!output) return;
+      const archivedCount = result?.archived_count || 0;
+      const lockedCount = result?.skipped_locked_count || 0;
+      const pinnedCount = result?.skipped_pinned_count || 0;
+      const failedCount = result?.failed_count || 0;
+      const matching = result?.matching || 0;
+      const parts = [
+        `${archivedCount} archived`,
+        `${pinnedCount} starred skipped`,
+        `${lockedCount} submit-locked skipped`,
+      ];
+      if (failedCount) parts.push(`${failedCount} failed`);
+      output.className = `csv-empty${failedCount ? ' status-bad' : ''}`;
+      output.textContent = `${matching} matching; ${parts.join('; ')}.`;
+      output.title = failedCount ? (result.failed || []).map(item => `${item.id}: ${item.error}`).join('\n') : '';
+    }
     async function archiveCodexExperiments() {
       const message = 'Archive all active, unstarred, unlocked experiments tagged Codex? Starred or submitted experiments will be skipped.';
       if (!confirm(message)) return;
@@ -8311,6 +8459,58 @@ HTML = r"""<!doctype html>
         if (state.selected && archivedIds.has(state.selected)) clearSelectedExperiment();
         await Promise.all([
           refreshExperiments({ force: true }),
+          loadArchivedExperiments({ force: true }).catch(err => out(String(err)))
+        ]);
+      });
+    }
+    function renderExperimentSubdirectories() {
+      const select = document.getElementById('archive-subdir-select');
+      const button = document.getElementById('archive-subdir-experiments');
+      if (!select || !button) return;
+      select.innerHTML = '';
+      const directories = state.experimentSubdirectories || [];
+      if (!directories.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'No subdirectories';
+        select.appendChild(option);
+        select.disabled = true;
+        button.disabled = true;
+        return;
+      }
+      for (const directory of directories) {
+        const option = document.createElement('option');
+        option.value = directory.id;
+        option.textContent = `${directory.id} (${directory.count})`;
+        select.appendChild(option);
+      }
+      select.disabled = false;
+      button.disabled = false;
+    }
+    async function loadExperimentSubdirectories() {
+      const data = await api('/api/experiments/subdirectories');
+      state.experimentSubdirectories = data.directories || [];
+      renderExperimentSubdirectories();
+      return state.experimentSubdirectories;
+    }
+    async function archiveSubdirectoryExperiments() {
+      const select = document.getElementById('archive-subdir-select');
+      const directory = select?.value || '';
+      if (!directory) return;
+      const message = `Archive all active, unstarred, unlocked experiments in "${directory}"? Starred or submitted experiments will be skipped.`;
+      if (!confirm(message)) return;
+      const button = document.getElementById('archive-subdir-experiments');
+      await withBusyButton(button, 'Archiving...', async () => {
+        const result = await api('/api/experiments/archive-subdirectory', {
+          method: 'POST',
+          body: JSON.stringify({ directory })
+        });
+        renderArchiveBulkResult('archive-subdir-output', result);
+        const archivedIds = new Set((result.archived || []).map(item => item.id));
+        if (state.selected && archivedIds.has(state.selected)) clearSelectedExperiment();
+        await Promise.all([
+          refreshExperiments({ force: true }),
+          loadExperimentSubdirectories().catch(err => out(String(err))),
           loadArchivedExperiments({ force: true }).catch(err => out(String(err)))
         ]);
       });
@@ -8430,7 +8630,7 @@ HTML = r"""<!doctype html>
         const id = prefix ? `${prefix}/${name}` : name;
         const details = document.createElement('details');
         details.className = 'experiment-folder archive-folder';
-        details.open = state.archivedOpenDirs.has(id);
+        details.open = Boolean(state.archiveQuery) || state.archivedOpenDirs.has(id);
         details.addEventListener('toggle', () => {
           if (details.open) state.archivedOpenDirs.add(id);
           else state.archivedOpenDirs.delete(id);
@@ -8469,27 +8669,60 @@ HTML = r"""<!doctype html>
       path.textContent = exp.id;
       text.appendChild(name);
       text.appendChild(path);
+      const actions = document.createElement('div');
+      actions.className = 'archive-actions';
+      const open = document.createElement('button');
+      open.textContent = 'Open';
+      open.title = `Open archived experiment ${exp.id}`;
+      open.onclick = () => selectArchivedExperiment(exp.id).catch(err => out(String(err)));
       const button = document.createElement('button');
       button.textContent = 'Unarchive';
       button.title = `Unarchive ${exp.id}`;
       button.onclick = () => unarchiveExperiment(exp.id, button).catch(err => out(String(err)));
       item.appendChild(text);
-      item.appendChild(button);
+      actions.appendChild(open);
+      actions.appendChild(button);
+      item.appendChild(actions);
       container.appendChild(item);
+    }
+    function fuzzyMatch(text, query) {
+      const haystack = String(text || '').toLowerCase();
+      const needle = String(query || '').trim().toLowerCase();
+      if (!needle) return true;
+      if (haystack.includes(needle)) return true;
+      let index = 0;
+      for (const char of needle) {
+        index = haystack.indexOf(char, index);
+        if (index === -1) return false;
+        index += 1;
+      }
+      return true;
+    }
+    function archivedExperimentMatches(exp, query) {
+      return fuzzyMatch(exp.id, query) || fuzzyMatch(exp.name, query) || fuzzyMatch(exp.label, query);
     }
     function renderArchivedExperiments() {
       const list = document.getElementById('archive-list');
       const summary = document.getElementById('archive-summary');
       const archived = state.archivedExperiments || [];
-      summary.textContent = `${archived.length} archived experiment${archived.length === 1 ? '' : 's'}.`;
+      const query = state.archiveQuery || '';
+      const filtered = archived.filter(exp => archivedExperimentMatches(exp, query));
+      summary.textContent = query
+        ? `${filtered.length} of ${archived.length} archived experiment${archived.length === 1 ? '' : 's'} matched.`
+        : `${archived.length} archived experiment${archived.length === 1 ? '' : 's'}.`;
       list.innerHTML = '';
       if (!archived.length) {
         list.className = 'archive-list csv-empty';
         list.textContent = 'No archived experiments.';
         return;
       }
+      if (!filtered.length) {
+        list.className = 'archive-list csv-empty';
+        list.textContent = 'No archived experiments match the search.';
+        return;
+      }
       list.className = 'archive-list';
-      renderArchivedExperimentTree(list, experimentTree(archived));
+      renderArchivedExperimentTree(list, experimentTree(filtered));
     }
     async function loadArchivedExperiments(options = {}) {
       const query = options.force ? '?refresh=1' : '';
@@ -8500,6 +8733,8 @@ HTML = r"""<!doctype html>
     }
     async function openArchiveDialog() {
       document.getElementById('archive-modal').classList.remove('hidden');
+      const search = document.getElementById('archive-search');
+      if (search) search.value = state.archiveQuery || '';
       await loadArchivedExperiments({ force: true }).catch(err => {
         const list = document.getElementById('archive-list');
         list.className = 'archive-list csv-empty status-bad';
@@ -8966,7 +9201,7 @@ HTML = r"""<!doctype html>
       if (!submitButton) return;
       const locked = Boolean(state.submitLock?.locked);
       const loadingAlgorithms = Boolean(state.algorithmLoading && state.algorithmLoadingFor === state.selected);
-      submitButton.disabled = state.submitBusy || loadingAlgorithms || locked || !state.selected;
+      submitButton.disabled = state.submitBusy || loadingAlgorithms || locked || !state.selected || state.selectedArchived;
       submitButton.classList.toggle('is-busy', state.submitBusy || loadingAlgorithms);
       if (state.submitBusy) {
         submitButton.innerHTML = '';
@@ -8978,25 +9213,38 @@ HTML = r"""<!doctype html>
         submitButton.setAttribute('aria-label', 'Loading submit choices');
       } else {
         submitButton.innerHTML = submitPlayIconHtml();
-        submitButton.title = locked ? submitLockMessage() : 'Submit selected algorithms';
-        submitButton.setAttribute('aria-label', locked ? submitLockMessage() : 'Submit selected algorithms');
+        const submitTitle = state.selectedArchived ? 'Unarchive before submitting.' : (locked ? submitLockMessage() : 'Submit selected algorithms');
+        submitButton.title = submitTitle;
+        submitButton.setAttribute('aria-label', submitTitle);
       }
       const clearButton = document.getElementById('clear-submit-lock');
-      if (clearButton) clearButton.disabled = !locked || !state.selected;
+      if (clearButton) clearButton.disabled = !locked || !state.selected || state.selectedArchived;
       const renameButton = document.getElementById('rename-experiment');
       if (renameButton) {
-        renameButton.disabled = locked || !state.selected;
-        renameButton.title = locked ? 'Cannot rename while submit is locked.' : '';
+        renameButton.disabled = locked || !state.selected || state.selectedArchived;
+        renameButton.title = state.selectedArchived ? 'Unarchive before renaming.' : (locked ? 'Cannot rename while submit is locked.' : '');
       }
       const archiveButton = document.getElementById('archive-experiment');
       if (archiveButton) {
-        archiveButton.disabled = locked || !state.selected;
-        archiveButton.title = locked ? 'Cannot archive while submit is locked.' : '';
+        archiveButton.disabled = locked || !state.selected || state.selectedArchived;
+        archiveButton.title = state.selectedArchived ? 'Already archived.' : (locked ? 'Cannot archive while submit is locked.' : '');
       }
       const deleteButton = document.getElementById('delete-experiment');
       if (deleteButton) {
-        deleteButton.disabled = locked || !state.selected;
-        deleteButton.title = locked ? 'Cannot delete while submit is locked.' : '';
+        deleteButton.disabled = locked || !state.selected || state.selectedArchived;
+        deleteButton.title = state.selectedArchived ? 'Unarchive before deleting.' : (locked ? 'Cannot delete while submit is locked.' : '');
+      }
+      const checkButton = document.getElementById('check');
+      if (checkButton && checkButton.dataset.busy !== '1') {
+        checkButton.disabled = !state.selected || state.selectedArchived || state.shared;
+        checkButton.title = state.selectedArchived
+          ? 'Unarchive before saving.'
+          : 'Save and validate the Experiment file';
+      }
+      const progressButton = document.getElementById('refresh-progress');
+      if (progressButton && progressButton.dataset.busy !== '1') {
+        progressButton.disabled = !state.selected || state.selectedArchived;
+        progressButton.title = state.selectedArchived ? 'Unarchive before checking progress.' : 'Reload progress';
       }
     }
     function renderAlgorithmLoading(experimentId) {
@@ -9142,11 +9390,15 @@ HTML = r"""<!doctype html>
         renderSubmitLock({ locked: false });
         return;
       }
+      if (state.selectedArchived) {
+        renderSubmitLock({ locked: false });
+        return;
+      }
       const lock = await api(`/api/experiments/${encodeURIComponent(state.selected)}/submit-lock`);
       renderSubmitLock(lock);
     }
     async function clearSubmitLock() {
-      if (!state.selected) return;
+      if (!state.selected || state.selectedArchived) return;
       await withBusyButton('clear-submit-lock', 'Unlocking...', async () => {
         const result = await api(`/api/experiments/${encodeURIComponent(state.selected)}/submit-lock`, { method: 'DELETE' });
         renderSubmitLock(result.submit_lock);
@@ -9154,6 +9406,7 @@ HTML = r"""<!doctype html>
     }
     function clearSelectedExperiment() {
       state.selected = null;
+      state.selectedArchived = false;
       state.editorDirty = false;
       clearCheckIndicator();
       clearPlotIndicator();
@@ -9192,6 +9445,7 @@ HTML = r"""<!doctype html>
       setView('experiment-view').catch(err => out(String(err)));
       document.getElementById('selected-title').textContent = 'Experiment';
       document.getElementById('selected-path').textContent = '';
+      editor.readOnly = Boolean(state.shared);
       setEditorValue('');
       renderResultsWorkspace();
       renderStatsWorkspace();
@@ -9204,7 +9458,7 @@ HTML = r"""<!doctype html>
       renderExperimentsList();
     }
     async function archiveExperiment() {
-      if (!state.selected) return;
+      if (!state.selected || state.selectedArchived) return;
       if (state.submitLock?.locked) {
         alert('Cannot archive while submit is locked.');
         renderSubmitButton();
@@ -9223,7 +9477,7 @@ HTML = r"""<!doctype html>
       });
     }
     async function renameExperiment() {
-      if (!state.selected) return;
+      if (!state.selected || state.selectedArchived) return;
       if (state.submitLock?.locked) {
         alert('Cannot rename while submit is locked.');
         renderSubmitButton();
@@ -9385,7 +9639,7 @@ HTML = r"""<!doctype html>
       await withBusyButton('download-experiment', '', openDownloadDialog);
     }
     async function deleteExperiment() {
-      if (!state.selected) return;
+      if (!state.selected || state.selectedArchived) return;
       if (state.submitLock?.locked) {
         alert('Cannot delete while submit is locked.');
         renderSubmitButton();
@@ -9404,11 +9658,14 @@ HTML = r"""<!doctype html>
     }
     async function unarchiveExperiment(id, button) {
       await withBusyButton(button, 'Unarchiving...', async () => {
-        await api(`/api/experiments/${encodeURIComponent(id)}/unarchive`, { method: 'POST' });
+        const result = await api(`/api/experiments/${encodeURIComponent(id)}/unarchive`, { method: 'POST' });
         await Promise.all([
           refreshExperiments({ force: true }),
           loadArchivedExperiments({ force: true })
         ]);
+        if (state.selected === id && result.active_id) {
+          await selectExperiment(result.active_id);
+        }
       });
     }
     function startProgressPolling() {
@@ -9513,6 +9770,7 @@ HTML = r"""<!doctype html>
     async function loadProgress(options = {}) {
       const experimentId = options.experimentId || state.selected;
       if (!experimentId) return;
+      if (state.selectedArchived && experimentId === state.selected) return;
       const loadId = ++state.progressLoadSeq;
       if (!options.quiet) renderProgressLoading(experimentId);
       let result = null;
@@ -9534,6 +9792,7 @@ HTML = r"""<!doctype html>
     async function selectExperiment(id) {
       const selectionId = ++state.selectionSeq;
       state.selected = id;
+      state.selectedArchived = false;
       state.algorithmLoadSeq += 1;
       state.editorDirty = false;
       clearCheckIndicator();
@@ -9568,6 +9827,7 @@ HTML = r"""<!doctype html>
       state.plotLabelTouched = false;
       state.plotGenerationRunning = false;
       clearPlotPdfUrl();
+      editor.readOnly = Boolean(state.shared);
       setView('experiment-view').catch(err => out(String(err)));
       renderResultsWorkspace();
       renderStatsWorkspace();
@@ -9596,6 +9856,78 @@ HTML = r"""<!doctype html>
       loadDescription().catch(err => out(String(err)));
       await loadAlgorithms(id);
     }
+    async function selectArchivedExperiment(id) {
+      const selectionId = ++state.selectionSeq;
+      state.selected = id;
+      state.selectedArchived = true;
+      state.algorithmLoadSeq += 1;
+      state.editorDirty = false;
+      clearCheckIndicator();
+      clearPlotIndicator();
+      clearAlgorithmChoices();
+      state.results = [];
+      state.resultsFor = null;
+      state.stats = null;
+      state.statsFor = null;
+      state.selectedResults = [];
+      state.compareColumnModes = {};
+      state.columnVisibility = {};
+      state.columnVisibilityFor = null;
+      state.description = null;
+      state.descriptionFor = null;
+      state.descriptionEditing = false;
+      state.downloadOptions = null;
+      state.downloadOptionsFor = null;
+      state.logsDir = '';
+      state.logsListing = null;
+      state.logsFor = null;
+      state.selectedLog = '';
+      state.logContent = null;
+      state.submitLock = { locked: false, fields: {} };
+      state.plotSources = null;
+      state.plotSourcesFor = null;
+      state.plotSourcesInitializedFor = null;
+      state.selectedPlotSources = new Set();
+      state.externalPlotSources = [];
+      state.plotArtifacts = null;
+      state.plotArtifactsFor = null;
+      state.selectedPlotArtifact = '';
+      state.plotLabelTouched = false;
+      state.plotGenerationRunning = false;
+      state.progressLoadSeq += 1;
+      clearPlotPdfUrl();
+      editor.readOnly = true;
+      setView('experiment-view').catch(err => out(String(err)));
+      renderResultsWorkspace();
+      renderStatsWorkspace();
+      renderDescriptionWorkspace();
+      renderLogsWorkspace();
+      renderSubmitLock({ locked: false });
+      const progressBox = document.getElementById('progress-output');
+      progressBox.className = 'csv-empty';
+      progressBox.textContent = 'Archived experiment.';
+      const list = document.getElementById('algorithm-list');
+      list.className = 'csv-empty';
+      list.textContent = 'Archived experiment; unarchive before submitting.';
+      document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
+      renderTagSelect();
+      renderSubmitButton();
+      renderExperimentsList();
+      renderArchivedExperiments();
+      closeArchiveDialog();
+      const data = await api(`/api/experiments/${encodeURIComponent(id)}/experiment`);
+      if (state.selected !== id || state.selectionSeq !== selectionId) return;
+      clearTransientOutput();
+      document.getElementById('selected-title').textContent = id;
+      document.getElementById('selected-path').textContent = selectedPathText(data.path, data);
+      setEditorValue(data.experiment);
+      state.editorDirty = false;
+      setExperimentTagInState(id, data.tag || null);
+      renderSubmitLock(data.submit_lock || { locked: false });
+      renderTagSelect();
+      renderSubmitButton();
+      loadDescription().catch(err => out(String(err)));
+    }
     async function selectSharedExperiment(shareId) {
       state.shared = true;
       state.shareId = shareId;
@@ -9606,6 +9938,7 @@ HTML = r"""<!doctype html>
       const data = await api(`/api/share/${encodeURIComponent(shareId)}/experiment`);
       const id = data.id;
       state.selected = id;
+      state.selectedArchived = false;
       state.selectionSeq += 1;
       state.algorithmLoadSeq += 1;
       clearAlgorithmChoices();
@@ -9623,6 +9956,7 @@ HTML = r"""<!doctype html>
     }
     async function persistExperiment() {
       if (!state.selected) return;
+      if (state.selectedArchived) throw new Error('Archived experiments cannot be edited.');
       if (state.shared) throw new Error('Shared experiments cannot be edited.');
       const experiment = document.getElementById('experiment-editor').value;
       return await api(`/api/experiments/${encodeURIComponent(state.selected)}/experiment`, {
@@ -9646,7 +9980,7 @@ HTML = r"""<!doctype html>
       });
     }
     async function copyExperiment() {
-      if (!state.selected || state.shared) return;
+      if (!state.selected || state.shared || state.selectedArchived) return;
       const sourceId = state.selected;
       const name = document.getElementById('copy-name').value || suggestedCopyName();
       const nameTemplate = activeCopyTemplate();
@@ -9667,7 +10001,7 @@ HTML = r"""<!doctype html>
       });
     }
     async function checkExperiment() {
-      if (!state.selected) return;
+      if (!state.selected || state.selectedArchived || state.shared) return;
       const experimentId = state.selected;
       const button = document.getElementById('check');
       clearCheckIndicator();
@@ -9716,11 +10050,12 @@ HTML = r"""<!doctype html>
           results.push(detail);
         }
         renderProbeResult(results, null);
-        await loadAlgorithms(experimentId);
+        if (!state.selectedArchived) await loadAlgorithms(experimentId);
       });
     }
     async function loadAlgorithms(experimentId = state.selected, options = {}) {
       if (!experimentId) return;
+      if (state.selectedArchived && experimentId === state.selected) return;
       const loadId = ++state.algorithmLoadSeq;
       const isCurrent = () => state.selected === experimentId && state.algorithmLoadSeq === loadId;
       const selectedSelections = Array.isArray(options.selectedSelections) ? options.selectedSelections : null;
@@ -9746,7 +10081,7 @@ HTML = r"""<!doctype html>
       }
     }
     async function submitExperiment(force = false) {
-      if (!state.selected) return;
+      if (!state.selected || state.selectedArchived) return;
       const experimentId = state.selected;
       if (state.algorithmLoading) {
         out('Wait for algorithm loading to finish before submitting.');
@@ -9798,7 +10133,7 @@ HTML = r"""<!doctype html>
       await loadProgress({ quiet: true }).catch(() => {});
     }
     async function parseExperiment() {
-      if (!state.selected) return;
+      if (!state.selected || state.selectedArchived) return;
       await withBusyButton('parse-results', 'Parsing...', async () => {
         const action = await api(`/api/experiments/${encodeURIComponent(state.selected)}/parse`, {
           method: 'POST',
@@ -10187,18 +10522,20 @@ HTML = r"""<!doctype html>
       const error = validatePlotSelection();
       const addButton = document.getElementById('plot-add-open');
       if (addButton && addButton.dataset.busy !== '1') {
-        addButton.disabled = !state.selected || state.plotGenerationRunning;
-        addButton.title = state.plotGenerationRunning ? 'Plot generation is running' : 'Add plot artifacts';
+        addButton.disabled = !state.selected || state.plotGenerationRunning || state.selectedArchived;
+        addButton.title = state.selectedArchived
+          ? 'Unarchive before generating plots.'
+          : (state.plotGenerationRunning ? 'Plot generation is running' : 'Add plot artifacts');
       }
       const sourceButton = document.getElementById('add-plot-source');
       if (sourceButton) {
-        sourceButton.hidden = Boolean(state.shared);
-        sourceButton.disabled = Boolean(state.shared);
+        sourceButton.hidden = Boolean(state.shared || state.selectedArchived);
+        sourceButton.disabled = Boolean(state.shared || state.selectedArchived);
       }
       const button = document.getElementById('plot-results');
       if (button && button.dataset.busy !== '1') {
-        button.disabled = Boolean(error) || !state.selected;
-        button.title = error || 'Generate selected plot artifacts';
+        button.disabled = Boolean(error) || !state.selected || state.selectedArchived;
+        button.title = state.selectedArchived ? 'Unarchive before generating plots.' : (error || 'Generate selected plot artifacts');
       }
       const running = document.getElementById('plot-running');
       if (running) running.classList.toggle('hidden', !(state.plotGenerationRunning || action?.status === 'running'));
@@ -10254,7 +10591,7 @@ HTML = r"""<!doctype html>
       return state.plotArtifacts;
     }
     async function openPlotGenerateDialog() {
-      if (!state.selected) return;
+      if (!state.selected || state.selectedArchived) return;
       document.getElementById('plot-generate-modal').classList.remove('hidden');
       renderPlotPanel();
       await Promise.all([
@@ -10414,7 +10751,7 @@ HTML = r"""<!doctype html>
       }
     }
     async function openPlotSourceDialog() {
-      if (!state.selected) return;
+      if (!state.selected || state.selectedArchived) return;
       const experimentId = state.selected;
       const modal = document.getElementById('plot-source-modal');
       const list = document.getElementById('plot-source-modal-list');
@@ -10461,7 +10798,7 @@ HTML = r"""<!doctype html>
       return false;
     }
     async function plotExperiment() {
-      if (!state.selected) return;
+      if (!state.selected || state.selectedArchived) return;
       setView('plots-view').catch(err => out(String(err)));
       applyPlotBackendStatus();
       clearPlotIndicator();
@@ -10544,7 +10881,7 @@ HTML = r"""<!doctype html>
       renderStatsWorkspace();
     }
     async function loadStats() {
-      if (!state.selected) return;
+      if (!state.selected || state.selectedArchived) return;
       const experimentId = state.selected;
       const data = await api(`/api/experiments/${encodeURIComponent(experimentId)}/stats`);
       if (state.selected !== experimentId) return;
@@ -10618,6 +10955,10 @@ HTML = r"""<!doctype html>
     document.getElementById('archive-open').onclick = () => withBusyButton('archive-open', '', openArchiveDialog).catch(err => out(String(err)));
     document.getElementById('archive-close').onclick = closeArchiveDialog;
     document.getElementById('archive-refresh').onclick = () => withBusyButton('archive-refresh', '', () => loadArchivedExperiments({ force: true })).catch(err => out(String(err)));
+    document.getElementById('archive-search').oninput = event => {
+      state.archiveQuery = event.target.value || '';
+      renderArchivedExperiments();
+    };
     document.getElementById('git-open').onclick = () => withBusyButton('git-open', '', openGitDialog).catch(err => out(String(err)));
     document.getElementById('git-close').onclick = closeGitDialog;
     document.getElementById('git-refresh').onclick = () => withBusyButton('git-refresh', '', loadGitStatus).catch(err => out(String(err)));
@@ -10638,6 +10979,7 @@ HTML = r"""<!doctype html>
     document.getElementById('settings-close').onclick = closeSettingsDialog;
     document.getElementById('theme-dark-toggle').onchange = event => saveTheme(event.target.checked ? 'dark' : 'light');
     document.getElementById('archive-codex-experiments').onclick = () => archiveCodexExperiments().catch(err => out(String(err)));
+    document.getElementById('archive-subdir-experiments').onclick = () => archiveSubdirectoryExperiments().catch(err => out(String(err)));
     document.getElementById('spack-cache-refresh').onclick = () => refreshSpackCache().catch(err => out(String(err)));
     document.getElementById('check').onclick = checkExperiment;
     document.getElementById('describe-toggle').onclick = () => toggleDescribePanel().catch(err => out(String(err)));
@@ -10933,6 +11275,9 @@ def make_handler(app):
                     force = (query.get("refresh") or ["0"])[0] in ("1", "true", "yes")
                     json_response(self, 200, {"experiments": app.list_experiments(force=force)})
                     return
+                if path == "/api/experiments/subdirectories":
+                    json_response(self, 200, app.experiment_subdirectories())
+                    return
                 if path == "/api/experiments/archived":
                     query = urllib.parse.parse_qs(parsed.query)
                     force = (query.get("refresh") or ["0"])[0] in ("1", "true", "yes")
@@ -10941,13 +11286,15 @@ def make_handler(app):
                 match = re.match(r"^/api/experiments/([^/]+)/experiment$", path)
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
-                    exp_path = app.active_experiment_path(experiment_id)
+                    exp_path = app.readable_experiment_path(experiment_id)
+                    archived = app.is_archived_experiment_id(experiment_id)
                     payload = {
                         "id": experiment_id,
                         "path": str(exp_path),
                         "experiment": (exp_path / "Experiment").read_text(encoding="utf-8"),
-                        "submit_lock": app.submit_lock(experiment_id),
+                        "submit_lock": {"locked": False, "fields": {}} if archived else app.submit_lock(experiment_id),
                         "tag": app.tag_for_experiment(experiment_id),
+                        "archived": archived,
                     }
                     payload.update(app.experiment_time_metadata(exp_path))
                     json_response(
@@ -11015,7 +11362,7 @@ def make_handler(app):
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/plots\.pdf$", path)
                 if match:
-                    exp_path = app.active_experiment_path(urllib.parse.unquote(match.group(1)))
+                    exp_path = app.readable_experiment_path(urllib.parse.unquote(match.group(1)))
                     pdf = exp_path / "plots.pdf"
                     if not pdf.is_file():
                         json_response(self, 404, {"error": "plots.pdf not found"})
@@ -11100,6 +11447,9 @@ def make_handler(app):
                     return
                 if path == "/api/tags":
                     json_response(self, 200, app.upsert_tag(payload))
+                    return
+                if path == "/api/experiments/archive-subdirectory":
+                    json_response(self, 200, app.archive_subdirectory_experiments(payload.get("directory") or ""))
                     return
                 match = re.match(r"^/api/tags/([^/]+)/archive-experiments$", path)
                 if match:

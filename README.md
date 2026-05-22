@@ -430,8 +430,8 @@ The UI can:
   are rejected while the experiment has `.mkexp2/submit.lock`
 - archive experiments by renaming the experiment directory leaf to
   `<name>.archived`; archived experiments are hidden from the sidebar and can
-  be restored from the header archive dialog; archive/delete actions are also
-  rejected while `.mkexp2/submit.lock` exists
+  be searched, opened read-only, and restored from the header archive dialog;
+  archive/delete actions are also rejected while `.mkexp2/submit.lock` exists
 - inspect the configured experiment Git repo from the header Git button, review
   added/modified/deleted files, enter a commit message, and run `git add -A`,
   `git commit`, and `git push`
@@ -448,7 +448,9 @@ The UI can:
   top-level subdirectories to include; root files such as `Experiment` are
   always included in the archive
 - open the header settings button to manage the session token, dark mode,
-  experiment tags, and the native plotting Spack/R cache
+  experiment tags, bulk-archive active experiments in a selected subdirectory
+  while skipping starred or submit-locked experiments, and the native plotting
+  Spack/R cache
 - show a disabled busy state with a spinner on controls that trigger backend
   work, including reloads, checks, probes, parsing, plotting, Git push, and
   destructive recovery actions
