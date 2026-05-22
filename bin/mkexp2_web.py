@@ -3269,6 +3269,22 @@ HTML = r"""<!doctype html>
       border-bottom: 1px solid var(--border);
       background: var(--surface);
     }
+    .experiment-editor-header {
+      align-items: flex-start;
+      flex-wrap: nowrap;
+    }
+    .experiment-editor-heading {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .experiment-editor-header .check-action {
+      flex: 0 0 auto;
+      align-self: flex-start;
+    }
+    .experiment-editor-header .panel-title,
+    .experiment-editor-header #selected-path {
+      overflow-wrap: anywhere;
+    }
     .panel-title {
       font-weight: 700;
     }
@@ -5588,8 +5604,8 @@ HTML = r"""<!doctype html>
       <section id="experiment-view" class="view-panel active">
         <section class="grid">
           <div class="panel">
-            <div class="panel-header">
-              <div>
+            <div class="panel-header experiment-editor-header">
+              <div class="experiment-editor-heading">
                 <div class="panel-title" id="selected-title">Experiment</div>
                 <div class="muted" id="selected-path"></div>
               </div>
