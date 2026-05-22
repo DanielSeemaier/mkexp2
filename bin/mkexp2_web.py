@@ -3108,10 +3108,17 @@ HTML = r"""<!doctype html>
     .progress-experiment {
       display: grid;
       gap: 8px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: #fbfcfd;
-      padding: 10px;
+      padding: 0;
+    }
+    .progress-experiment + .progress-experiment {
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+    }
+    .progress-loading {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
     }
     .progress-experiment-header,
     .progress-row {
@@ -4892,6 +4899,7 @@ HTML = r"""<!doctype html>
       plotNoDockerTouched: false,
       spackCache: null,
       progressTimer: null,
+      progressLoadSeq: 0,
       description: null,
       descriptionFor: null,
       descriptionEditing: false,
@@ -7477,6 +7485,7 @@ HTML = r"""<!doctype html>
       state.plotArtifactsFor = null;
       state.selectedPlotArtifact = '';
       state.plotLabelTouched = false;
+      state.progressLoadSeq += 1;
       clearPlotPdfUrl();
       setView('experiment-view').catch(err => out(String(err)));
       document.getElementById('selected-title').textContent = 'Experiment';
@@ -7599,6 +7608,22 @@ HTML = r"""<!doctype html>
       clearInterval(state.progressTimer);
       state.progressTimer = null;
     }
+    function renderProgressLoading(experimentId = state.selected) {
+      if (!state.selected || (experimentId && state.selected !== experimentId)) return;
+      stopProgressPolling();
+      const box = document.getElementById('progress-output');
+      box.className = 'progress-output';
+      box.innerHTML = '';
+      const row = document.createElement('div');
+      row.className = 'progress-loading';
+      const spinner = document.createElement('span');
+      spinner.className = 'loading-spinner';
+      const text = document.createElement('span');
+      text.textContent = 'Loading progress...';
+      row.appendChild(spinner);
+      row.appendChild(text);
+      box.appendChild(row);
+    }
     function renderProgress(result) {
       const box = document.getElementById('progress-output');
       const command = result?.progress || result;
@@ -7672,8 +7697,23 @@ HTML = r"""<!doctype html>
       box.textContent = text || 'No progress output.';
     }
     async function loadProgress(options = {}) {
-      if (!state.selected) return;
-      const result = await api(`/api/experiments/${encodeURIComponent(state.selected)}/progress`);
+      const experimentId = options.experimentId || state.selected;
+      if (!experimentId) return;
+      const loadId = ++state.progressLoadSeq;
+      if (!options.quiet) renderProgressLoading(experimentId);
+      let result = null;
+      try {
+        result = await api(`/api/experiments/${encodeURIComponent(experimentId)}/progress`);
+      } catch (err) {
+        if (state.selected === experimentId && state.progressLoadSeq === loadId && !options.quiet) {
+          stopProgressPolling();
+          const box = document.getElementById('progress-output');
+          box.className = 'csv-empty';
+          box.textContent = `Progress failed: ${firstLines(err?.message || String(err), 3)}`;
+        }
+        throw err;
+      }
+      if (state.selected !== experimentId || state.progressLoadSeq !== loadId) return;
       renderSubmitLock(result.submit_lock);
       renderProgress(result);
     }
@@ -7718,6 +7758,9 @@ HTML = r"""<!doctype html>
       renderLogsWorkspace();
       renderSubmitLock({ locked: false });
       renderProgress(null);
+      loadProgress({ experimentId: id }).catch(err => {
+        if (state.selected === id) out(String(err));
+      });
       renderAlgorithmLoading(id);
       document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
       openExperimentAncestors(id);
@@ -7754,6 +7797,9 @@ HTML = r"""<!doctype html>
       setEditorValue(data.experiment);
       renderSubmitLock(data.submit_lock);
       renderProgress(null);
+      loadProgress({ experimentId: id }).catch(err => {
+        if (state.selected === id) out(String(err));
+      });
       loadDescription().catch(err => out(String(err)));
     }
     async function persistExperiment() {

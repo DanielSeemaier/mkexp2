@@ -444,7 +444,11 @@ The UI can:
 - view failure-aware stats at the top of Results, backed by `mkexp2 stats
   --json`, including row quality counters, all successful cuts, balanced cuts,
   successful runtimes, and common subsets that worked for every algorithm
-- refresh run progress from the Experiment page; the web backend uses generated `jobs/*.cmds.meta.tsv` files when available and falls back to `mkexp2 progress --json`; after progress has been loaded, incomplete runs auto-refresh every 15 seconds, while `.mkexp2/submit.lock` keeps the Submit button disabled
+- refresh run progress from the Experiment page; selecting an experiment runs
+  progress once automatically, the web backend uses generated
+  `jobs/*.cmds.meta.tsv` files when available and falls back to `mkexp2
+  progress --json`, and incomplete runs auto-refresh every 15 seconds while
+  `.mkexp2/submit.lock` keeps the Submit button disabled
 - clear `.mkexp2/submit.lock` from the Submit panel to recover from crashed or
   abandoned submissions
 - auto-load and render `logs/install.md` from the Install Log tab, with a
