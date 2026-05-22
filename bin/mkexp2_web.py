@@ -32,6 +32,7 @@ WEB_STATE_DIR = ".mkexp2"
 WEB_PINS_FILE = "web-pins.json"
 WEB_SHARES_FILE = "web-shares.json"
 WEB_TAGS_FILE = "web-tags.json"
+WEB_COLUMNS_FILE = "web-column-visibility.json"
 PLOT_INDEX_FILE = "index.json"
 ARCHIVE_SUFFIX = ".archived"
 EXPERIMENT_SKIP_DIRS = {".git", ".mkexp2", "jobs", "logs", "plots", "results", "slurm"}
@@ -874,6 +875,108 @@ class Mkexp2WebApp:
         tmp.replace(path)
         return {"pinned": filtered, "path": str(path), "saved": True}
 
+    def columns_path(self):
+        return self.repo / WEB_STATE_DIR / WEB_COLUMNS_FILE
+
+    def _normalize_column_visibility_payload(self, payload):
+        raw_experiments = payload.get("experiments") if isinstance(payload, dict) else None
+        if not isinstance(raw_experiments, dict):
+            raw_experiments = {}
+        experiments = {}
+        for experiment_id, signatures in raw_experiments.items():
+            experiment_id = str(experiment_id or "").strip().strip("/")
+            try:
+                self.experiment_path(experiment_id)
+            except ValueError:
+                continue
+            if not isinstance(signatures, dict):
+                continue
+            normalized_signatures = {}
+            for signature, columns in signatures.items():
+                signature = str(signature or "")
+                if not signature or not isinstance(columns, list):
+                    continue
+                normalized_columns = []
+                seen = set()
+                for column in columns:
+                    column = str(column)
+                    if column not in seen:
+                        normalized_columns.append(column)
+                        seen.add(column)
+                normalized_signatures[signature] = normalized_columns
+            if normalized_signatures:
+                experiments[experiment_id] = normalized_signatures
+        return experiments
+
+    def read_column_visibility_state(self):
+        path = self.columns_path()
+        if not path.is_file():
+            payload = {}
+        else:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8") or "{}")
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid column visibility JSON: {exc}") from exc
+        return {"experiments": self._normalize_column_visibility_payload(payload), "path": str(path)}
+
+    def write_column_visibility_state(self, experiments):
+        normalized = self._normalize_column_visibility_payload({"experiments": experiments})
+        path = self.columns_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps({"experiments": normalized}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(path)
+        return {"experiments": normalized, "path": str(path), "saved": True}
+
+    def column_visibility(self, experiment_id):
+        experiment_id = str(experiment_id or "").strip().strip("/")
+        path = self.active_experiment_path(experiment_id)
+        if not path.is_dir() or not (path / "Experiment").is_file():
+            raise ValueError(f"experiment not found: {experiment_id}")
+        state = self.read_column_visibility_state()
+        return {
+            "id": experiment_id,
+            "visibility": dict((state.get("experiments") or {}).get(experiment_id) or {}),
+            "path": state.get("path", ""),
+        }
+
+    def write_column_visibility(self, experiment_id, payload):
+        experiment_id = str(experiment_id or "").strip().strip("/")
+        path = self.active_experiment_path(experiment_id)
+        if not path.is_dir() or not (path / "Experiment").is_file():
+            raise ValueError(f"experiment not found: {experiment_id}")
+        visibility = payload.get("visibility") if isinstance(payload, dict) else None
+        if not isinstance(visibility, dict):
+            raise ValueError("visibility must be an object")
+        state = self.read_column_visibility_state()
+        experiments = dict(state.get("experiments") or {})
+        normalized = self._normalize_column_visibility_payload({"experiments": {experiment_id: visibility}})
+        if normalized.get(experiment_id):
+            experiments[experiment_id] = normalized[experiment_id]
+        else:
+            experiments.pop(experiment_id, None)
+        saved = self.write_column_visibility_state(experiments)
+        return {
+            "id": experiment_id,
+            "visibility": dict((saved.get("experiments") or {}).get(experiment_id) or {}),
+            "path": saved.get("path", ""),
+            "saved": True,
+        }
+
+    def move_column_visibility(self, old_id, new_id):
+        state = self.read_column_visibility_state()
+        experiments = dict(state.get("experiments") or {})
+        if old_id in experiments:
+            experiments[new_id] = experiments.pop(old_id)
+            self.write_column_visibility_state(experiments)
+
+    def remove_column_visibility(self, experiment_id):
+        state = self.read_column_visibility_state()
+        experiments = dict(state.get("experiments") or {})
+        if experiment_id in experiments:
+            experiments.pop(experiment_id, None)
+            self.write_column_visibility_state(experiments)
+
     def tags_path(self):
         return self.repo / WEB_STATE_DIR / WEB_TAGS_FILE
 
@@ -1371,6 +1474,7 @@ class Mkexp2WebApp:
         if experiment_id in pins:
             self.write_pins([item for item in pins if item != experiment_id])
         self.remove_experiment_tag(experiment_id)
+        self.remove_column_visibility(experiment_id)
         return {"deleted": True, "id": experiment_id, "path": str(path)}
 
     def rename_experiment(self, experiment_id, payload):
@@ -1400,6 +1504,7 @@ class Mkexp2WebApp:
         if experiment_id in pins:
             self.write_pins([new_id if item == experiment_id else item for item in pins])
         self.move_experiment_tag(experiment_id, new_id)
+        self.move_column_visibility(experiment_id, new_id)
         return {
             "renamed": True,
             "id": experiment_id,
@@ -1428,6 +1533,7 @@ class Mkexp2WebApp:
         if experiment_id in pins:
             self.write_pins([item for item in pins if item != experiment_id])
         self.move_experiment_tag(experiment_id, archived_id)
+        self.move_column_visibility(experiment_id, archived_id)
         return {
             "archived": True,
             "id": experiment_id,
@@ -1452,6 +1558,7 @@ class Mkexp2WebApp:
         path.rename(target_path)
         self.invalidate_experiments_cache()
         self.move_experiment_tag(experiment_id, target_id)
+        self.move_column_visibility(experiment_id, target_id)
         return {
             "unarchived": True,
             "id": experiment_id,
@@ -5423,6 +5530,8 @@ HTML = r"""<!doctype html>
       statsFor: null,
       selectedResults: [],
       compareColumnModes: {},
+      columnVisibility: {},
+      columnVisibilityFor: null,
       installLog: null,
       installLogFor: null,
       logsDir: '',
@@ -6687,25 +6796,29 @@ HTML = r"""<!doctype html>
     function headersForFiles(files) {
       return uniqueHeaders(files.flatMap(file => file?.headers || []));
     }
-    function columnStorageKey(headers) {
-      const signature = encodeURIComponent(uniqueHeaders(headers).join('\u001f'));
-      return `mkexp2-columns:${state.selected || 'none'}:${signature}`;
+    function columnSignature(headers) {
+      return uniqueHeaders(headers).join('\u001f');
     }
     function visibleColumns(headers) {
       const all = uniqueHeaders(headers);
-      const raw = localStorage.getItem(columnStorageKey(all));
-      if (!raw) return all;
-      try {
-        const saved = JSON.parse(raw);
-        if (!Array.isArray(saved)) return all;
-        const allowed = new Set(all);
-        return saved.filter(name => allowed.has(name));
-      } catch (_err) {
-        return all;
-      }
+      if (state.columnVisibilityFor !== state.selected) return all;
+      const saved = state.columnVisibility?.[columnSignature(all)];
+      if (!Array.isArray(saved)) return all;
+      const allowed = new Set(all);
+      return saved.filter(name => allowed.has(name));
     }
     function saveVisibleColumns(headers, columns) {
-      localStorage.setItem(columnStorageKey(headers), JSON.stringify(uniqueHeaders(columns)));
+      if (!state.selected) return;
+      const signature = columnSignature(headers);
+      state.columnVisibility = Object.assign({}, state.columnVisibility || {}, {
+        [signature]: uniqueHeaders(columns),
+      });
+      state.columnVisibilityFor = state.selected;
+      if (state.shared) return;
+      api(`/api/experiments/${encodeURIComponent(state.selected)}/columns`, {
+        method: 'PUT',
+        body: JSON.stringify({ visibility: state.columnVisibility })
+      }).catch(err => out(`Column visibility save failed: ${String(err)}`));
     }
     function findResult(name) {
       return state.results.find(file => file.name === name) || null;
@@ -8508,6 +8621,8 @@ HTML = r"""<!doctype html>
       state.statsFor = null;
       state.selectedResults = [];
       state.compareColumnModes = {};
+      state.columnVisibility = {};
+      state.columnVisibilityFor = null;
       state.installLog = null;
       state.installLogFor = null;
       state.description = null;
@@ -8888,6 +9003,8 @@ HTML = r"""<!doctype html>
       state.statsFor = null;
       state.selectedResults = [];
       state.compareColumnModes = {};
+      state.columnVisibility = {};
+      state.columnVisibilityFor = null;
       state.installLog = null;
       state.installLogFor = null;
       state.description = null;
@@ -9804,11 +9921,21 @@ HTML = r"""<!doctype html>
     }
     async function loadResults() {
       if (!state.selected) return;
+      const experimentId = state.selected;
       const previousSelection = new Set(state.selectedResults || []);
-      const data = await api(`/api/experiments/${encodeURIComponent(state.selected)}/results`);
+      const [data, columns] = await Promise.all([
+        api(`/api/experiments/${encodeURIComponent(experimentId)}/results`),
+        api(`/api/experiments/${encodeURIComponent(experimentId)}/columns`).catch(err => {
+          out(`Column visibility load failed: ${String(err)}`);
+          return { visibility: {} };
+        }),
+      ]);
+      if (state.selected !== experimentId) return;
       clearTransientOutput();
       state.results = (data.files || []).map(prepareCsvFile);
-      state.resultsFor = state.selected;
+      state.resultsFor = experimentId;
+      state.columnVisibility = columns.visibility || {};
+      state.columnVisibilityFor = experimentId;
       const availableNames = state.results.map(file => file.name);
       const preservedSelection = availableNames.filter(name => previousSelection.has(name));
       state.selectedResults = preservedSelection.length
@@ -10046,6 +10173,9 @@ def make_handler(app):
             if tail == "results":
                 json_response(self, 200, app.results(experiment_id))
                 return
+            if tail == "columns":
+                json_response(self, 200, app.column_visibility(experiment_id))
+                return
             if tail == "progress":
                 json_response(self, 200, app.progress(experiment_id))
                 return
@@ -10233,6 +10363,10 @@ def make_handler(app):
                 match = re.match(r"^/api/experiments/([^/]+)/results$", path)
                 if match:
                     json_response(self, 200, app.results(urllib.parse.unquote(match.group(1))))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/columns$", path)
+                if match:
+                    json_response(self, 200, app.column_visibility(urllib.parse.unquote(match.group(1))))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/(submit-lock|progress)$", path)
                 if match:
@@ -10449,6 +10583,11 @@ def make_handler(app):
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
                     json_response(self, 200, app.write_description(experiment_id, payload.get("description", "")))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/columns$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    json_response(self, 200, app.write_column_visibility(experiment_id, payload))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/plot-artifact-sets/([^/]+)$", path)
                 if match:

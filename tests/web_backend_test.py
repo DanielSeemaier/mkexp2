@@ -238,6 +238,44 @@ class WebBackendTest(unittest.TestCase):
             finally:
                 mkexp2_web.shutil.which = original_which
 
+    def test_column_visibility_is_server_side_persistent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            exp.mkdir()
+            (exp / "Experiment").write_text("ExperimentA() { :; }\n", encoding="utf-8")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "%Y.%m.%d-<name>", "token")
+
+            saved = app.write_column_visibility("exp", {
+                "visibility": {
+                    "A\u001fB\u001fC": ["A", "C", "A"],
+                    "D": [],
+                }
+            })
+
+            self.assertTrue(saved["saved"])
+            self.assertEqual(saved["visibility"]["A\u001fB\u001fC"], ["A", "C"])
+            self.assertEqual(saved["visibility"]["D"], [])
+            self.assertEqual(app.column_visibility("exp")["visibility"]["A\u001fB\u001fC"], ["A", "C"])
+            self.assertTrue((repo / ".mkexp2" / "web-column-visibility.json").is_file())
+
+            renamed = app.rename_experiment("exp", {"new_id": "renamed"})
+            self.assertEqual(renamed["new_id"], "renamed")
+            self.assertEqual(app.column_visibility("renamed")["visibility"]["A\u001fB\u001fC"], ["A", "C"])
+            archived = app.archive_experiment("renamed")
+            self.assertEqual(archived["archived_id"], "renamed.archived")
+            unarchived = app.unarchive_experiment("renamed.archived")
+            self.assertEqual(unarchived["active_id"], "renamed")
+            self.assertEqual(app.column_visibility("renamed")["visibility"]["A\u001fB\u001fC"], ["A", "C"])
+
+            app.delete_experiment("renamed")
+            self.assertEqual(app.read_column_visibility_state()["experiments"], {})
+
+            with self.assertRaises(ValueError):
+                app.write_column_visibility("missing", {"visibility": {}})
+            with self.assertRaises(ValueError):
+                app.write_column_visibility("exp", {"visibility": []})
+
     def test_list_presets_uses_probe_json(self):
         original_run_command = mkexp2_web.run_command
         calls = []
@@ -391,6 +429,11 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("download-options", mkexp2_web.HTML)
         self.assertIn("function selectedDownloadDirectories", mkexp2_web.HTML)
         self.assertIn("Root files are always included", mkexp2_web.HTML)
+        self.assertIn("columnVisibility: {}", mkexp2_web.HTML)
+        self.assertIn("function columnSignature", mkexp2_web.HTML)
+        self.assertIn("/columns", mkexp2_web.HTML)
+        self.assertIn("Column visibility save failed", mkexp2_web.HTML)
+        self.assertNotIn("mkexp2-columns:", mkexp2_web.HTML)
         self.assertIn('id="check-indicator"', mkexp2_web.HTML)
         self.assertIn("function setCheckIndicator", mkexp2_web.HTML)
         self.assertIn("function clearCheckIndicator", mkexp2_web.HTML)
@@ -746,7 +789,9 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("compare-equal", mkexp2_web.HTML)
         self.assertIn("compare-mid", mkexp2_web.HTML)
         self.assertIn("Cannot compare: row counts differ", mkexp2_web.HTML)
-        self.assertIn("mkexp2-columns:", mkexp2_web.HTML)
+        self.assertIn("function columnSignature", mkexp2_web.HTML)
+        self.assertIn("Column visibility save failed", mkexp2_web.HTML)
+        self.assertNotIn("mkexp2-columns:", mkexp2_web.HTML)
         self.assertIn("renderCsvTable", mkexp2_web.HTML)
         self.assertIn("selectedResults", mkexp2_web.HTML)
         self.assertIn("previousSelection", mkexp2_web.HTML)

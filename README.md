@@ -477,6 +477,8 @@ The UI can:
 - commit submitted state to Git after submission
 - run `mkexp2 parse` from the Results tab and reload CSV results when parsing
   succeeds
+- persist Results column visibility in the experiment repo backend, so shown
+  and hidden CSV columns survive browser changes and reloads
 - generate failure-aware stats on demand at the top of Results, backed by `mkexp2 stats
   --json`, including row quality counters, all successful cuts, balanced cuts,
   successful runtimes, and fair-set/common subsets that worked for every
