@@ -387,9 +387,12 @@ the same resolved inputs. The managed speedup plot takes exactly one source, use
 the smallest available `Cores` value as the baseline, and plots geometric mean
 speedup curves for larger core counts over baseline running-time thresholds.
 
-The web UI exposes the same backend choice with the Plots tab's "No docker"
-checkbox. If the backend cannot use Docker, the checkbox is checked and disabled
-automatically. Web-triggered plot actions have a two-hour timeout to allow
+The web UI exposes managed artifacts first in the Plots tab. Use the Plots tab's
+Add button to open the generation dialog, choose plot types, sources, label, and
+the "No docker" backend option, then Generate. If the backend cannot use Docker,
+the checkbox is checked and disabled automatically. Generation progress is shown
+in the Plots tab header, followed by a success/error icon with command details in
+the tooltip. Web-triggered plot actions have a two-hour timeout to allow
 first-run native R dependency setup on shared filesystems. Web-generated plot
 artifacts are immutable timestamped PDFs under each experiment's `plots/`
 directory, with metadata in `plots/index.json`; the legacy `plots.pdf` remains
@@ -504,11 +507,12 @@ The UI can:
   middle values in three-way-or-larger comparisons; reloading CSVs preserves
   the selected algorithm set when those files still exist and clears stale
   stats
-- manage plots from the Plots tab: discover supported plot types from
-  `mkexp2 plot --list --json`, select current-experiment CSV sources or CSVs
-  from other experiments, validate source-count restrictions, generate one
-  immutable PDF artifact per selected plot type, and preview/list generated
-  artifacts while retaining legacy `plots.pdf` support
+- manage plots from the Plots tab: browse artifacts first, open Add to discover
+  supported plot types from `mkexp2 plot --list --json`, select
+  current-experiment CSV sources or CSVs from other experiments, validate
+  source-count restrictions, generate one immutable PDF artifact per selected
+  plot type, and preview/list generated artifacts while retaining legacy
+  `plots.pdf` support
 - show compact Slurm node status in the sidebar, sorted by CPU count, from
   `sinfo -lN -p all` while the status API also attaches live job/user data from
   `squeue`; displayed CPU counts are divided by two and labeled as cores

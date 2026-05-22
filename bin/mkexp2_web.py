@@ -4189,6 +4189,17 @@ HTML = r"""<!doctype html>
       justify-content: flex-end;
       align-items: center;
     }
+    .plot-generation-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .plot-generation-status.hidden {
+      display: none;
+    }
     .plot-option {
       display: inline-flex;
       align-items: center;
@@ -4222,6 +4233,9 @@ HTML = r"""<!doctype html>
     .plot-manager {
       display: grid;
       gap: 14px;
+    }
+    .plot-generate-modal {
+      width: min(1060px, 100%);
     }
     .plot-grid {
       display: grid;
@@ -5357,6 +5371,46 @@ HTML = r"""<!doctype html>
         </div>
       </div>
     </div>
+    <div id="plot-generate-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="plot-generate-modal-title">
+      <div class="modal plot-generate-modal">
+        <div class="modal-header">
+          <div>
+            <div id="plot-generate-modal-title" class="modal-title">Add Plot Artifacts</div>
+            <div class="csv-summary">Choose plot types, data sources, and an artifact label.</div>
+          </div>
+          <button id="plot-generate-close" class="icon-button" aria-label="Close plot generation dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="modal-body plot-manager">
+          <div class="plot-grid">
+            <section class="plot-box">
+              <div class="plot-box-title">Plot Types</div>
+              <div id="plot-catalog" class="csv-empty">Loading plot types...</div>
+            </section>
+            <section class="plot-box">
+              <div class="plot-source-actions">
+                <div class="plot-box-title">Sources</div>
+                <button id="add-plot-source" class="small-button">Add CSV</button>
+              </div>
+              <div id="plot-sources" class="csv-empty">Loading sources...</div>
+            </section>
+          </div>
+          <label>
+            <span class="csv-summary">Artifact label</span>
+            <input id="plot-label" type="text" placeholder="Auto-generated label">
+          </label>
+          <label class="plot-option" id="plot-no-docker-label" title="Use host R instead of Docker">
+            <input id="plot-no-docker" type="checkbox">
+            <span>No docker</span>
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button id="plot-generate-cancel">Cancel</button>
+          <button id="plot-results" class="primary">Generate</button>
+        </div>
+      </div>
+    </div>
     <div id="plot-source-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="plot-source-modal-title">
       <div class="modal">
         <div class="modal-header">
@@ -5602,32 +5656,18 @@ HTML = r"""<!doctype html>
               <div class="panel-title">Plots</div>
             </div>
             <div class="actions plot-actions check-action">
+              <span id="plot-running" class="plot-generation-status hidden" aria-live="polite">
+                <span class="loading-spinner" aria-hidden="true"></span>
+                <span>Generating...</span>
+              </span>
               <span id="plot-indicator" class="check-indicator hidden" aria-live="polite"></span>
-              <button id="plot-results">Generate Plots</button>
-              <label class="plot-option" id="plot-no-docker-label" title="Use host R instead of Docker">
-                <input id="plot-no-docker" type="checkbox">
-                <span>No docker</span>
-              </label>
+              <button id="plot-add-open" class="icon-text-button" aria-label="Add plot artifacts" title="Add plot artifacts">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                <span>Add</span>
+              </button>
             </div>
           </div>
           <div class="panel-body plot-manager">
-            <div class="plot-grid">
-              <section class="plot-box">
-                <div class="plot-box-title">Plot Types</div>
-                <div id="plot-catalog" class="csv-empty">Loading plot types...</div>
-              </section>
-              <section class="plot-box">
-                <div class="plot-source-actions">
-                  <div class="plot-box-title">Sources</div>
-                  <button id="add-plot-source" class="small-button">Add CSV</button>
-                </div>
-                <div id="plot-sources" class="csv-empty">Loading sources...</div>
-              </section>
-            </div>
-            <label>
-              <span class="csv-summary">Artifact label</span>
-              <input id="plot-label" type="text" placeholder="Auto-generated label">
-            </label>
             <div class="plot-artifact-browser">
               <section class="plot-box plot-artifact-sidebar">
                 <div class="plot-artifact-toolbar">
@@ -5718,6 +5758,7 @@ HTML = r"""<!doctype html>
       plotPdfVersion: '',
       plotLabelTouched: false,
       plotNoDockerTouched: false,
+      plotGenerationRunning: false,
       spackCache: null,
       progressTimer: null,
       progressLoadSeq: 0,
@@ -7698,12 +7739,7 @@ HTML = r"""<!doctype html>
         await ensureLogsLoaded();
       }
       if (viewId === 'plots-view') {
-        await Promise.all([
-          loadPlotBackendStatus(),
-          state.plotCatalog ? Promise.resolve(state.plotCatalog) : loadPlotCatalog(),
-          state.plotSourcesFor === state.selected ? Promise.resolve(state.plotSources) : loadPlotSources(false),
-          loadPlotInfo()
-        ]);
+        await loadPlotInfo();
         renderPlotPanel();
       }
     }
@@ -8852,6 +8888,7 @@ HTML = r"""<!doctype html>
       state.plotArtifactsFor = null;
       state.selectedPlotArtifact = '';
       state.plotLabelTouched = false;
+      state.plotGenerationRunning = false;
       state.progressLoadSeq += 1;
       clearPlotPdfUrl();
       setView('experiment-view').catch(err => out(String(err)));
@@ -9234,6 +9271,7 @@ HTML = r"""<!doctype html>
       state.plotArtifactsFor = null;
       state.selectedPlotArtifact = '';
       state.plotLabelTouched = false;
+      state.plotGenerationRunning = false;
       clearPlotPdfUrl();
       setView('experiment-view').catch(err => out(String(err)));
       renderResultsWorkspace();
@@ -9529,6 +9567,11 @@ HTML = r"""<!doctype html>
     function renderPlotCatalog() {
       const box = document.getElementById('plot-catalog');
       if (!box) return;
+      if (!state.plotCatalog) {
+        box.className = 'csv-empty';
+        box.textContent = 'Loading plot types...';
+        return;
+      }
       const plots = state.plotCatalog?.plots || [];
       if (!plots.length) {
         box.className = 'csv-empty';
@@ -9571,6 +9614,11 @@ HTML = r"""<!doctype html>
     function renderPlotSources() {
       const box = document.getElementById('plot-sources');
       if (!box) return;
+      if (state.plotSourcesFor !== state.selected || !state.plotSources) {
+        box.className = 'csv-empty';
+        box.textContent = 'Loading sources...';
+        return;
+      }
       const current = state.plotSources?.current || [];
       const sources = [...current, ...state.externalPlotSources];
       if (!sources.length) {
@@ -9843,11 +9891,23 @@ HTML = r"""<!doctype html>
       renderPlotArtifacts();
       syncPlotLabelSuggestion();
       const error = validatePlotSelection();
+      const addButton = document.getElementById('plot-add-open');
+      if (addButton && addButton.dataset.busy !== '1') {
+        addButton.disabled = !state.selected || state.plotGenerationRunning;
+        addButton.title = state.plotGenerationRunning ? 'Plot generation is running' : 'Add plot artifacts';
+      }
+      const sourceButton = document.getElementById('add-plot-source');
+      if (sourceButton) {
+        sourceButton.hidden = Boolean(state.shared);
+        sourceButton.disabled = Boolean(state.shared);
+      }
       const button = document.getElementById('plot-results');
       if (button && button.dataset.busy !== '1') {
         button.disabled = Boolean(error) || !state.selected;
         button.title = error || 'Generate selected plot artifacts';
       }
+      const running = document.getElementById('plot-running');
+      if (running) running.classList.toggle('hidden', !(state.plotGenerationRunning || action?.status === 'running'));
       if (!state.selected) {
         clearPlotIndicator();
         return;
@@ -9895,6 +9955,20 @@ HTML = r"""<!doctype html>
       state.plotArtifactsFor = state.selected;
       renderPlotPanel();
       return state.plotArtifacts;
+    }
+    async function openPlotGenerateDialog() {
+      if (!state.selected) return;
+      document.getElementById('plot-generate-modal').classList.remove('hidden');
+      renderPlotPanel();
+      await Promise.all([
+        loadPlotBackendStatus(),
+        state.plotCatalog ? Promise.resolve(state.plotCatalog) : loadPlotCatalog(),
+        state.plotSourcesFor === state.selected ? Promise.resolve(state.plotSources) : loadPlotSources(false)
+      ]);
+      renderPlotPanel();
+    }
+    function closePlotGenerateDialog() {
+      document.getElementById('plot-generate-modal').classList.add('hidden');
     }
     async function loadPlotPdf(pdfUrl, version, owner = state.selectedPlotArtifact || 'legacy') {
       if (!state.selected) return null;
@@ -10066,6 +10140,7 @@ HTML = r"""<!doctype html>
     function closeVisibleModal() {
       const modalIds = [
         'plot-source-modal',
+        'plot-generate-modal',
         'settings-modal',
         'queue-modal',
         'share-modal',
@@ -10095,25 +10170,36 @@ HTML = r"""<!doctype html>
         renderPlotPanel();
         return;
       }
-      await withBusyButton('plot-results', 'Generating...', async () => {
-        const noDocker = document.getElementById('plot-no-docker')?.checked || false;
-        const label = document.getElementById('plot-label')?.value || '';
-        const action = await api(`/api/experiments/${encodeURIComponent(state.selected)}/plot-artifacts`, {
-          method: 'POST',
-          body: JSON.stringify({
-            no_docker: noDocker,
-            plots: Array.from(state.selectedPlotTypes),
-            sources: selectedPlotSourceObjects(),
-            label
-          })
+      state.plotGenerationRunning = true;
+      closePlotGenerateDialog();
+      renderPlotPanel({ status: 'running' });
+      try {
+        await withBusyButton('plot-results', 'Generating...', async () => {
+          const noDocker = document.getElementById('plot-no-docker')?.checked || false;
+          const label = document.getElementById('plot-label')?.value || '';
+          const action = await api(`/api/experiments/${encodeURIComponent(state.selected)}/plot-artifacts`, {
+            method: 'POST',
+            body: JSON.stringify({
+              no_docker: noDocker,
+              plots: Array.from(state.selectedPlotTypes),
+              sources: selectedPlotSourceObjects(),
+              label
+            })
+          });
+          renderPlotPanel({ status: 'running', id: action.id });
+          const completed = await watchAction(action.id, current => renderPlotPanel(current));
+          if (completed?.status === 'completed' && completed.result?.plotted) {
+            await new Promise(resolve => setTimeout(resolve, PLOT_RELOAD_DELAY_MS));
+            await loadPlotInfo();
+          }
         });
-        renderPlotPanel({ status: 'running', id: action.id });
-        const completed = await watchAction(action.id, current => renderPlotPanel(current));
-        if (completed?.status === 'completed' && completed.result?.plotted) {
-          await new Promise(resolve => setTimeout(resolve, PLOT_RELOAD_DELAY_MS));
-          await loadPlotInfo();
-        }
-      });
+      } catch (err) {
+        setPlotIndicator(false, `Plot generation failed.\n${firstLines(err?.message || String(err), 6)}`);
+        out(String(err));
+      } finally {
+        state.plotGenerationRunning = false;
+        renderPlotPanel();
+      }
     }
     async function watchAction(id, onUpdate = null) {
       let action = null;
@@ -10280,7 +10366,10 @@ HTML = r"""<!doctype html>
     document.getElementById('delete-experiment').onclick = deleteExperiment;
     document.getElementById('refresh-progress').onclick = () => withBusyButton('refresh-progress', '', () => loadProgress()).catch(err => out(String(err)));
     document.getElementById('parse-results').onclick = parseExperiment;
-    document.getElementById('plot-results').onclick = plotExperiment;
+    document.getElementById('plot-add-open').onclick = () => withBusyButton('plot-add-open', 'Loading...', openPlotGenerateDialog).catch(err => out(String(err)));
+    document.getElementById('plot-generate-close').onclick = closePlotGenerateDialog;
+    document.getElementById('plot-generate-cancel').onclick = closePlotGenerateDialog;
+    document.getElementById('plot-results').onclick = () => plotExperiment().catch(err => out(String(err)));
     document.getElementById('add-plot-source').onclick = () => withBusyButton('add-plot-source', 'Loading...', openPlotSourceDialog).catch(err => out(String(err)));
     document.getElementById('plot-source-close').onclick = closePlotSourceDialog;
     document.getElementById('plot-source-close-footer').onclick = closePlotSourceDialog;
