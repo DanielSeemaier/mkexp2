@@ -199,6 +199,45 @@ class WebBackendTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 app.copy_experiment("source", {"name": "Hidden", "name_template": "<name>.archived"})
 
+    def test_experiment_archive_can_filter_top_level_directories(self):
+        original_which = mkexp2_web.shutil.which
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            (exp / "results").mkdir(parents=True)
+            (exp / "logs").mkdir()
+            (exp / "jobs").mkdir()
+            (exp / "Experiment").write_text("ExperimentA() { :; }\n", encoding="utf-8")
+            (exp / "description.md").write_text("notes\n", encoding="utf-8")
+            (exp / "results" / "A.csv").write_text("x\n", encoding="utf-8")
+            (exp / "logs" / "A.log").write_text("log\n", encoding="utf-8")
+            (exp / "jobs" / "run.sh").write_text("job\n", encoding="utf-8")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "%Y.%m.%d-<name>", "token")
+            mkexp2_web.shutil.which = lambda _name: None
+            try:
+                options = app.experiment_download_options("exp")
+                self.assertEqual([item["name"] for item in options["directories"]], ["jobs", "logs", "results"])
+                self.assertIn("Experiment", options["root_files"])
+
+                archive = app.experiment_archive("exp", include_dirs=["results"])
+                try:
+                    with zipfile.ZipFile(archive["path"]) as zip_file:
+                        names = set(zip_file.namelist())
+                    self.assertIn("exp/Experiment", names)
+                    self.assertIn("exp/description.md", names)
+                    self.assertIn("exp/results/A.csv", names)
+                    self.assertNotIn("exp/logs/A.log", names)
+                    self.assertNotIn("exp/jobs/run.sh", names)
+                finally:
+                    archive["path"].unlink(missing_ok=True)
+
+                with self.assertRaises(ValueError):
+                    app.experiment_archive("exp", include_dirs=["../logs"])
+                with self.assertRaises(ValueError):
+                    app.experiment_archive("exp", include_dirs=["missing"])
+            finally:
+                mkexp2_web.shutil.which = original_which
+
     def test_list_presets_uses_probe_json(self):
         original_run_command = mkexp2_web.run_command
         calls = []
@@ -347,6 +386,11 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("async function copyExperiment", mkexp2_web.HTML)
         self.assertIn("/copy", mkexp2_web.HTML)
         self.assertIn("Create a new experiment from the current Experiment file.", mkexp2_web.HTML)
+        self.assertIn('id="download-modal"', mkexp2_web.HTML)
+        self.assertIn('id="download-directories"', mkexp2_web.HTML)
+        self.assertIn("download-options", mkexp2_web.HTML)
+        self.assertIn("function selectedDownloadDirectories", mkexp2_web.HTML)
+        self.assertIn("Root files are always included", mkexp2_web.HTML)
         self.assertIn('id="check-indicator"', mkexp2_web.HTML)
         self.assertIn("function setCheckIndicator", mkexp2_web.HTML)
         self.assertIn("function clearCheckIndicator", mkexp2_web.HTML)

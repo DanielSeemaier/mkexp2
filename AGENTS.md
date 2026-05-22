@@ -131,6 +131,8 @@ There is no linting configuration or CI setup.
 
 - **Web experiment copying.** The web top navigation has a copy action for the selected experiment. It opens a modal for the new experiment name, renders the configured name template preview, optionally accepts a one-off template override, and creates the new experiment directory by copying only the selected experiment's current `Experiment` file.
 
+- **Web experiment downloads.** The web download action opens a modal before streaming an archive. Root files in the experiment directory are always included, and the selected top-level subdirectories are passed as validated `dir` query parameters to the download endpoint. Omit the selection query to keep the legacy full-directory archive behavior.
+
 - **Generated `.gitignore`.** `mkexp2 init` ignores generated log contents with `logs/*` but explicitly unignores `logs/install.md`, so the single install log remains visible for debugging failed setup runs. It does not ignore `plots.pdf` by default. Managed web plot artifacts live under the experiment-local `plots/` directory and are added to `.gitignore` by `mkexp2 plot` because they are generated PDFs plus `plots/index.json` metadata.
 
 - **Slurm artifacts.** Slurm run/install/parse job scripts are generated under `jobs/`. Slurm scheduler stdout/stderr is directed to `slurm/slurm-%j.out` for regular jobs and `slurm/slurm-%A_%a.out` for array tasks, while mkexp2 command manifests also remain under `jobs/*.cmds` with matching `*.cmds.meta.tsv` files.

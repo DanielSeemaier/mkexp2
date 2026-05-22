@@ -119,6 +119,12 @@ def json_response(handler, status, payload):
     handler.wfile.write(data)
 
 
+def archive_include_dirs_from_query(query):
+    if (query.get("select") or ["0"])[0] in ("1", "true", "yes"):
+        return query.get("dir") or []
+    return None
+
+
 def text_response(handler, status, body, content_type="text/plain; charset=utf-8"):
     data = body.encode("utf-8")
     handler.send_response(status)
@@ -1911,17 +1917,62 @@ class Mkexp2WebApp:
         result["saved"] = True
         return result
 
-    def experiment_archive(self, experiment_id):
+    def experiment_download_options(self, experiment_id):
+        path = self.active_experiment_path(experiment_id)
+        directories = []
+        root_files = []
+        for child in sorted(path.iterdir(), key=lambda item: item.name.lower()):
+            if child.is_dir():
+                directories.append({"name": child.name})
+            elif child.is_file():
+                root_files.append(child.name)
+        return {
+            "id": experiment_id,
+            "path": str(path),
+            "directories": directories,
+            "root_files": root_files,
+        }
+
+    def archive_entries(self, path, include_dirs):
+        root_files = [child.name for child in sorted(path.iterdir(), key=lambda item: item.name.lower()) if child.is_file()]
+        if include_dirs is None:
+            return None
+
+        available_dirs = {
+            child.name
+            for child in path.iterdir()
+            if child.is_dir()
+        }
+        selected = []
+        seen = set()
+        for item in include_dirs:
+            name = str(item or "").strip()
+            if not name:
+                continue
+            if "/" in name or "\\" in name or name in (".", ".."):
+                raise ValueError(f"invalid archive directory: {name}")
+            if name not in available_dirs:
+                raise ValueError(f"archive directory not found: {name}")
+            if name not in seen:
+                selected.append(name)
+                seen.add(name)
+        selected.sort(key=str.lower)
+        root_files.sort(key=str.lower)
+        return root_files + selected
+
+    def experiment_archive(self, experiment_id, include_dirs=None):
         path = self.active_experiment_path(experiment_id)
         base = download_filename(path.name)
+        entries = self.archive_entries(path, include_dirs)
         tar_command = shutil.which("tar")
         zstd_command = shutil.which("zstd")
         if tar_command and zstd_command:
             archive = tempfile.NamedTemporaryFile(prefix=f"{base}-", suffix=".tar.zst", delete=False)
             archive.close()
             archive_path = Path(archive.name)
+            tar_targets = [path.name] if entries is None else [f"{path.name}/{name}" for name in entries]
             result = run_command(
-                [tar_command, "--zstd", "-cf", str(archive_path), "-C", str(path.parent), path.name],
+                [tar_command, "--zstd", "-cf", str(archive_path), "-C", str(path.parent), *tar_targets],
                 timeout=3600,
             )
             if result["returncode"] == 0 and archive_path.is_file() and archive_path.stat().st_size > 0:
@@ -1938,14 +1989,20 @@ class Mkexp2WebApp:
         archive_path = Path(archive.name)
         try:
             with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as zip_file:
-                for root, dirs, files in os.walk(path):
-                    dirs.sort()
-                    files.sort()
-                    root_path = Path(root)
-                    for name in files:
-                        file_path = root_path / name
-                        rel_path = Path(path.name) / file_path.relative_to(path)
-                        zip_file.write(file_path, rel_path.as_posix())
+                walk_roots = [path] if entries is None else [path / name for name in entries]
+                for walk_root in walk_roots:
+                    if walk_root.is_file():
+                        rel_path = Path(path.name) / walk_root.relative_to(path)
+                        zip_file.write(walk_root, rel_path.as_posix())
+                        continue
+                    for root, dirs, files in os.walk(walk_root):
+                        dirs.sort()
+                        files.sort()
+                        root_path = Path(root)
+                        for name in files:
+                            file_path = root_path / name
+                            rel_path = Path(path.name) / file_path.relative_to(path)
+                            zip_file.write(file_path, rel_path.as_posix())
             return {
                 "path": archive_path,
                 "filename": f"{base}.zip",
@@ -4670,6 +4727,11 @@ HTML = r"""<!doctype html>
       display: grid;
       gap: 12px;
     }
+    .button-row {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
     .create-field {
       display: grid;
       gap: 6px;
@@ -5000,6 +5062,33 @@ HTML = r"""<!doctype html>
         <div class="modal-footer">
           <button id="copy-cancel">Cancel</button>
           <button id="copy-submit" class="primary">Copy</button>
+        </div>
+      </div>
+    </div>
+    <div id="download-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="download-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="download-modal-title" class="modal-title">Download Experiment</div>
+            <div id="download-summary" class="csv-summary">Choose which top-level directories to include.</div>
+          </div>
+          <button id="download-close" class="icon-button" aria-label="Close download dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="create-form">
+            <div id="download-root-files" class="csv-summary"></div>
+            <div class="button-row">
+              <button id="download-select-all" type="button">All</button>
+              <button id="download-select-none" type="button">None</button>
+            </div>
+            <div id="download-directories" class="chips"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="download-cancel">Cancel</button>
+          <button id="download-submit" class="primary">Download</button>
         </div>
       </div>
     </div>
@@ -5368,6 +5457,8 @@ HTML = r"""<!doctype html>
       description: null,
       descriptionFor: null,
       descriptionEditing: false,
+      downloadOptions: null,
+      downloadOptionsFor: null,
       queueServerUser: '',
       activeView: 'experiment-view',
       shared: false,
@@ -8422,6 +8513,8 @@ HTML = r"""<!doctype html>
       state.description = null;
       state.descriptionFor = null;
       state.descriptionEditing = false;
+      state.downloadOptions = null;
+      state.downloadOptionsFor = null;
       state.logsDir = '';
       state.logsListing = null;
       state.logsFor = null;
@@ -8554,10 +8647,73 @@ HTML = r"""<!doctype html>
         renderShareCommand();
       });
     }
-    async function downloadExperiment() {
+    function renderDownloadOptions(options) {
+      const root = document.getElementById('download-root-files');
+      const list = document.getElementById('download-directories');
+      const rootFiles = options?.root_files || [];
+      const directories = options?.directories || [];
+      root.textContent = rootFiles.length
+        ? `Root files are always included: ${rootFiles.join(', ')}.`
+        : 'Root files are always included.';
+      list.innerHTML = '';
+      if (!directories.length) {
+        list.className = 'csv-empty';
+        list.textContent = 'No top-level directories found.';
+        return;
+      }
+      list.className = 'chips';
+      for (const directory of directories) {
+        const name = directory.name || '';
+        const label = document.createElement('label');
+        label.className = 'chip';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = true;
+        checkbox.value = name;
+        checkbox.dataset.directory = name;
+        const text = document.createElement('span');
+        text.className = 'chip-label';
+        text.textContent = name;
+        text.title = name;
+        label.appendChild(checkbox);
+        label.appendChild(text);
+        list.appendChild(label);
+      }
+    }
+    function setDownloadDirectoriesChecked(checked) {
+      document.querySelectorAll('#download-directories input[data-directory]').forEach(input => {
+        input.checked = checked;
+      });
+    }
+    function selectedDownloadDirectories() {
+      return Array.from(document.querySelectorAll('#download-directories input[data-directory]:checked'))
+        .map(input => input.dataset.directory || input.value || '')
+        .filter(Boolean);
+    }
+    async function openDownloadDialog() {
       if (!state.selected) return;
-      await withBusyButton('download-experiment', '', async () => {
-        const result = await fetchDownload(`/api/experiments/${encodeURIComponent(state.selected)}/download`);
+      const experimentId = state.selected;
+      document.getElementById('download-modal').classList.remove('hidden');
+      document.getElementById('download-summary').textContent = `Download ${experimentId}.`;
+      const list = document.getElementById('download-directories');
+      list.className = 'csv-empty';
+      list.textContent = 'Loading directories...';
+      const options = await api(`/api/experiments/${encodeURIComponent(experimentId)}/download-options`);
+      if (state.selected !== experimentId) return;
+      state.downloadOptions = options;
+      state.downloadOptionsFor = experimentId;
+      renderDownloadOptions(options);
+    }
+    function closeDownloadDialog() {
+      document.getElementById('download-modal').classList.add('hidden');
+    }
+    async function performDownload() {
+      if (!state.selected) return;
+      const query = new URLSearchParams();
+      query.set('select', '1');
+      for (const directory of selectedDownloadDirectories()) query.append('dir', directory);
+      await withBusyButton('download-submit', 'Preparing...', async () => {
+        const result = await fetchDownload(`/api/experiments/${encodeURIComponent(state.selected)}/download?${query.toString()}`);
         const url = URL.createObjectURL(result.blob);
         const link = document.createElement('a');
         link.href = url;
@@ -8566,7 +8722,11 @@ HTML = r"""<!doctype html>
         link.click();
         link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
+        closeDownloadDialog();
       });
+    }
+    async function downloadExperiment() {
+      await withBusyButton('download-experiment', '', openDownloadDialog);
     }
     async function deleteExperiment() {
       if (!state.selected) return;
@@ -8733,6 +8893,8 @@ HTML = r"""<!doctype html>
       state.description = null;
       state.descriptionFor = null;
       state.descriptionEditing = false;
+      state.downloadOptions = null;
+      state.downloadOptionsFor = null;
       state.logsDir = '';
       state.logsListing = null;
       state.logsFor = null;
@@ -9585,6 +9747,7 @@ HTML = r"""<!doctype html>
         'share-modal',
         'git-modal',
         'archive-modal',
+        'download-modal',
         'copy-modal',
         'create-modal',
       ];
@@ -9746,6 +9909,11 @@ HTML = r"""<!doctype html>
     document.getElementById('git-push').onclick = pushGitChanges;
     document.getElementById('share-experiment').onclick = shareExperiment;
     document.getElementById('download-experiment').onclick = downloadExperiment;
+    document.getElementById('download-close').onclick = closeDownloadDialog;
+    document.getElementById('download-cancel').onclick = closeDownloadDialog;
+    document.getElementById('download-select-all').onclick = () => setDownloadDirectoriesChecked(true);
+    document.getElementById('download-select-none').onclick = () => setDownloadDirectoriesChecked(false);
+    document.getElementById('download-submit').onclick = () => performDownload().catch(err => out(String(err)));
     document.getElementById('share-close').onclick = closeShareDialog;
     document.getElementById('share-username').oninput = renderShareCommand;
     document.getElementById('share-copy-command').onclick = () => copyShareCommand().catch(err => out(String(err)));
@@ -9899,6 +10067,9 @@ def make_handler(app):
             if tail == "install-log":
                 json_response(self, 200, app.install_log(experiment_id))
                 return
+            if tail == "download-options":
+                json_response(self, 200, app.experiment_download_options(experiment_id))
+                return
             if tail == "logs":
                 limit = int((query.get("limit") or [MAX_LOG_LIST_ENTRIES])[0])
                 offset = int((query.get("offset") or [0])[0])
@@ -9938,7 +10109,7 @@ def make_handler(app):
                 self.wfile.write(data)
                 return
             if tail == "download":
-                archive = app.experiment_archive(experiment_id)
+                archive = app.experiment_archive(experiment_id, include_dirs=archive_include_dirs_from_query(query))
                 archive_path = archive["path"]
                 try:
                     self.send_response(200)
@@ -10098,6 +10269,10 @@ def make_handler(app):
                 if match:
                     json_response(self, 200, app.install_log(urllib.parse.unquote(match.group(1))))
                     return
+                match = re.match(r"^/api/experiments/([^/]+)/download-options$", path)
+                if match:
+                    json_response(self, 200, app.experiment_download_options(urllib.parse.unquote(match.group(1))))
+                    return
                 match = re.match(r"^/api/experiments/([^/]+)/(logs|log)$", path)
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
@@ -10128,7 +10303,11 @@ def make_handler(app):
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/download$", path)
                 if match:
-                    archive = app.experiment_archive(urllib.parse.unquote(match.group(1)))
+                    query = urllib.parse.parse_qs(parsed.query)
+                    archive = app.experiment_archive(
+                        urllib.parse.unquote(match.group(1)),
+                        include_dirs=archive_include_dirs_from_query(query),
+                    )
                     archive_path = archive["path"]
                     try:
                         self.send_response(200)
