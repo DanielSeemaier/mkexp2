@@ -546,6 +546,24 @@ class SlurmStatus:
             "scancel": scancel,
         }
 
+    def cancel_user_jobs(self, payload):
+        owner = getpass.getuser()
+        if not re.fullmatch(r"[A-Za-z0-9_.@+\-]+", owner):
+            raise ValueError("invalid server user")
+        confirm_user = str((payload or {}).get("confirm_user") or "").strip()
+        if confirm_user != owner:
+            raise ValueError("confirmation did not match server user")
+
+        scancel = run_command(["scancel", "-u", owner], timeout=30)
+        self._cache_until = 0
+        if scancel["returncode"] != 0:
+            raise ValueError(scancel["stderr"] or scancel["stdout"] or f"scancel failed for user {owner}")
+        return {
+            "ok": scancel["returncode"] == 0,
+            "server_user": owner,
+            "scancel": scancel,
+        }
+
 
 class ActionStore:
     def __init__(self):
@@ -3792,6 +3810,10 @@ HTML = r"""<!doctype html>
       border-color: #f1b7b1;
       font-size: 12px;
     }
+    .queue-cancel-all {
+      color: var(--danger);
+      border-color: #f1b7b1;
+    }
     .git-message {
       display: grid;
       gap: 6px;
@@ -4228,6 +4250,7 @@ HTML = r"""<!doctype html>
           <div id="queue-output" class="csv-empty">Open the dialog to load squeue output.</div>
         </div>
         <div class="modal-footer">
+          <button id="queue-cancel-all" class="queue-cancel-all">Cancel all</button>
           <button id="queue-refresh" class="icon-button" aria-label="Reload Slurm queue" title="Reload Slurm queue">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
           </button>
@@ -4579,6 +4602,7 @@ HTML = r"""<!doctype html>
       description: null,
       descriptionFor: null,
       descriptionEditing: false,
+      queueServerUser: '',
       activeView: 'experiment-view',
       shared: false,
       shareId: ''
@@ -5303,6 +5327,14 @@ HTML = r"""<!doctype html>
       const summary = document.getElementById('queue-summary');
       const output = document.getElementById('queue-output');
       const rows = data.rows || [];
+      state.queueServerUser = data.server_user || '';
+      const cancelAllButton = document.getElementById('queue-cancel-all');
+      if (cancelAllButton) {
+        cancelAllButton.disabled = !state.queueServerUser;
+        cancelAllButton.title = state.queueServerUser
+          ? `Cancel all Slurm jobs owned by ${state.queueServerUser}`
+          : 'Load the queue before canceling jobs.';
+      }
       summary.textContent = `${rows.length} job${rows.length === 1 ? '' : 's'} from ${data.source || 'squeue'}; refreshed ${data.generated_at || 'now'}.`;
       if (!rows.length) {
         output.className = 'csv-empty';
@@ -5354,6 +5386,8 @@ HTML = r"""<!doctype html>
       const output = document.getElementById('queue-output');
       output.className = 'csv-empty';
       output.textContent = 'Loading Slurm queue...';
+      const cancelAllButton = document.getElementById('queue-cancel-all');
+      if (cancelAllButton) cancelAllButton.disabled = true;
       const data = await api('/api/status/squeue');
       renderQueue(data);
       return data;
@@ -5375,6 +5409,23 @@ HTML = r"""<!doctype html>
         await api('/api/status/squeue/cancel', {
           method: 'POST',
           body: JSON.stringify({ job_id: jobId })
+        });
+        await loadQueue();
+        await refreshStatus().catch(err => out(String(err)));
+      });
+    }
+    async function cancelAllQueueJobs(button = null) {
+      const owner = state.queueServerUser || '';
+      if (!owner) {
+        alert('Load the Slurm queue before canceling jobs.');
+        return;
+      }
+      const message = `Cancel all Slurm jobs owned by ${owner}?\n\nThis runs: scancel -u ${owner}`;
+      if (!confirm(message)) return;
+      await withBusyButton(button || 'queue-cancel-all', 'Canceling...', async () => {
+        await api('/api/status/squeue/cancel-all', {
+          method: 'POST',
+          body: JSON.stringify({ confirm_user: owner })
         });
         await loadQueue();
         await refreshStatus().catch(err => out(String(err)));
@@ -8025,6 +8076,7 @@ HTML = r"""<!doctype html>
     document.getElementById('queue-open').onclick = () => withBusyButton('queue-open', '', openQueueDialog).catch(err => out(String(err)));
     document.getElementById('queue-close').onclick = closeQueueDialog;
     document.getElementById('queue-refresh').onclick = () => withBusyButton('queue-refresh', '', loadQueue).catch(err => out(String(err)));
+    document.getElementById('queue-cancel-all').onclick = () => cancelAllQueueJobs(document.getElementById('queue-cancel-all')).catch(err => out(String(err)));
     document.getElementById('create-open').onclick = () => withBusyButton('create-open', '', openCreateDialog).catch(err => out(String(err)));
     document.getElementById('create-close').onclick = closeCreateDialog;
     document.getElementById('create-cancel').onclick = closeCreateDialog;
@@ -8448,6 +8500,9 @@ def make_handler(app):
                     return
                 if path == "/api/status/squeue/cancel":
                     json_response(self, 200, app.slurm.cancel_job(payload))
+                    return
+                if path == "/api/status/squeue/cancel-all":
+                    json_response(self, 200, app.slurm.cancel_user_jobs(payload))
                     return
                 if path == "/api/plot/spack-r-libs/resolve":
                     force = bool(payload.get("force", False))

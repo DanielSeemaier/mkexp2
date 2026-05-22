@@ -443,6 +443,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="queue-open" class="icon-button" aria-label="Show Slurm queue"', mkexp2_web.HTML)
         self.assertIn('id="queue-modal"', mkexp2_web.HTML)
         self.assertIn('id="queue-refresh" class="icon-button" aria-label="Reload Slurm queue"', mkexp2_web.HTML)
+        self.assertIn('id="queue-cancel-all" class="queue-cancel-all"', mkexp2_web.HTML)
         self.assertIn('id="sidebar-resizer"', mkexp2_web.HTML)
         self.assertIn('aria-label="Resize sidebar"', mkexp2_web.HTML)
         self.assertIn("const SIDEBAR_WIDTH_KEY = 'mkexp2-sidebar-width'", mkexp2_web.HTML)
@@ -451,7 +452,11 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("latest: 0", mkexp2_web.HTML)
         self.assertIn("function renderQueue", mkexp2_web.HTML)
         self.assertIn("function cancelQueueJob", mkexp2_web.HTML)
+        self.assertIn("function cancelAllQueueJobs", mkexp2_web.HTML)
         self.assertIn("api('/api/status/squeue/cancel'", mkexp2_web.HTML)
+        self.assertIn("api('/api/status/squeue/cancel-all'", mkexp2_web.HTML)
+        self.assertIn("This runs: scancel -u", mkexp2_web.HTML)
+        self.assertIn("confirm_user: owner", mkexp2_web.HTML)
         self.assertIn("row.user === data.server_user", mkexp2_web.HTML)
         self.assertIn("button.textContent = 'x'", mkexp2_web.HTML)
         self.assertIn("button.setAttribute('aria-label'", mkexp2_web.HTML)
@@ -1496,6 +1501,8 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
                 return {"returncode": 0, "stdout": "", "stderr": ""}
             if argv == ["scancel", "125_[0-3%1]"]:
                 return {"returncode": 0, "stdout": "", "stderr": ""}
+            if argv == ["scancel", "-u", "owner"]:
+                return {"returncode": 0, "stdout": "", "stderr": ""}
             return {"returncode": 99, "stdout": "", "stderr": "unexpected"}
 
         mkexp2_web.run_command = fake_run_command
@@ -1504,8 +1511,11 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
             queue = mkexp2_web.SlurmStatus().queue()
             result = mkexp2_web.SlurmStatus().cancel_job({"job_id": "123"})
             array_result = mkexp2_web.SlurmStatus().cancel_job({"job_id": "125_[0-3%1]"})
+            all_result = mkexp2_web.SlurmStatus().cancel_user_jobs({"confirm_user": "owner"})
             with self.assertRaises(ValueError):
                 mkexp2_web.SlurmStatus().cancel_job({"job_id": "124"})
+            with self.assertRaisesRegex(ValueError, "confirmation"):
+                mkexp2_web.SlurmStatus().cancel_user_jobs({"confirm_user": "alice"})
         finally:
             mkexp2_web.run_command = original_run_command
             mkexp2_web.getpass.getuser = original_getuser
@@ -1514,8 +1524,11 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
         self.assertTrue(result["ok"])
         self.assertEqual(result["job"]["user"], "owner")
         self.assertTrue(array_result["ok"])
+        self.assertTrue(all_result["ok"])
+        self.assertEqual(all_result["server_user"], "owner")
         self.assertIn((["scancel", "123"], 30), calls)
         self.assertIn((["scancel", "125_[0-3%1]"], 30), calls)
+        self.assertIn((["scancel", "-u", "owner"], 30), calls)
 
     def test_spack_plot_cache_action_uses_fixed_argv(self):
         calls = []
