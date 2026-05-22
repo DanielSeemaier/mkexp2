@@ -11033,6 +11033,13 @@ HTML = r"""<!doctype html>
         event.preventDefault();
       }
     });
+    document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+      backdrop.addEventListener('click', event => {
+        if (event.target === backdrop && closeVisibleModal()) {
+          event.preventDefault();
+        }
+      });
+    });
     document.querySelectorAll('.view-tab').forEach(button => {
       button.onclick = () => withBusyButton(button, 'Loading...', () => setView(button.dataset.view)).catch(err => out(String(err)));
     });

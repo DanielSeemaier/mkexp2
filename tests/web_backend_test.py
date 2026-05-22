@@ -808,6 +808,8 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("async function pushGitChanges", mkexp2_web.HTML)
         self.assertIn("function closeVisibleModal", mkexp2_web.HTML)
         self.assertIn("event.key === 'Escape'", mkexp2_web.HTML)
+        self.assertIn("document.querySelectorAll('.modal-backdrop')", mkexp2_web.HTML)
+        self.assertIn("event.target === backdrop && closeVisibleModal()", mkexp2_web.HTML)
         self.assertIn("/api/git/status", mkexp2_web.HTML)
         self.assertIn("/api/git/push", mkexp2_web.HTML)
         self.assertNotIn('id="plot"', mkexp2_web.HTML)
