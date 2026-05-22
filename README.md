@@ -393,6 +393,8 @@ mkexp2 web --repo /path/to/experiment-repo \
 ```
 
 Pass `--web-token TOKEN` to reuse a fixed session token across restarts.
+Set `MKEXP2_WEB_PUBLIC_HOST` when the machine's short hostname is not the SSH
+host colleagues should use in generated share commands.
 
 The UI can:
 

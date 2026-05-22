@@ -1064,7 +1064,7 @@ class Mkexp2WebApp:
         return f"http://{host}:{self.web_port}/share/{share_id}"
 
     def share_remote_host(self):
-        for candidate in (socket.getfqdn(), socket.gethostname(), os.environ.get("HOSTNAME")):
+        for candidate in (os.environ.get("MKEXP2_WEB_PUBLIC_HOST"), socket.getfqdn(), socket.gethostname(), os.environ.get("HOSTNAME")):
             candidate = str(candidate or "").strip()
             if candidate:
                 return candidate
