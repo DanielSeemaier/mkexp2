@@ -3387,7 +3387,8 @@ HTML = r"""<!doctype html>
     }
     .plot-pdf {
       width: 100%;
-      min-height: min(78vh, 900px);
+      height: min(80vh, 920px);
+      min-height: 560px;
       border: 1px solid var(--border);
       border-radius: 6px;
       background: white;
@@ -3485,6 +3486,19 @@ HTML = r"""<!doctype html>
       display: grid;
       gap: 8px;
     }
+    .plot-artifact-browser {
+      display: grid;
+      grid-template-columns: minmax(260px, 28%) minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
+      min-width: 0;
+    }
+    .plot-artifact-sidebar {
+      align-content: start;
+      max-height: min(86vh, 980px);
+      overflow: auto;
+      padding-right: 2px;
+    }
     .plot-artifact-toolbar {
       display: flex;
       justify-content: space-between;
@@ -3531,6 +3545,7 @@ HTML = r"""<!doctype html>
       display: flex;
       gap: 6px;
       align-items: center;
+      flex-wrap: wrap;
     }
     .plot-artifact-items {
       display: grid;
@@ -3560,10 +3575,31 @@ HTML = r"""<!doctype html>
       border-color: var(--accent);
       background: #e8f5f3;
     }
+    .plot-artifact-sidebar .plot-artifact-group-header,
+    .plot-artifact-sidebar .plot-artifact-select {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .plot-artifact-sidebar .plot-artifact-toolbar {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+    .plot-artifact-sidebar .plot-artifact-open {
+      display: none;
+    }
     .plot-preview {
       display: grid;
       gap: 8px;
       min-width: 0;
+    }
+    @media (max-width: 1100px) {
+      .plot-artifact-browser {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .plot-artifact-sidebar {
+        max-height: none;
+        overflow: visible;
+        padding-right: 0;
+      }
     }
     .plot-source-modal-list {
       display: grid;
@@ -4472,17 +4508,19 @@ HTML = r"""<!doctype html>
               <span class="csv-summary">Artifact label</span>
               <input id="plot-label" type="text" placeholder="Auto-generated label">
             </label>
-            <section class="plot-box">
-              <div class="plot-artifact-toolbar">
-                <div class="plot-box-title">Artifacts</div>
-                <div class="plot-artifact-view-toggle" role="group" aria-label="Plot artifact navigation">
-                  <button id="plot-view-sets" type="button" class="active">Sets</button>
-                  <button id="plot-view-types" type="button">Types</button>
+            <div class="plot-artifact-browser">
+              <section class="plot-box plot-artifact-sidebar">
+                <div class="plot-artifact-toolbar">
+                  <div class="plot-box-title">Artifacts</div>
+                  <div class="plot-artifact-view-toggle" role="group" aria-label="Plot artifact navigation">
+                    <button id="plot-view-sets" type="button" class="active">Sets</button>
+                    <button id="plot-view-types" type="button">Types</button>
+                  </div>
                 </div>
-              </div>
-              <div id="plot-artifacts" class="csv-empty">No plot artifacts loaded.</div>
-            </section>
-            <div id="plot-file" class="csv-empty">Select a plot artifact to preview it.</div>
+                <div id="plot-artifacts" class="csv-empty">No plot artifacts loaded.</div>
+              </section>
+              <div id="plot-file" class="csv-empty">Select a plot artifact to preview it.</div>
+            </div>
           </div>
         </section>
       </section>
@@ -7495,6 +7533,7 @@ HTML = r"""<!doctype html>
       body.appendChild(title);
       body.appendChild(meta);
       const open = document.createElement('span');
+      open.className = 'plot-artifact-open';
       open.textContent = 'Open';
       button.appendChild(body);
       button.appendChild(open);
