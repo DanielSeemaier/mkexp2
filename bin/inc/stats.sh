@@ -24,5 +24,5 @@ StatsCommand() {
     args+=(--json)
   fi
 
-  Rscript "$stats_script" "${args[@]}"
+  env -u R_HOME Rscript "$stats_script" "${args[@]}"
 }
