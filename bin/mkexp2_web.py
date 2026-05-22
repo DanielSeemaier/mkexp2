@@ -980,6 +980,24 @@ class Mkexp2WebApp:
             "path": state.get("path", ""),
         }
 
+    def global_column_visibility(self):
+        state = self.read_column_visibility_state()
+        return {
+            "visibility": dict(state.get("visibility") or {}),
+            "path": state.get("path", ""),
+        }
+
+    def write_global_column_visibility(self, payload):
+        visibility = payload.get("visibility") if isinstance(payload, dict) else None
+        if not isinstance(visibility, dict):
+            raise ValueError("visibility must be an object")
+        saved = self.write_column_visibility_state(visibility)
+        return {
+            "visibility": dict(saved.get("visibility") or {}),
+            "path": saved.get("path", ""),
+            "saved": True,
+        }
+
     def write_column_visibility(self, experiment_id, payload):
         experiment_id = str(experiment_id or "").strip().strip("/")
         path = self.active_experiment_path(experiment_id)
@@ -4691,6 +4709,68 @@ HTML = r"""<!doctype html>
       font-size: 12px;
       text-align: right;
     }
+    .settings-hidden-columns {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }
+    .hidden-column-group {
+      display: grid;
+      gap: 7px;
+      padding: 9px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      min-width: 0;
+    }
+    .hidden-column-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+    .hidden-column-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 750;
+      font-size: 12px;
+    }
+    .hidden-column-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .hidden-column-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      max-width: 100%;
+      padding: 4px 5px 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel);
+      font-size: 12px;
+    }
+    .hidden-column-chip-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 260px;
+    }
+    .hidden-column-remove {
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      border-radius: 999px;
+      color: var(--danger);
+      border-color: var(--danger-border);
+      font-size: 12px;
+      line-height: 1;
+    }
     .danger-icon-button {
       color: var(--danger);
       border-color: var(--danger-border);
@@ -5308,6 +5388,10 @@ HTML = r"""<!doctype html>
               </span>
               <input id="theme-dark-toggle" type="checkbox">
             </label>
+          </div>
+          <div class="settings-section">
+            <div class="settings-tool-title">Results columns</div>
+            <div id="settings-hidden-columns" class="settings-hidden-columns csv-empty">No globally hidden columns loaded.</div>
           </div>
           <div class="settings-section">
             <div class="settings-tool-title">Tags</div>
@@ -6643,10 +6727,117 @@ HTML = r"""<!doctype html>
         out(`Theme save failed: ${String(err)}`);
       }
     }
+    function decodeColumnSignature(signature) {
+      const text = String(signature || '');
+      return text ? uniqueHeaders(text.split('\u001f')) : [];
+    }
+    function hiddenColumnGroups() {
+      const visibility = state.columnVisibility || {};
+      return Object.entries(visibility)
+        .map(([signature, visibleColumnsForSignature]) => {
+          const headers = decodeColumnSignature(signature);
+          if (!headers.length || !Array.isArray(visibleColumnsForSignature)) return null;
+          const allowed = new Set(headers);
+          const visible = new Set(uniqueHeaders(visibleColumnsForSignature).filter(column => allowed.has(column)));
+          const hidden = headers.filter(column => !visible.has(column));
+          if (!hidden.length) return null;
+          return { signature, headers, visible, hidden };
+        })
+        .filter(Boolean)
+        .sort((left, right) => left.signature.localeCompare(right.signature));
+    }
+    function renderSettingsColumnVisibility() {
+      const container = document.getElementById('settings-hidden-columns');
+      if (!container) return;
+      const groups = hiddenColumnGroups();
+      container.innerHTML = '';
+      if (!groups.length) {
+        container.className = 'settings-hidden-columns csv-empty';
+        container.textContent = 'No globally hidden columns.';
+        return;
+      }
+      container.className = 'settings-hidden-columns';
+      for (const group of groups) {
+        const section = document.createElement('section');
+        section.className = 'hidden-column-group';
+        const heading = document.createElement('div');
+        heading.className = 'hidden-column-heading';
+        const title = document.createElement('div');
+        title.className = 'hidden-column-title';
+        title.textContent = `${group.hidden.length} hidden of ${group.headers.length} column${group.headers.length === 1 ? '' : 's'}`;
+        title.title = group.headers.join(', ');
+        const preview = document.createElement('div');
+        preview.className = 'csv-summary';
+        preview.textContent = group.headers.slice(0, 4).join(', ') + (group.headers.length > 4 ? ', ...' : '');
+        heading.appendChild(title);
+        heading.appendChild(preview);
+        const chips = document.createElement('div');
+        chips.className = 'hidden-column-chips';
+        for (const column of group.hidden) {
+          const chip = document.createElement('span');
+          chip.className = 'hidden-column-chip';
+          const name = document.createElement('span');
+          name.className = 'hidden-column-chip-name';
+          name.textContent = column || '(empty)';
+          name.title = column;
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'hidden-column-remove';
+          remove.textContent = 'x';
+          remove.title = `Show ${column || '(empty)'} by default`;
+          remove.setAttribute('aria-label', `Show ${column || '(empty)'} by default`);
+          remove.onclick = () => removeHiddenColumnDefault(group.signature, column, remove).catch(err => out(String(err)));
+          chip.appendChild(name);
+          chip.appendChild(remove);
+          chips.appendChild(chip);
+        }
+        section.appendChild(heading);
+        section.appendChild(chips);
+        container.appendChild(section);
+      }
+    }
+    async function loadSettingsColumnVisibility() {
+      if (state.shared) return state.columnVisibility;
+      const data = await api('/api/columns');
+      state.columnVisibility = data.visibility || {};
+      state.columnVisibilityFor = 'global';
+      renderSettingsColumnVisibility();
+      return state.columnVisibility;
+    }
+    async function saveGlobalColumnVisibility() {
+      const result = await api('/api/columns', {
+        method: 'PUT',
+        body: JSON.stringify({ visibility: state.columnVisibility || {} })
+      });
+      state.columnVisibility = result.visibility || {};
+      state.columnVisibilityFor = 'global';
+      renderSettingsColumnVisibility();
+      if (state.results?.length) renderResultsWorkspace();
+      return result;
+    }
+    async function removeHiddenColumnDefault(signature, column, button) {
+      await withBusyButton(button, '...', async () => {
+        const headers = decodeColumnSignature(signature);
+        const allowed = new Set(headers);
+        const visible = new Set(uniqueHeaders(state.columnVisibility?.[signature] || []).filter(item => allowed.has(item)));
+        visible.add(column);
+        const next = Object.assign({}, state.columnVisibility || {});
+        const orderedVisible = headers.filter(header => visible.has(header));
+        if (orderedVisible.length >= headers.length) {
+          delete next[signature];
+        } else {
+          next[signature] = orderedVisible;
+        }
+        state.columnVisibility = next;
+        renderSettingsColumnVisibility();
+        await saveGlobalColumnVisibility();
+      });
+    }
     function openSettingsDialog() {
       document.getElementById('settings-modal').classList.remove('hidden');
       renderThemeSetting();
       loadUiSettings().catch(err => out(String(err)));
+      loadSettingsColumnVisibility().catch(err => out(String(err)));
       refreshTags().catch(err => out(String(err)));
       loadSpackCacheInfo().catch(err => out(String(err)));
     }
@@ -7089,6 +7280,7 @@ HTML = r"""<!doctype html>
         [signature]: uniqueHeaders(columns),
       });
       state.columnVisibilityFor = 'global';
+      renderSettingsColumnVisibility();
       if (state.shared) return;
       api(`/api/experiments/${encodeURIComponent(state.selected)}/columns`, {
         method: 'PUT',
@@ -10702,6 +10894,9 @@ def make_handler(app):
                 if path == "/api/tags":
                     json_response(self, 200, app.read_tags())
                     return
+                if path == "/api/columns":
+                    json_response(self, 200, app.global_column_visibility())
+                    return
                 if path == "/api/plot/backend":
                     json_response(self, 200, app.plot_backend_status())
                     return
@@ -10956,6 +11151,9 @@ def make_handler(app):
                     return
                 if path == "/api/settings":
                     json_response(self, 200, app.write_settings(payload))
+                    return
+                if path == "/api/columns":
+                    json_response(self, 200, app.write_global_column_visibility(payload))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/tag$", path)
                 if match:

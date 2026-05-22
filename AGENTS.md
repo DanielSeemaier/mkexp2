@@ -137,7 +137,7 @@ There is no linting configuration or CI setup.
 
 - **Web experiment downloads.** The web download action opens a modal before streaming an archive. Root files in the experiment directory are always included, and the selected top-level subdirectories are passed as validated `dir` query parameters to the download endpoint. Omit the selection query to keep the legacy full-directory archive behavior.
 
-- **Web Results column visibility.** Shown/hidden CSV column selections are backend-persistent in `.mkexp2/web-column-visibility.json` under the experiment repo, keyed globally by CSV header signature rather than experiment id. Legacy per-experiment files are read and folded into the global map, but rename/archive/delete no longer move or remove column preferences.
+- **Web Results column visibility.** Shown/hidden CSV column selections are backend-persistent in `.mkexp2/web-column-visibility.json` under the experiment repo, keyed globally by CSV header signature rather than experiment id. Legacy per-experiment files are read and folded into the global map, but rename/archive/delete no longer move or remove column preferences. The Settings dialog lists columns currently hidden by default globally and can remove individual hidden-column entries, which restores that column for the matching CSV header signature.
 
 - **Generated `.gitignore`.** `mkexp2 init` ignores generated log contents with `logs/*` but explicitly unignores `logs/install.md`, so the single install log remains visible for debugging failed setup runs. It does not ignore `plots.pdf` by default. Managed web plot artifacts live under the experiment-local `plots/` directory and are added to `.gitignore` by `mkexp2 plot` because they are generated PDFs plus `plots/index.json` metadata.
 

@@ -262,24 +262,31 @@ class WebBackendTest(unittest.TestCase):
             self.assertEqual(app.column_visibility("exp")["visibility"]["A\u001fB\u001fC"], ["A", "C"])
             self.assertEqual(app.column_visibility("other")["visibility"]["A\u001fB\u001fC"], ["A", "C"])
             self.assertTrue((repo / ".mkexp2" / "web-column-visibility.json").is_file())
+            self.assertEqual(app.global_column_visibility()["visibility"]["A\u001fB\u001fC"], ["A", "C"])
+
+            global_saved = app.write_global_column_visibility({"visibility": {"A\u001fB\u001fC": ["A", "B", "C"]}})
+            self.assertTrue(global_saved["saved"])
+            self.assertEqual(app.column_visibility("other")["visibility"]["A\u001fB\u001fC"], ["A", "B", "C"])
 
             renamed = app.rename_experiment("exp", {"new_id": "renamed"})
             self.assertEqual(renamed["new_id"], "renamed")
-            self.assertEqual(app.column_visibility("renamed")["visibility"]["A\u001fB\u001fC"], ["A", "C"])
-            self.assertEqual(app.column_visibility("other")["visibility"]["A\u001fB\u001fC"], ["A", "C"])
+            self.assertEqual(app.column_visibility("renamed")["visibility"]["A\u001fB\u001fC"], ["A", "B", "C"])
+            self.assertEqual(app.column_visibility("other")["visibility"]["A\u001fB\u001fC"], ["A", "B", "C"])
             archived = app.archive_experiment("renamed")
             self.assertEqual(archived["archived_id"], "renamed.archived")
             unarchived = app.unarchive_experiment("renamed.archived")
             self.assertEqual(unarchived["active_id"], "renamed")
-            self.assertEqual(app.column_visibility("renamed")["visibility"]["A\u001fB\u001fC"], ["A", "C"])
+            self.assertEqual(app.column_visibility("renamed")["visibility"]["A\u001fB\u001fC"], ["A", "B", "C"])
 
             app.delete_experiment("renamed")
-            self.assertEqual(app.column_visibility("other")["visibility"]["A\u001fB\u001fC"], ["A", "C"])
+            self.assertEqual(app.column_visibility("other")["visibility"]["A\u001fB\u001fC"], ["A", "B", "C"])
 
             with self.assertRaises(ValueError):
                 app.write_column_visibility("missing", {"visibility": {}})
             with self.assertRaises(ValueError):
                 app.write_column_visibility("exp", {"visibility": []})
+            with self.assertRaises(ValueError):
+                app.write_global_column_visibility({"visibility": []})
 
     def test_legacy_column_visibility_file_is_read_as_global(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -469,6 +476,11 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("Root files are always included", mkexp2_web.HTML)
         self.assertIn("columnVisibility: {}", mkexp2_web.HTML)
         self.assertIn("function columnSignature", mkexp2_web.HTML)
+        self.assertIn('id="settings-hidden-columns"', mkexp2_web.HTML)
+        self.assertIn("function hiddenColumnGroups", mkexp2_web.HTML)
+        self.assertIn("async function removeHiddenColumnDefault", mkexp2_web.HTML)
+        self.assertIn("/api/columns", mkexp2_web.HTML)
+        self.assertIn("No globally hidden columns.", mkexp2_web.HTML)
         self.assertIn("/columns", mkexp2_web.HTML)
         self.assertIn("Column visibility save failed", mkexp2_web.HTML)
         self.assertNotIn("mkexp2-columns:", mkexp2_web.HTML)
