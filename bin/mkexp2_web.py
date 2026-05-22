@@ -33,6 +33,7 @@ WEB_PINS_FILE = "web-pins.json"
 WEB_SHARES_FILE = "web-shares.json"
 WEB_TAGS_FILE = "web-tags.json"
 WEB_COLUMNS_FILE = "web-column-visibility.json"
+WEB_SETTINGS_FILE = "web-settings.json"
 PLOT_INDEX_FILE = "index.json"
 ARCHIVE_SUFFIX = ".archived"
 EXPERIMENT_SKIP_DIRS = {".git", ".mkexp2", "jobs", "logs", "plots", "results", "slurm"}
@@ -874,6 +875,40 @@ class Mkexp2WebApp:
         tmp.write_text(json.dumps({"pinned": filtered}, indent=2) + "\n", encoding="utf-8")
         tmp.replace(path)
         return {"pinned": filtered, "path": str(path), "saved": True}
+
+    def settings_path(self):
+        return self.repo / WEB_STATE_DIR / WEB_SETTINGS_FILE
+
+    def normalize_settings(self, payload):
+        payload = payload if isinstance(payload, dict) else {}
+        theme = str(payload.get("theme") or "light").strip().lower()
+        if theme not in ("light", "dark"):
+            theme = "light"
+        return {"theme": theme}
+
+    def read_settings(self):
+        path = self.settings_path()
+        if not path.is_file():
+            payload = {}
+        else:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8") or "{}")
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid settings JSON: {exc}") from exc
+        settings = self.normalize_settings(payload)
+        settings["path"] = str(path)
+        return settings
+
+    def write_settings(self, payload):
+        settings = self.normalize_settings(payload)
+        path = self.settings_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(settings, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(path)
+        settings["path"] = str(path)
+        settings["saved"] = True
+        return settings
 
     def columns_path(self):
         return self.repo / WEB_STATE_DIR / WEB_COLUMNS_FILE
@@ -2626,20 +2661,71 @@ HTML = r"""<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>mkexp2</title>
+  <script>
+    (() => {
+      const theme = localStorage.getItem('mkexp2-theme') || 'light';
+      if (theme === 'dark') document.documentElement.dataset.theme = 'dark';
+    })();
+  </script>
   <style>
     :root {
       color-scheme: light;
       --bg: #f5f7f8;
       --panel: #ffffff;
       --panel-2: #edf2f4;
+      --surface: #fbfcfd;
+      --surface-2: #f8fafb;
+      --input-bg: #ffffff;
+      --editor-bg: #ffffff;
+      --editor-text: #25313a;
       --text: #182024;
       --muted: #68767f;
       --border: #d8e0e5;
       --accent: #0f766e;
+      --accent-soft: #e8f5f3;
+      --accent-ring: rgba(15, 118, 110, 0.12);
       --danger: #b42318;
+      --danger-soft: #fffafa;
+      --danger-border: #f1b7b1;
       --ok: #127443;
+      --code-bg: #101820;
+      --code-text: #e7eef2;
+      --progress-bg: #dbe3e8;
+      --compare-good-bg: #dcfce7;
+      --compare-bad-bg: #fee2e2;
+      --compare-equal-bg: #dbeafe;
+      --compare-mid-bg: #ffedd5;
       --shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
       --sidebar-width: 320px;
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #0f1419;
+      --panel: #161d24;
+      --panel-2: #202a33;
+      --surface: #1b242d;
+      --surface-2: #202b35;
+      --input-bg: #111820;
+      --editor-bg: #111820;
+      --editor-text: #d8e2ea;
+      --text: #e7edf2;
+      --muted: #9aa9b6;
+      --border: #334250;
+      --accent: #2dd4bf;
+      --accent-soft: #123b37;
+      --accent-ring: rgba(45, 212, 191, 0.18);
+      --danger: #f87171;
+      --danger-soft: #33191b;
+      --danger-border: #7f3030;
+      --ok: #4ade80;
+      --code-bg: #08111d;
+      --code-text: #e5edf5;
+      --progress-bg: #2b3844;
+      --compare-good-bg: #103d24;
+      --compare-bad-bg: #4a1919;
+      --compare-equal-bg: #172f5f;
+      --compare-mid-bg: #4d2d0c;
+      --shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
     }
     * { box-sizing: border-box; }
     body {
@@ -2736,7 +2822,7 @@ HTML = r"""<!doctype html>
       border: 1px solid var(--border);
       border-radius: 6px;
       padding: 9px 10px;
-      background: white;
+      background: var(--input-bg);
       color: var(--text);
     }
     input[type="checkbox"] {
@@ -2790,14 +2876,14 @@ HTML = r"""<!doctype html>
       grid-column: 1;
     }
     .app.share-mode .editor-shell {
-      background: #fbfcfd;
+      background: var(--surface);
     }
     .app.share-mode #experiment-editor {
       background: transparent;
     }
     .sidebar {
       border-right: 1px solid var(--border);
-      background: #ffffff;
+      background: var(--panel);
       padding: 18px;
       min-width: 0;
       overflow: auto;
@@ -2812,7 +2898,7 @@ HTML = r"""<!doctype html>
     .sidebar-resizer:hover,
     .sidebar-resizer:focus-visible,
     .app.resizing .sidebar-resizer {
-      background: #dce6ea;
+      background: var(--panel-2);
       outline: none;
     }
     .app.resizing {
@@ -2872,7 +2958,7 @@ HTML = r"""<!doctype html>
       padding: 8px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: #fbfcfd;
+      background: var(--surface);
     }
     .archive-name {
       font-weight: 700;
@@ -2929,7 +3015,7 @@ HTML = r"""<!doctype html>
       padding: 8px 10px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: #f8fafb;
+      background: var(--surface-2);
       cursor: pointer;
       list-style: none;
     }
@@ -2984,7 +3070,7 @@ HTML = r"""<!doctype html>
     }
     .experiment-row.active {
       border-color: var(--accent);
-      background: #e8f5f3;
+      background: var(--accent-soft);
     }
     .experiment-row.tagged {
       border-left: 4px solid var(--experiment-tag-color);
@@ -3068,7 +3154,7 @@ HTML = r"""<!doctype html>
       padding: 7px 8px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: #f8fafb;
+      background: var(--surface-2);
       color: var(--text);
       font-size: 12px;
       line-height: 1.2;
@@ -3129,7 +3215,7 @@ HTML = r"""<!doctype html>
     .panel-header {
       padding: 12px 14px;
       border-bottom: 1px solid var(--border);
-      background: #fbfcfd;
+      background: var(--surface);
     }
     .panel-title {
       font-weight: 700;
@@ -3143,12 +3229,12 @@ HTML = r"""<!doctype html>
       min-height: 420px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: white;
+      background: var(--editor-bg);
       overflow: hidden;
     }
     .editor-shell:focus-within {
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+      box-shadow: 0 0 0 3px var(--accent-ring);
     }
     .editor-shell textarea,
     .editor-highlight {
@@ -3181,7 +3267,7 @@ HTML = r"""<!doctype html>
     }
     .editor-highlight {
       pointer-events: none;
-      color: #25313a;
+      color: var(--editor-text);
     }
     .tok-comment { color: #7a8790; font-style: italic; }
     .tok-keyword { color: #0f766e; font-weight: 750; }
@@ -3261,8 +3347,8 @@ HTML = r"""<!doctype html>
     .output {
       white-space: pre-wrap;
       word-break: break-word;
-      background: #101820;
-      color: #e7eef2;
+      background: var(--code-bg);
+      color: var(--code-text);
       border-radius: 6px;
       padding: 10px;
       max-height: 260px;
@@ -3276,7 +3362,7 @@ HTML = r"""<!doctype html>
     .rendered-output {
       white-space: normal;
       word-break: normal;
-      background: white;
+      background: var(--panel);
       color: var(--text);
       border: 1px solid var(--border);
       max-height: 420px;
@@ -3343,7 +3429,7 @@ HTML = r"""<!doctype html>
       border: 1px solid var(--border);
       border-radius: 6px;
       padding: 8px;
-      background: #fbfcfd;
+      background: var(--surface);
     }
     .check-fact-label {
       color: var(--muted);
@@ -3362,7 +3448,7 @@ HTML = r"""<!doctype html>
     .check-line {
       border-radius: 5px;
       padding: 6px 8px;
-      background: #f8fafc;
+      background: var(--surface-2);
       border: 1px solid var(--border);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 12px;
@@ -3385,7 +3471,7 @@ HTML = r"""<!doctype html>
     .check-experiment {
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: #fbfcfd;
+      background: var(--surface);
       padding: 10px;
     }
     .check-experiment-title {
@@ -3402,7 +3488,7 @@ HTML = r"""<!doctype html>
       letter-spacing: 0.04em;
     }
     .danger-zone {
-      border-color: #f1b7b1;
+      border-color: var(--danger-border);
       margin-top: 14px;
     }
     .danger-actions {
@@ -3456,7 +3542,7 @@ HTML = r"""<!doctype html>
     .progress-bar {
       height: 9px;
       border-radius: 999px;
-      background: #dbe3e8;
+      background: var(--progress-bg);
       overflow: hidden;
     }
     .progress-bar-fill {
@@ -3512,8 +3598,8 @@ HTML = r"""<!doctype html>
       margin: 8px 0 0;
       padding: 8px;
       border-radius: 6px;
-      background: #101820;
-      color: #e7eef2;
+      background: var(--code-bg);
+      color: var(--code-text);
       font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     .describe-panel {
@@ -3543,7 +3629,7 @@ HTML = r"""<!doctype html>
       border: 1px solid var(--border);
       border-radius: 7px;
       padding: 3px;
-      background: #f8fafc;
+      background: var(--surface-2);
       flex-wrap: wrap;
       justify-content: flex-end;
     }
@@ -3591,7 +3677,7 @@ HTML = r"""<!doctype html>
       min-width: 0;
       border: 1px solid var(--border);
       border-radius: 8px;
-      background: #fbfcfd;
+      background: var(--surface);
       padding: 10px;
     }
     .describe-card-header {
@@ -3660,7 +3746,7 @@ HTML = r"""<!doctype html>
       white-space: nowrap;
       border: 1px solid var(--border);
       border-radius: 999px;
-      background: white;
+      background: var(--input-bg);
       padding: 3px 7px;
       font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
@@ -3669,7 +3755,7 @@ HTML = r"""<!doctype html>
     }
     .describe-chip.copied {
       border-color: var(--accent);
-      background: #e8f5f3;
+      background: var(--accent-soft);
       color: var(--accent);
     }
     .describe-chip.copyable:focus {
@@ -3702,7 +3788,7 @@ HTML = r"""<!doctype html>
       border: 1px dashed var(--border);
       border-radius: 8px;
       padding: 20px;
-      background: #fbfcfd;
+      background: var(--surface);
     }
     .probe-section {
       display: grid;
@@ -3736,7 +3822,7 @@ HTML = r"""<!doctype html>
       min-width: 0;
       border: 1px solid var(--border);
       border-radius: 8px;
-      background: #fbfcfd;
+      background: var(--surface);
       padding: 10px;
     }
     .probe-input-title,
@@ -3760,7 +3846,7 @@ HTML = r"""<!doctype html>
       white-space: pre;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: white;
+      background: var(--input-bg);
       padding: 7px 8px;
       font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
@@ -3770,7 +3856,7 @@ HTML = r"""<!doctype html>
       text-overflow: ellipsis;
       border: 1px solid var(--border);
       border-radius: 999px;
-      background: white;
+      background: var(--input-bg);
       padding: 3px 7px;
       font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       white-space: nowrap;
@@ -3785,7 +3871,7 @@ HTML = r"""<!doctype html>
       border: 1px solid var(--border);
       border-left: 4px solid var(--accent);
       border-radius: 8px;
-      background: white;
+      background: var(--panel);
       padding: 12px;
     }
     .probe-algorithm-main {
@@ -3824,7 +3910,7 @@ HTML = r"""<!doctype html>
       gap: 6px;
       border: 1px solid var(--border);
       border-radius: 8px;
-      background: #f8fafc;
+      background: var(--surface-2);
       padding: 10px;
     }
     .probe-primary-label {
@@ -3865,7 +3951,7 @@ HTML = r"""<!doctype html>
       gap: 4px;
       border: 1px solid var(--border);
       border-radius: 999px;
-      background: #f8fafc;
+      background: var(--surface-2);
       padding: 4px 8px;
       font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       overflow: hidden;
@@ -3906,7 +3992,7 @@ HTML = r"""<!doctype html>
       border: 1px solid var(--border);
       border-radius: 6px;
       padding: 8px;
-      background: #fbfcfd;
+      background: var(--surface);
     }
     .submit-algorithm-header {
       display: grid;
@@ -3986,7 +4072,7 @@ HTML = r"""<!doctype html>
       white-space: nowrap;
     }
     .csv-file-tab.active {
-      background: #e8f5f3;
+      background: var(--accent-soft);
       border-color: var(--accent);
       color: var(--text);
       font-weight: 650;
@@ -4015,7 +4101,7 @@ HTML = r"""<!doctype html>
       padding: 8px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: #fbfcfd;
+      background: var(--surface);
       max-height: 170px;
       overflow: auto;
     }
@@ -4035,7 +4121,7 @@ HTML = r"""<!doctype html>
       max-height: calc(100vh - 260px);
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: white;
+      background: var(--panel);
     }
     .csv-table {
       width: max-content;
@@ -4047,18 +4133,18 @@ HTML = r"""<!doctype html>
       position: sticky;
       top: 0;
       z-index: 1;
-      background: #eef4f5;
+      background: var(--surface-2);
     }
     .csv-table th.compare-clickable {
       cursor: pointer;
       user-select: none;
     }
     .csv-table th.compare-clickable:hover {
-      background: #ddebec;
+      background: var(--panel-2);
     }
     .csv-table th.compare-lower-good,
     .csv-table th.compare-higher-good {
-      background: #d9e8ea;
+      background: var(--panel-2);
       color: var(--text);
     }
     .csv-table th.compare-lower-good::after {
@@ -4084,16 +4170,16 @@ HTML = r"""<!doctype html>
       font-variant-numeric: tabular-nums;
     }
     .csv-table td.compare-good {
-      background: #dcfce7;
+      background: var(--compare-good-bg);
     }
     .csv-table td.compare-bad {
-      background: #fee2e2;
+      background: var(--compare-bad-bg);
     }
     .csv-table td.compare-equal {
-      background: #dbeafe;
+      background: var(--compare-equal-bg);
     }
     .csv-table td.compare-mid {
-      background: #ffedd5;
+      background: var(--compare-mid-bg);
     }
     .csv-summary {
       color: var(--muted);
@@ -4111,7 +4197,7 @@ HTML = r"""<!doctype html>
       padding: 0 10px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: white;
+      background: var(--panel);
       color: var(--text);
       font-size: 12px;
       white-space: nowrap;
@@ -4122,7 +4208,7 @@ HTML = r"""<!doctype html>
     }
     .plot-option.disabled {
       color: var(--muted);
-      background: #f2f4f7;
+      background: var(--surface-2);
       cursor: not-allowed;
     }
     .plot-pdf {
@@ -4131,7 +4217,7 @@ HTML = r"""<!doctype html>
       min-height: 560px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: white;
+      background: var(--panel);
     }
     .plot-manager {
       display: grid;
@@ -4162,14 +4248,14 @@ HTML = r"""<!doctype html>
       padding: 8px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: white;
+      background: var(--panel);
     }
     .plot-source-row {
       grid-template-columns: auto minmax(0, 1fr) auto;
     }
     .plot-source-row.external {
       border-color: #bfdbfe;
-      background: #eff6ff;
+      background: var(--surface);
     }
     .plot-source-check {
       display: contents;
@@ -4195,7 +4281,7 @@ HTML = r"""<!doctype html>
     }
     .plot-choice.expensive {
       border-color: #fed7aa;
-      background: #fff7ed;
+      background: var(--surface);
     }
     .plot-choice-title,
     .plot-source-title,
@@ -4252,7 +4338,7 @@ HTML = r"""<!doctype html>
       padding: 2px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: white;
+      background: var(--panel);
     }
     .plot-artifact-view-toggle button {
       height: 26px;
@@ -4271,7 +4357,7 @@ HTML = r"""<!doctype html>
       padding: 10px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: white;
+      background: var(--panel);
     }
     .plot-artifact-group-header {
       display: grid;
@@ -4307,13 +4393,13 @@ HTML = r"""<!doctype html>
       padding: 8px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: #fbfcfd;
+      background: var(--surface);
       text-align: left;
       height: auto;
     }
     .plot-artifact-select.active {
       border-color: var(--accent);
-      background: #e8f5f3;
+      background: var(--accent-soft);
     }
     .plot-artifact-sidebar .plot-artifact-group-header,
     .plot-artifact-sidebar .plot-artifact-select {
@@ -4358,7 +4444,7 @@ HTML = r"""<!doctype html>
       padding: 8px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: #fbfcfd;
+      background: var(--surface);
     }
     .plot-source-modal-files {
       display: flex;
@@ -4407,7 +4493,7 @@ HTML = r"""<!doctype html>
       color: var(--muted);
       padding: 10px 12px;
       border-left: 3px solid var(--accent);
-      background: #eef8f6;
+      background: var(--accent-soft);
       border-radius: 6px;
       line-height: 1.45;
     }
@@ -4416,7 +4502,7 @@ HTML = r"""<!doctype html>
       padding: 9px 10px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: #fbfcfd;
+      background: var(--surface);
     }
     .stat-card-label {
       color: var(--muted);
@@ -4446,7 +4532,7 @@ HTML = r"""<!doctype html>
       padding: 14px;
       border: 1px dashed var(--border);
       border-radius: 6px;
-      background: #fbfcfd;
+      background: var(--surface);
     }
     .modal-backdrop {
       position: fixed;
@@ -4461,7 +4547,7 @@ HTML = r"""<!doctype html>
       width: min(760px, 100%);
       max-height: calc(100vh - 40px);
       overflow: auto;
-      background: white;
+      background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 8px;
       box-shadow: 0 20px 50px rgba(15, 23, 42, 0.24);
@@ -4474,7 +4560,7 @@ HTML = r"""<!doctype html>
       gap: 10px;
       padding: 12px 14px;
       border-bottom: 1px solid var(--border);
-      background: #fbfcfd;
+      background: var(--surface);
     }
     .modal-footer {
       border-top: 1px solid var(--border);
@@ -4539,7 +4625,7 @@ HTML = r"""<!doctype html>
       padding: 7px 9px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: #fbfcfd;
+      background: var(--surface);
       cursor: pointer;
     }
     .tag-row:focus-visible {
@@ -4559,8 +4645,8 @@ HTML = r"""<!doctype html>
     }
     .danger-icon-button {
       color: var(--danger);
-      border-color: #fecaca;
-      background: #fffafa;
+      border-color: var(--danger-border);
+      background: var(--danger-soft);
     }
     .git-status-grid {
       display: grid;
@@ -4570,7 +4656,7 @@ HTML = r"""<!doctype html>
       min-width: 0;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: #fbfcfd;
+      background: var(--surface);
       padding: 6px;
       display: grid;
       gap: 3px;
@@ -4611,7 +4697,7 @@ HTML = r"""<!doctype html>
       overflow: auto;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: #fbfcfd;
+      background: var(--surface);
     }
     .queue-table {
       width: 100%;
@@ -4631,7 +4717,7 @@ HTML = r"""<!doctype html>
       font-size: 11px;
       font-weight: 750;
       text-transform: uppercase;
-      background: #f8fafb;
+      background: var(--surface-2);
     }
     .queue-table tr:last-child td {
       border-bottom: 0;
@@ -4648,12 +4734,12 @@ HTML = r"""<!doctype html>
       height: 26px;
       padding: 0 8px;
       color: var(--danger);
-      border-color: #f1b7b1;
+      border-color: var(--danger-border);
       font-size: 12px;
     }
     .queue-cancel-all {
       color: var(--danger);
-      border-color: #f1b7b1;
+      border-color: var(--danger-border);
     }
     .git-message {
       display: grid;
@@ -4674,6 +4760,33 @@ HTML = r"""<!doctype html>
       font-weight: 750;
       font-size: 12px;
     }
+    .theme-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      cursor: pointer;
+    }
+    .theme-toggle input {
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      flex: 0 0 auto;
+    }
+    .theme-toggle-title {
+      display: block;
+      font-weight: 750;
+      font-size: 12px;
+      margin-bottom: 2px;
+    }
+    .theme-toggle-desc {
+      color: var(--muted);
+      font-size: 12px;
+    }
     .settings-tool {
       display: flex;
       align-items: center;
@@ -4683,7 +4796,7 @@ HTML = r"""<!doctype html>
       margin-bottom: 12px;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: #fbfcfd;
+      background: var(--surface);
     }
     .settings-tool-title {
       font-weight: 750;
@@ -4741,7 +4854,7 @@ HTML = r"""<!doctype html>
     }
     .log-entry.active {
       border-color: var(--accent);
-      background: #e8f5f3;
+      background: var(--accent-soft);
     }
     .log-entry-name {
       min-width: 0;
@@ -4765,8 +4878,8 @@ HTML = r"""<!doctype html>
       white-space: pre-wrap;
       overflow-wrap: anywhere;
       border-radius: 6px;
-      background: #101820;
-      color: #e7eef2;
+      background: var(--code-bg);
+      color: var(--code-text);
       padding: 12px;
       font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
@@ -4792,7 +4905,7 @@ HTML = r"""<!doctype html>
     .markdown-doc h3 { font-size: 14px; }
     .markdown-doc p {
       margin: 7px 0;
-      color: #334155;
+      color: var(--text);
     }
     .markdown-doc ul {
       margin: 7px 0 7px 20px;
@@ -4804,7 +4917,7 @@ HTML = r"""<!doctype html>
     .markdown-doc code {
       border: 1px solid var(--border);
       border-radius: 5px;
-      background: #f8fafc;
+      background: var(--surface-2);
       padding: 1px 4px;
       font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
@@ -4812,8 +4925,8 @@ HTML = r"""<!doctype html>
       margin: 10px 0;
       padding: 10px;
       border-radius: 6px;
-      background: #101820;
-      color: #e7eef2;
+      background: var(--code-bg);
+      color: var(--code-text);
       overflow: auto;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
@@ -4856,7 +4969,7 @@ HTML = r"""<!doctype html>
       min-width: 0;
       border: 1px solid var(--border);
       border-radius: 6px;
-      background: white;
+      background: var(--input-bg);
       overflow: hidden;
     }
     .template-name-part {
@@ -4885,6 +4998,41 @@ HTML = r"""<!doctype html>
     }
     .checkbox-line input {
       width: auto;
+    }
+    :root[data-theme="dark"] .node-state-allocated {
+      background: #4a1919;
+      border-color: #7f3030;
+      color: #fecaca;
+    }
+    :root[data-theme="dark"] .node-state-idle {
+      background: #12351f;
+      border-color: #23663c;
+      color: #bbf7d0;
+    }
+    :root[data-theme="dark"] .check-indicator.ok,
+    :root[data-theme="dark"] .git-file.added {
+      color: #bbf7d0;
+      background: #12351f;
+      border-color: #23663c;
+    }
+    :root[data-theme="dark"] .check-indicator.bad,
+    :root[data-theme="dark"] .git-file.deleted {
+      color: #fecaca;
+      background: #4a1919;
+      border-color: #7f3030;
+    }
+    :root[data-theme="dark"] .git-file.modified {
+      color: #bfdbfe;
+      background: #172f5f;
+    }
+    :root[data-theme="dark"] .pin-button.active {
+      color: #fde68a;
+      border-color: #a16207;
+      background: #3f310c;
+    }
+    :root[data-theme="dark"] .tag-color-choice.active {
+      border-color: #f8fafc;
+      box-shadow: inset 0 0 0 2px #111820;
     }
     .hidden { display: none; }
     @media (max-width: 980px) {
@@ -5102,6 +5250,16 @@ HTML = r"""<!doctype html>
           <div class="settings-token">
             <label for="token">Session token</label>
             <input id="token" type="password" placeholder="Session token">
+          </div>
+          <div class="settings-section">
+            <div class="settings-tool-title">Appearance</div>
+            <label class="theme-toggle" for="theme-dark-toggle">
+              <span>
+                <span class="theme-toggle-title">Dark mode</span>
+                <span class="theme-toggle-desc">Use a darker color scheme for this web UI.</span>
+              </span>
+              <input id="theme-dark-toggle" type="checkbox">
+            </label>
           </div>
           <div class="settings-section">
             <div class="settings-tool-title">Tags</div>
@@ -5572,9 +5730,12 @@ HTML = r"""<!doctype html>
       activeView: 'experiment-view',
       shared: false,
       shareId: '',
-      shareCommandTemplate: ''
+      shareCommandTemplate: '',
+      settings: { theme: 'light' },
+      settingsLoaded: false
     };
     const PLOT_RELOAD_DELAY_MS = 5000;
+    const THEME_STORAGE_KEY = 'mkexp2-theme';
     const SIDEBAR_WIDTH_KEY = 'mkexp2-sidebar-width';
     const DEFAULT_SIDEBAR_WIDTH = 320;
     const MIN_SIDEBAR_WIDTH = 260;
@@ -5589,6 +5750,7 @@ HTML = r"""<!doctype html>
       localStorage.setItem('mkexp2-token', tokenInput.value);
       out('');
       if (token() || allowEmptyToken) {
+        loadUiSettings().catch(err => out(String(err)));
         refreshConfig().catch(err => out(String(err)));
         refreshPresets().catch(err => out(String(err)));
         refreshExperiments({ selectMostRecent: true }).catch(err => out(String(err)));
@@ -6369,8 +6531,53 @@ HTML = r"""<!doctype html>
         await refreshStatus().catch(err => out(String(err)));
       });
     }
+    function normalizeTheme(theme) {
+      return theme === 'dark' ? 'dark' : 'light';
+    }
+    function applyTheme(theme, persistLocal = true) {
+      const normalized = normalizeTheme(theme);
+      state.settings = Object.assign({}, state.settings || {}, { theme: normalized });
+      document.documentElement.dataset.theme = normalized;
+      if (normalized === 'light') {
+        delete document.documentElement.dataset.theme;
+      }
+      if (persistLocal) localStorage.setItem(THEME_STORAGE_KEY, normalized);
+      renderThemeSetting();
+      return normalized;
+    }
+    function renderThemeSetting() {
+      const toggle = document.getElementById('theme-dark-toggle');
+      if (!toggle) return;
+      toggle.checked = normalizeTheme(state.settings?.theme) === 'dark';
+    }
+    async function loadUiSettings() {
+      if (state.shared) {
+        applyTheme(localStorage.getItem(THEME_STORAGE_KEY) || 'light', false);
+        return state.settings;
+      }
+      const settings = await api('/api/settings');
+      state.settingsLoaded = true;
+      applyTheme(settings.theme || 'light');
+      return settings;
+    }
+    async function saveTheme(theme) {
+      const normalized = applyTheme(theme);
+      if (state.shared) return;
+      try {
+        const saved = await api('/api/settings', {
+          method: 'PUT',
+          body: JSON.stringify({ theme: normalized })
+        });
+        state.settingsLoaded = true;
+        applyTheme(saved.theme || normalized);
+      } catch (err) {
+        out(`Theme save failed: ${String(err)}`);
+      }
+    }
     function openSettingsDialog() {
       document.getElementById('settings-modal').classList.remove('hidden');
+      renderThemeSetting();
+      loadUiSettings().catch(err => out(String(err)));
       refreshTags().catch(err => out(String(err)));
       loadSpackCacheInfo().catch(err => out(String(err)));
     }
@@ -10048,6 +10255,7 @@ HTML = r"""<!doctype html>
     document.getElementById('tag-save').onclick = () => saveTag().catch(err => out(String(err)));
     document.getElementById('settings-open').onclick = openSettingsDialog;
     document.getElementById('settings-close').onclick = closeSettingsDialog;
+    document.getElementById('theme-dark-toggle').onchange = event => saveTheme(event.target.checked ? 'dark' : 'light');
     document.getElementById('spack-cache-refresh').onclick = () => refreshSpackCache().catch(err => out(String(err)));
     document.getElementById('check').onclick = checkExperiment;
     document.getElementById('describe-toggle').onclick = () => toggleDescribePanel().catch(err => out(String(err)));
@@ -10106,6 +10314,7 @@ HTML = r"""<!doctype html>
     if (initialShareId) {
       selectSharedExperiment(initialShareId).catch(err => out(String(err)));
     } else if (token() || allowEmptyToken) {
+      loadUiSettings().catch(err => out(String(err)));
       refreshConfig().catch(err => out(String(err)));
       refreshPresets().catch(err => out(String(err)));
       refreshExperiments({ selectMostRecent: true }).catch(err => out(String(err)));
@@ -10307,6 +10516,9 @@ def make_handler(app):
                     return
                 if path == "/api/config":
                     json_response(self, 200, app.config())
+                    return
+                if path == "/api/settings":
+                    json_response(self, 200, app.read_settings())
                     return
                 if path == "/api/presets":
                     json_response(self, 200, {"presets": app.list_presets()})
@@ -10573,6 +10785,9 @@ def make_handler(app):
                 payload = read_json(self)
                 if path == "/api/pins":
                     json_response(self, 200, app.write_pins(payload.get("pinned") or []))
+                    return
+                if path == "/api/settings":
+                    json_response(self, 200, app.write_settings(payload))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/tag$", path)
                 if match:

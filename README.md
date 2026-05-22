@@ -444,8 +444,8 @@ The UI can:
 - download an experiment from the top navigation after choosing which
   top-level subdirectories to include; root files such as `Experiment` are
   always included in the archive
-- open the header settings button to manage the session token, experiment tags,
-  and the native plotting Spack/R cache
+- open the header settings button to manage the session token, dark mode,
+  experiment tags, and the native plotting Spack/R cache
 - show a disabled busy state with a spinner on controls that trigger backend
   work, including reloads, checks, probes, parsing, plotting, Git push, and
   destructive recovery actions

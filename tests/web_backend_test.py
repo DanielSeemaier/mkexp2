@@ -276,6 +276,19 @@ class WebBackendTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 app.write_column_visibility("exp", {"visibility": []})
 
+    def test_web_settings_persist_theme(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "%Y.%m.%d-<name>", "token")
+
+            self.assertEqual(app.read_settings()["theme"], "light")
+            saved = app.write_settings({"theme": "dark"})
+            self.assertTrue(saved["saved"])
+            self.assertEqual(saved["theme"], "dark")
+            self.assertEqual(app.read_settings()["theme"], "dark")
+            self.assertTrue((repo / ".mkexp2" / "web-settings.json").is_file())
+            self.assertEqual(app.write_settings({"theme": "bad"})["theme"], "light")
+
     def test_list_presets_uses_probe_json(self):
         original_run_command = mkexp2_web.run_command
         calls = []
@@ -642,6 +655,13 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="settings-modal"', mkexp2_web.HTML)
         self.assertIn('id="settings-close"', mkexp2_web.HTML)
         self.assertIn('<label for="token">Session token</label>', mkexp2_web.HTML)
+        self.assertIn('id="theme-dark-toggle"', mkexp2_web.HTML)
+        self.assertIn('Dark mode', mkexp2_web.HTML)
+        self.assertIn('data-theme="dark"', mkexp2_web.HTML)
+        self.assertIn("THEME_STORAGE_KEY", mkexp2_web.HTML)
+        self.assertIn("async function loadUiSettings", mkexp2_web.HTML)
+        self.assertIn("async function saveTheme", mkexp2_web.HTML)
+        self.assertIn("/api/settings", mkexp2_web.HTML)
         self.assertIn('id="spack-cache-refresh"', mkexp2_web.HTML)
         self.assertIn("Resolve Spack R cache", mkexp2_web.HTML)
         self.assertIn("/api/plot/spack-r-libs", mkexp2_web.HTML)
