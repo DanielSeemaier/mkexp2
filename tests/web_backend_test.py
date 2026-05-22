@@ -88,6 +88,8 @@ class WebBackendTest(unittest.TestCase):
             (repo / "flat" / "Experiment").write_text("ExperimentFlat() { :; }\n")
             (repo / "2026" / "run-a").mkdir(parents=True)
             (repo / "2026" / "run-a" / "Experiment").write_text("ExperimentA() { :; }\n")
+            (repo / "2026" / "run-a" / ".mkexp2").mkdir()
+            (repo / "2026" / "run-a" / ".mkexp2" / "submit.lock").write_text("started_at=2026-05-22T12:00:00Z\n")
             (repo / "2026" / "old.archived").mkdir(parents=True)
             (repo / "2026" / "old.archived" / "Experiment").write_text("ExperimentOld() { :; }\n")
             (repo / ".git" / "ignored").mkdir(parents=True)
@@ -108,6 +110,8 @@ class WebBackendTest(unittest.TestCase):
             self.assertEqual(nested["depth"], 2)
             self.assertIn("created_at", nested)
             self.assertIsInstance(nested["created_at_epoch"], float)
+            self.assertTrue(nested["submit_lock"]["locked"])
+            self.assertEqual(nested["submit_lock"]["fields"]["started_at"], "2026-05-22T12:00:00Z")
 
     def test_list_experiments_prefers_git_index_and_caches(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -122,6 +126,14 @@ class WebBackendTest(unittest.TestCase):
 
             first = app.list_experiments()
             self.assertEqual([item["id"] for item in first], ["tracked", "untracked"])
+            self.assertFalse(first[0]["submit_lock"]["locked"])
+
+            (repo / "tracked" / ".mkexp2").mkdir()
+            (repo / "tracked" / ".mkexp2" / "submit.lock").write_text("algorithms=Mock\n")
+            cached_with_lock = app.list_experiments()
+            tracked = next(item for item in cached_with_lock if item["id"] == "tracked")
+            self.assertTrue(tracked["submit_lock"]["locked"])
+            self.assertEqual(tracked["submit_lock"]["fields"]["algorithms"], "Mock")
 
             (repo / "later").mkdir()
             (repo / "later" / "Experiment").write_text("ExperimentLater() { :; }\n")
@@ -355,6 +367,10 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("margin-top: 14px;", mkexp2_web.HTML)
         self.assertIn("Type the full experiment name to delete it", mkexp2_web.HTML)
         self.assertIn("function renderSubmitButton", mkexp2_web.HTML)
+        self.assertIn(".experiment-row.locked", mkexp2_web.HTML)
+        self.assertIn("border-left-color: var(--danger)", mkexp2_web.HTML)
+        self.assertIn("function updateSelectedExperimentLock", mkexp2_web.HTML)
+        self.assertIn("function submitLockText", mkexp2_web.HTML)
         self.assertIn("async function renameExperiment", mkexp2_web.HTML)
         self.assertIn("async function shareExperiment", mkexp2_web.HTML)
         self.assertIn("/rename", mkexp2_web.HTML)

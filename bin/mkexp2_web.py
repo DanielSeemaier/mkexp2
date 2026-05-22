@@ -752,11 +752,11 @@ class Mkexp2WebApp:
             and self._experiments_cache is not None
             and now - self._experiments_cache_at < EXPERIMENT_CACHE_SECONDS
         ):
-            return self._experiments_cache
+            return self.with_submit_lock_summaries(self._experiments_cache)
         experiments = self._discover_experiments(archived=False)
         self._experiments_cache = experiments
         self._experiments_cache_at = now
-        return experiments
+        return self.with_submit_lock_summaries(experiments)
 
     def list_archived_experiments(self, force=False):
         now = time.time()
@@ -1034,8 +1034,8 @@ class Mkexp2WebApp:
     def submit_lock_path(self, experiment_id):
         return self.active_experiment_path(experiment_id) / ".mkexp2" / "submit.lock"
 
-    def submit_lock(self, experiment_id):
-        path = self.submit_lock_path(experiment_id)
+    def submit_lock_at_path(self, experiment_path):
+        path = Path(experiment_path) / ".mkexp2" / "submit.lock"
         if not path.is_file():
             return {"locked": False, "path": str(path), "content": "", "fields": {}}
         content = path.read_text(encoding="utf-8", errors="replace")
@@ -1052,6 +1052,28 @@ class Mkexp2WebApp:
             "fields": fields,
             "modified_at": _dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
         }
+
+    def submit_lock_summary_at_path(self, experiment_path):
+        lock = self.submit_lock_at_path(experiment_path)
+        return {
+            "locked": bool(lock.get("locked")),
+            "fields": lock.get("fields") or {},
+            "modified_at": lock.get("modified_at", ""),
+        }
+
+    def with_submit_lock_summaries(self, experiments):
+        summarized = []
+        for experiment in experiments:
+            item = dict(experiment)
+            try:
+                item["submit_lock"] = self.submit_lock_summary_at_path(item["path"])
+            except OSError:
+                item["submit_lock"] = {"locked": False, "fields": {}, "modified_at": ""}
+            summarized.append(item)
+        return summarized
+
+    def submit_lock(self, experiment_id):
+        return self.submit_lock_at_path(self.active_experiment_path(experiment_id))
 
     def clear_submit_lock(self, experiment_id):
         path = self.submit_lock_path(experiment_id)
@@ -2438,10 +2460,26 @@ HTML = r"""<!doctype html>
       overflow: hidden;
       display: grid;
       gap: 2px;
+      border-left: 4px solid transparent;
     }
     .experiment-row.active {
       border-color: var(--accent);
+      border-left-color: transparent;
       background: #e8f5f3;
+    }
+    .experiment-row.locked {
+      border-left-color: var(--danger);
+    }
+    .experiment-row.active.locked {
+      border-color: var(--accent);
+      border-left-color: var(--danger);
+      background: #e8f5f3;
+    }
+    .experiment-name-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
     }
     .experiment-name {
       min-width: 0;
@@ -6455,19 +6493,26 @@ HTML = r"""<!doctype html>
     }
     function renderExperimentItem(container, exp, label) {
       const pinned = state.pinnedExperiments.has(exp.id);
+      const locked = Boolean(exp.submit_lock?.locked);
       const item = document.createElement('div');
       item.className = 'experiment-item';
       const button = document.createElement('button');
-      button.className = 'experiment-row' + (state.selected === exp.id ? ' active' : '');
+      button.className = 'experiment-row'
+        + (state.selected === exp.id ? ' active' : '')
+        + (locked ? ' locked' : '');
+      const nameRow = document.createElement('span');
+      nameRow.className = 'experiment-name-row';
       const name = document.createElement('span');
       name.className = 'experiment-name';
       name.textContent = label;
+      nameRow.appendChild(name);
       const date = document.createElement('span');
       date.className = 'experiment-date';
       const created = formatExperimentDate(exp);
       date.textContent = created || 'unknown';
-      button.title = created ? `${exp.id}\n${created}` : exp.id;
-      button.appendChild(name);
+      const title = [exp.id, created, locked ? submitLockText(exp.submit_lock) : ''].filter(Boolean).join('\n');
+      button.title = title || exp.id;
+      button.appendChild(nameRow);
       button.appendChild(date);
       button.onclick = () => withBusyButton(button, 'Loading...', () => selectExperiment(exp.id)).catch(err => out(String(err)));
       const pin = document.createElement('button');
@@ -6480,6 +6525,17 @@ HTML = r"""<!doctype html>
       item.appendChild(button);
       item.appendChild(pin);
       container.appendChild(item);
+    }
+    function updateSelectedExperimentLock(lock) {
+      if (!state.selected) return;
+      const experiment = state.experiments.find(item => item.id === state.selected);
+      if (!experiment) return;
+      experiment.submit_lock = {
+        locked: Boolean(lock?.locked),
+        fields: lock?.fields || {},
+        modified_at: lock?.modified_at || ''
+      };
+      renderExperimentsList();
     }
     function renderPinnedExperiments(container) {
       const order = Array.from(state.pinnedExperiments);
@@ -6664,14 +6720,18 @@ HTML = r"""<!doctype html>
       const submitButton = document.getElementById('submit');
       const locked = Boolean(state.submitLock.locked);
       clearButton.disabled = !locked || !state.selected;
+      updateSelectedExperimentLock(state.submitLock);
       renderSubmitButton();
     }
-    function submitLockMessage() {
-      if (!state.submitLock?.locked) return '';
-      const fields = state.submitLock.fields || {};
+    function submitLockText(lock) {
+      if (!lock?.locked) return '';
+      const fields = lock.fields || {};
       const started = fields.started_at ? ` since ${fields.started_at}` : '';
       const algorithms = fields.algorithms ? ` (${fields.algorithms})` : '';
       return `Submit locked${started}${algorithms}`;
+    }
+    function submitLockMessage() {
+      return submitLockText(state.submitLock);
     }
     function renderSubmitButton() {
       const submitButton = document.getElementById('submit');
