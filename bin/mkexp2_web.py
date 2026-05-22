@@ -48,6 +48,7 @@ TAG_COLOR_PALETTE = [
     {"name": "Slate", "color": "#64748b"},
 ]
 DEFAULT_TAGS = [{"name": "Codex", "color": TAG_COLOR_PALETTE[0]["color"]}]
+DEFAULT_TAG_NAMES = {tag["name"] for tag in DEFAULT_TAGS}
 SINFO_LONG_FALLBACK = """Sat May 16 15:57:01 2026
 NODELIST    NODES PARTITION       STATE CPUS    S:C:T MEMORY TMP_DISK WEIGHT AVAIL_FE REASON
 backus          1      all*   allocated 128    1:64:2 101939        0      1   (null) none
@@ -903,6 +904,7 @@ class Mkexp2WebApp:
             "tags": sorted(tag_map.values(), key=lambda item: item["name"].casefold()),
             "assignments": assignments,
             "palette": list(TAG_COLOR_PALETTE),
+            "default_tags": sorted(DEFAULT_TAG_NAMES),
         }
 
     def read_tags(self):
@@ -941,6 +943,23 @@ class Mkexp2WebApp:
         tags = [tag for tag in state["tags"] if tag["name"] != name]
         tags.append({"name": name, "color": color})
         return self.write_tags_state(tags, state["assignments"])
+
+    def delete_tag(self, name):
+        name = normalize_tag_name(name)
+        if not name:
+            raise ValueError("tag name is required")
+        if name in DEFAULT_TAG_NAMES:
+            raise ValueError(f"default tag cannot be deleted: {name}")
+        state = self.read_tags()
+        tags = [tag for tag in state["tags"] if tag["name"] != name]
+        if len(tags) == len(state["tags"]):
+            raise ValueError(f"unknown tag: {name}")
+        assignments = {
+            experiment_id: tag_name
+            for experiment_id, tag_name in state["assignments"].items()
+            if tag_name != name
+        }
+        return self.write_tags_state(tags, assignments)
 
     def tag_for_experiment(self, experiment_id, tags_state=None):
         tags_state = tags_state or self.read_tags()
@@ -2465,7 +2484,6 @@ HTML = r"""<!doctype html>
     .app.share-mode .danger-zone,
     .app.share-mode #check,
     .app.share-mode #share-experiment,
-    .app.share-mode #tag-open,
     .app.share-mode .tag-controls,
     .app.share-mode #add-plot-source {
       display: none !important;
@@ -3939,7 +3957,7 @@ HTML = r"""<!doctype html>
       width: 100%;
       height: auto;
       display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-columns: auto minmax(0, 1fr) auto auto;
       gap: 8px;
       align-items: center;
       text-align: left;
@@ -3948,6 +3966,11 @@ HTML = r"""<!doctype html>
       border: 1px solid var(--border);
       border-radius: 6px;
       background: #fbfcfd;
+      cursor: pointer;
+    }
+    .tag-row:focus-visible {
+      outline: 2px solid rgba(37, 99, 235, 0.35);
+      outline-offset: 2px;
     }
     .tag-row-name {
       min-width: 0;
@@ -3955,6 +3978,15 @@ HTML = r"""<!doctype html>
       text-overflow: ellipsis;
       white-space: nowrap;
       font-weight: 700;
+    }
+    .tag-row-status {
+      font-size: 12px;
+      text-align: right;
+    }
+    .danger-icon-button {
+      color: var(--danger);
+      border-color: #fecaca;
+      background: #fffafa;
     }
     .git-status-grid {
       display: grid;
@@ -4086,6 +4118,13 @@ HTML = r"""<!doctype html>
     }
     .settings-tool button {
       flex: 0 0 auto;
+    }
+    .settings-section {
+      display: grid;
+      gap: 8px;
+      padding-top: 12px;
+      margin-bottom: 12px;
+      border-top: 1px solid var(--border);
     }
     .console-log {
       display: grid;
@@ -4472,31 +4511,6 @@ HTML = r"""<!doctype html>
         </div>
       </div>
     </div>
-    <div id="tag-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="tag-modal-title">
-      <div class="modal">
-        <div class="modal-header">
-          <div>
-            <div id="tag-modal-title" class="modal-title">Tag Manager</div>
-          </div>
-          <button id="tag-close" class="icon-button" aria-label="Close tag manager" title="Close">x</button>
-        </div>
-        <div class="modal-body">
-          <div class="tag-manager-grid">
-            <label>
-              <span class="csv-summary">Tag name</span>
-              <input id="tag-name" type="text" placeholder="Codex">
-            </label>
-            <div class="tag-color-field">
-              <span class="csv-summary">Border color</span>
-              <input id="tag-color" type="hidden" value="#2563eb">
-              <div id="tag-color-palette" class="tag-color-palette" role="radiogroup" aria-label="Border color"></div>
-            </div>
-            <button id="tag-save">Save Tag</button>
-          </div>
-          <div id="tag-list" class="tag-list"></div>
-        </div>
-      </div>
-    </div>
     <div id="queue-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="queue-modal-title">
       <div class="modal">
         <div class="modal-header">
@@ -4530,6 +4544,22 @@ HTML = r"""<!doctype html>
           <div class="settings-token">
             <label for="token">Session token</label>
             <input id="token" type="password" placeholder="Session token">
+          </div>
+          <div class="settings-section">
+            <div class="settings-tool-title">Tags</div>
+            <div class="tag-manager-grid">
+              <label>
+                <span class="csv-summary">Tag name</span>
+                <input id="tag-name" type="text" placeholder="Codex">
+              </label>
+              <div class="tag-color-field">
+                <span class="csv-summary">Border color</span>
+                <input id="tag-color" type="hidden" value="#2563eb">
+                <div id="tag-color-palette" class="tag-color-palette" role="radiogroup" aria-label="Border color"></div>
+              </div>
+              <button id="tag-save">Save Tag</button>
+            </div>
+            <div id="tag-list" class="tag-list"></div>
           </div>
           <div class="settings-tool">
             <div>
@@ -4573,9 +4603,6 @@ HTML = r"""<!doctype html>
         <div class="tag-controls" aria-label="Experiment tag controls">
           <select id="experiment-tag-select" title="Experiment tag"></select>
         </div>
-        <button id="tag-open" class="icon-button" aria-label="Manage tags" title="Manage tags">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.2 13.2 20.6a2 2 0 0 1-2.8 0L3 13.2V3h10.2l7.4 7.4a2 2 0 0 1 0 2.8Z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>
-        </button>
         <button id="share-experiment" class="icon-button" aria-label="Share experiment" title="Share experiment">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.6 6.8-4.2"/><path d="m8.6 13.4 6.8 4.2"/></svg>
         </button>
@@ -4827,6 +4854,7 @@ HTML = r"""<!doctype html>
       pinnedExperiments: new Set(),
       tags: [],
       tagPalette: DEFAULT_TAG_COLOR_PALETTE,
+      defaultTagNames: [],
       tagAssignments: {},
       algorithms: [],
       algorithmLoading: false,
@@ -5701,6 +5729,7 @@ HTML = r"""<!doctype html>
     function openSettingsDialog() {
       state.consoleOpen = true;
       document.getElementById('settings-modal').classList.remove('hidden');
+      refreshTags().catch(err => out(String(err)));
       loadSpackCacheInfo().catch(err => out(String(err)));
       renderConsoleLog();
     }
@@ -6850,9 +6879,9 @@ HTML = r"""<!doctype html>
       }
       list.className = 'tag-list';
       for (const tag of state.tags) {
-        const row = document.createElement('button');
-        row.type = 'button';
+        const row = document.createElement('div');
         row.className = 'tag-row';
+        row.tabIndex = 0;
         const dot = document.createElement('span');
         dot.className = 'tag-dot';
         if (validTagColor(tag.color)) dot.style.setProperty('--tag-color', tag.color);
@@ -6865,10 +6894,42 @@ HTML = r"""<!doctype html>
         row.appendChild(dot);
         row.appendChild(name);
         row.appendChild(color);
-        row.onclick = () => {
+        const isDefault = (state.defaultTagNames || []).includes(tag.name);
+        let deleteButton = null;
+        if (isDefault) {
+          const label = document.createElement('span');
+          label.className = 'muted tag-row-status';
+          label.textContent = 'Default';
+          row.appendChild(label);
+        } else {
+          deleteButton = document.createElement('button');
+          deleteButton.type = 'button';
+          deleteButton.className = 'icon-button danger-icon-button';
+          deleteButton.title = `Delete tag ${tag.name}`;
+          deleteButton.setAttribute('aria-label', `Delete tag ${tag.name}`);
+          deleteButton.textContent = 'x';
+          row.appendChild(deleteButton);
+        }
+        const selectTagForEdit = () => {
           document.getElementById('tag-name').value = tag.name;
           renderTagColorPalette(tag.color);
         };
+        row.onclick = event => {
+          if (deleteButton && event.target === deleteButton) return;
+          selectTagForEdit();
+        };
+        row.onkeydown = event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            selectTagForEdit();
+          }
+        };
+        if (deleteButton) {
+          deleteButton.onclick = event => {
+            event.stopPropagation();
+            deleteTag(tag.name, deleteButton).catch(err => out(String(err)));
+          };
+        }
         list.appendChild(row);
       }
     }
@@ -6876,6 +6937,7 @@ HTML = r"""<!doctype html>
       const data = await api('/api/tags');
       state.tags = data.tags || [];
       state.tagPalette = data.palette || DEFAULT_TAG_COLOR_PALETTE;
+      state.defaultTagNames = data.default_tags || [];
       state.tagAssignments = data.assignments || {};
       renderTagSelect();
       renderTagColorPalette(document.getElementById('tag-color')?.value);
@@ -6910,19 +6972,27 @@ HTML = r"""<!doctype html>
         });
         state.tags = result.tags || [];
         state.tagPalette = result.palette || state.tagPalette || DEFAULT_TAG_COLOR_PALETTE;
+        state.defaultTagNames = result.default_tags || state.defaultTagNames || [];
         state.tagAssignments = result.assignments || {};
         renderTagManager();
         renderTagSelect();
         renderExperimentsList();
       });
     }
-    async function openTagDialog() {
-      document.getElementById('tag-modal').classList.remove('hidden');
-      await refreshTags();
-      document.getElementById('tag-name').focus();
-    }
-    function closeTagDialog() {
-      document.getElementById('tag-modal').classList.add('hidden');
+    async function deleteTag(name, button) {
+      if (!confirm(`Delete tag ${name}? This clears it from experiments using it.`)) return;
+      await withBusyButton(button, '...', async () => {
+        const result = await api(`/api/tags/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        state.tags = result.tags || [];
+        state.tagPalette = result.palette || state.tagPalette || DEFAULT_TAG_COLOR_PALETTE;
+        state.defaultTagNames = result.default_tags || state.defaultTagNames || [];
+        state.tagAssignments = result.assignments || {};
+        const nameInput = document.getElementById('tag-name');
+        if (nameInput?.value.trim() === name) nameInput.value = '';
+        renderTagManager();
+        renderTagSelect();
+        renderExperimentsList();
+      });
     }
     function renderExperimentTree(container, node, prefix = '') {
       const folders = Array.from(node.folders.entries()).sort((left, right) => {
@@ -7143,6 +7213,8 @@ HTML = r"""<!doctype html>
       state.experiments = data.experiments;
       state.pinnedExperiments = new Set(pins.pinned || []);
       state.tags = tags.tags || [];
+      state.tagPalette = tags.palette || DEFAULT_TAG_COLOR_PALETTE;
+      state.defaultTagNames = tags.default_tags || [];
       state.tagAssignments = tags.assignments || {};
       renderTagSelect();
       renderExperimentsList();
@@ -8498,8 +8570,6 @@ HTML = r"""<!doctype html>
     document.getElementById('download-experiment').onclick = downloadExperiment;
     document.getElementById('share-close').onclick = closeShareDialog;
     document.getElementById('experiment-tag-select').onchange = () => assignSelectedTag().catch(err => out(String(err)));
-    document.getElementById('tag-open').onclick = () => withBusyButton('tag-open', '', openTagDialog).catch(err => out(String(err)));
-    document.getElementById('tag-close').onclick = closeTagDialog;
     document.getElementById('tag-save').onclick = () => saveTag().catch(err => out(String(err)));
     document.getElementById('settings-open').onclick = openSettingsDialog;
     document.getElementById('settings-close').onclick = closeSettingsDialog;
@@ -9021,6 +9091,11 @@ def make_handler(app):
                     return
                 if path.startswith("/api/") and not self.require_token():
                     json_response(self, 401, {"error": "missing or invalid token"})
+                    return
+                match = re.match(r"^/api/tags/([^/]+)$", path)
+                if match:
+                    tag_name = urllib.parse.unquote(match.group(1))
+                    json_response(self, 200, app.delete_tag(tag_name))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/plot-artifacts/([^/]+)$", path)
                 if match:
