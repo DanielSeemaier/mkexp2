@@ -53,13 +53,9 @@
     function selectedDateText(exp) {
       return formatExperimentDate(exp || {});
     }
-    function selectedPathText(path) {
-      return String(path || '');
-    }
     function setSelectedExperimentMetadata(title, path = '', exp = {}) {
       document.getElementById('selected-title').textContent = title || 'Experiment';
       document.getElementById('selected-date').textContent = selectedDateText(exp);
-      document.getElementById('selected-path').textContent = selectedPathText(path);
     }
     function compareExperimentsByCreatedDesc(left, right) {
       const createdDelta = experimentCreationKey(right) - experimentCreationKey(left);

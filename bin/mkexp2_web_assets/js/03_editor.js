@@ -1023,13 +1023,7 @@
       document.getElementById('guided-editor')?.classList.toggle('hidden', textMode);
       document.getElementById('editor-mode-text')?.classList.toggle('active', textMode);
       document.getElementById('editor-mode-guided')?.classList.toggle('active', !textMode);
-      const insertPostprocess = document.getElementById('insert-postprocess-dsl');
-      if (insertPostprocess) {
-        insertPostprocess.disabled = Boolean(state.shared || state.selectedArchived || !state.selected);
-        insertPostprocess.title = insertPostprocess.disabled
-          ? 'Select an editable experiment first.'
-          : 'Insert postprocessing DSL at the cursor.';
-      }
+      renderEditorInsertButtons();
       const check = document.getElementById('check');
       if (check) {
         check.textContent = textMode ? 'Save' : 'Save';

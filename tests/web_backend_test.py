@@ -465,6 +465,16 @@ class WebBackendTest(unittest.TestCase):
             self.assertEqual(saved["postprocess_defaults"]["email_to"], "daniel@example.org")
             self.assertEqual(saved["postprocess_defaults"]["plots"], "performance-profile running-time-box")
             self.assertEqual(app.read_settings()["postprocess_defaults"]["email_subject"], "done {experiment_id}")
+            saved = app.write_settings({
+                "insert_templates": [{
+                    "id": "custom",
+                    "name": "Custom block",
+                    "template": "Property foo {{bar}}",
+                    "parameters": [{"key": "bar", "label": "Bar", "type": "text", "value": "baz"}],
+                }]
+            })
+            self.assertEqual(saved["insert_templates"][0]["name"], "Custom block")
+            self.assertEqual(saved["insert_templates"][0]["parameters"][0]["value"], "baz")
 
     def test_workspaces_create_switch_and_remove(self):
         if mkexp2_web.shutil.which("git") is None:
@@ -993,6 +1003,14 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('aria-label="Settings"', mkexp2_web.HTML)
         self.assertIn('id="settings-modal"', mkexp2_web.HTML)
         self.assertIn('id="settings-close"', mkexp2_web.HTML)
+        self.assertIn('class="settings-nav"', mkexp2_web.HTML)
+        self.assertIn('href="#settings-editor"', mkexp2_web.HTML)
+        self.assertIn('id="settings-maintenance"', mkexp2_web.HTML)
+        self.assertIn("Server preferences, editor defaults, and maintenance actions.", mkexp2_web.HTML)
+        self.assertIn('id="insert-template-list"', mkexp2_web.HTML)
+        self.assertIn('id="insert-templates-save"', mkexp2_web.HTML)
+        self.assertIn("function renderInsertTemplateSettings", mkexp2_web.HTML)
+        self.assertIn("function expandInsertTemplate", mkexp2_web.HTML)
         self.assertIn('<label for="token">Session token</label>', mkexp2_web.HTML)
         self.assertIn('id="theme-select"', mkexp2_web.HTML)
         self.assertIn('<option value="system">System</option>', mkexp2_web.HTML)
@@ -1039,8 +1057,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('class="panel-header experiment-editor-header"', mkexp2_web.HTML)
         self.assertIn('class="experiment-editor-heading"', mkexp2_web.HTML)
         self.assertIn('class="muted experiment-editor-date" id="selected-date"', mkexp2_web.HTML)
-        self.assertIn('class="muted experiment-editor-meta" id="selected-path"', mkexp2_web.HTML)
-        self.assertIn("text-align: right;", mkexp2_web.HTML)
+        self.assertNotIn('id="selected-path"', mkexp2_web.HTML)
         source = (ROOT / "bin" / "mkexp2_web.py").read_text(encoding="utf-8")
         self.assertIn('"experiment_file": str(exp_path / "Experiment")', source)
         self.assertLess(
@@ -1051,13 +1068,11 @@ class WebBackendTest(unittest.TestCase):
             mkexp2_web.HTML.index('id="selected-date"'),
             mkexp2_web.HTML.index('id="check"'),
         )
-        self.assertLess(
-            mkexp2_web.HTML.index('id="experiment-editor"'),
-            mkexp2_web.HTML.index('id="selected-path"'),
-        )
-        self.assertIn('id="insert-postprocess-dsl"', mkexp2_web.HTML)
-        self.assertIn("function insertPostprocessDslAtCursor", mkexp2_web.HTML)
+        self.assertIn('id="experiment-insert-buttons"', mkexp2_web.HTML)
+        self.assertIn("function renderEditorInsertButtons", mkexp2_web.HTML)
+        self.assertIn("function insertTemplateAtCursor", mkexp2_web.HTML)
         self.assertIn("editor.selectionStart", mkexp2_web.HTML)
+        self.assertNotIn('id="insert-postprocess-dsl"', mkexp2_web.HTML)
         self.assertNotIn('id="postprocess-insert-dsl"', mkexp2_web.HTML)
         self.assertIn(".experiment-editor-header .check-action", mkexp2_web.HTML)
         self.assertIn("overflow-wrap: anywhere;", mkexp2_web.HTML)

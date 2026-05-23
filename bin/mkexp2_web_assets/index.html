@@ -196,18 +196,40 @@ __MKEXP2_STYLES__
         <div class="modal-header">
           <div>
             <div id="settings-modal-title" class="modal-title">Settings</div>
+            <div class="modal-subtitle">Server preferences, editor defaults, and maintenance actions.</div>
           </div>
           <button id="settings-close" class="icon-button" aria-label="Close settings" title="Close">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
         </div>
         <div class="modal-body">
-          <div class="settings-token">
-            <label for="token">Session token</label>
-            <input id="token" type="password" placeholder="Session token">
+          <nav class="settings-nav" aria-label="Settings sections">
+            <a href="#settings-access">Access</a>
+            <a href="#settings-workspaces">Workspaces</a>
+            <a href="#settings-editor">Editor</a>
+            <a href="#settings-results">Results</a>
+            <a href="#settings-tags">Tags</a>
+            <a href="#settings-maintenance">Maintenance</a>
+          </nav>
+          <div id="settings-access" class="settings-section">
+            <div class="settings-section-header">
+              <div>
+                <div class="settings-tool-title">Access</div>
+                <div class="csv-summary">Use the active session token for authenticated API requests.</div>
+              </div>
+            </div>
+            <div class="settings-token">
+              <label for="token">Session token</label>
+              <input id="token" type="password" placeholder="Session token">
+            </div>
           </div>
-          <div class="settings-section">
-            <div class="settings-tool-title">Workspaces</div>
+          <div id="settings-workspaces" class="settings-section">
+            <div class="settings-section-header">
+              <div>
+                <div class="settings-tool-title">Workspaces</div>
+                <div class="csv-summary">Switch or add experiment repositories served by this web UI.</div>
+              </div>
+            </div>
             <div id="workspace-list" class="workspace-list csv-empty">No workspaces loaded.</div>
             <div class="workspace-create-row">
               <label>
@@ -221,8 +243,13 @@ __MKEXP2_STYLES__
             </div>
             <div id="workspace-output" class="csv-empty hidden"></div>
           </div>
-          <div class="settings-section">
-            <div class="settings-tool-title">Appearance</div>
+          <div id="settings-editor" class="settings-section">
+            <div class="settings-section-header">
+              <div>
+                <div class="settings-tool-title">Editor and authoring</div>
+                <div class="csv-summary">Control the interface theme and defaults used while writing Experiment files.</div>
+              </div>
+            </div>
             <label class="theme-toggle" for="theme-select">
               <span>
                 <span class="theme-toggle-title">Appearance</span>
@@ -234,48 +261,45 @@ __MKEXP2_STYLES__
                 <option value="system">System</option>
               </select>
             </label>
-          </div>
-          <div class="settings-section">
-            <div class="settings-tool-title">Guided editor</div>
-            <label class="create-field">
-              <span class="create-field-label">Benchmark set base path</span>
-              <input id="benchmark-base-path" type="text" placeholder="/nfs/work/graph_benchmark_sets">
-            </label>
-            <div class="csv-summary">Used to prefill and autocomplete Graph entries in guided editing. Leave empty to disable.</div>
-          </div>
-          <div class="settings-section">
-            <div class="settings-tool-title">Postprocessing DSL defaults</div>
-            <div class="settings-grid">
+            <div class="settings-subsection">
+              <div class="settings-subsection-title">Guided editor</div>
               <label class="create-field">
-                <span class="create-field-label">Email recipients</span>
-                <input id="postprocess-email-to" type="text" placeholder="name@example.org">
+                <span class="create-field-label">Benchmark set base path</span>
+                <input id="benchmark-base-path" type="text" placeholder="/nfs/work/graph_benchmark_sets">
               </label>
-              <label class="create-field">
-                <span class="create-field-label">Plot types</span>
-                <input id="postprocess-plots" type="text" placeholder="default">
-              </label>
+              <div class="csv-summary">Used to prefill and autocomplete Graph entries in guided editing. Leave empty to disable.</div>
             </div>
-            <label class="create-field">
-              <span class="create-field-label">Email subject</span>
-              <input id="postprocess-email-subject" type="text" placeholder="mkexp2 {status}: {experiment_id}">
-            </label>
-            <label class="create-field">
-              <span class="create-field-label">Email body template</span>
-              <textarea id="postprocess-email-body" spellcheck="true" placeholder="Experiment: {experiment_id}"></textarea>
-            </label>
-            <div class="settings-tool">
-              <div class="csv-summary">Saved here as authoring defaults for the Experiment editor insert button.</div>
-              <div class="settings-inline-tool">
-                <button id="postprocess-save-defaults">Save defaults</button>
+            <div class="settings-subsection">
+              <div class="settings-subsection-title">Experiment insert buttons</div>
+              <div class="csv-summary">Define small editor buttons by name, inserted text, and optional parameters. Empty parameter values drop the line that contains them.</div>
+              <div id="insert-template-list" class="insert-template-list"></div>
+              <div class="settings-tool">
+                <div class="csv-summary">Templates are inserted at the current cursor location in the text editor.</div>
+                <div class="settings-inline-tool">
+                  <button id="insert-template-add" type="button">Add button</button>
+                  <button id="insert-templates-reset" type="button">Reset defaults</button>
+                  <button id="insert-templates-save" type="button">Save buttons</button>
+                </div>
               </div>
             </div>
           </div>
-          <div class="settings-section">
-            <div class="settings-tool-title">Results columns</div>
+          <div id="settings-results" class="settings-section">
+            <div class="settings-section-header">
+              <div>
+                <div class="settings-tool-title">Results</div>
+                <div class="csv-summary">Manage persistent table preferences for parsed CSV output.</div>
+              </div>
+            </div>
+            <div class="settings-subsection-title">Hidden columns</div>
             <div id="settings-hidden-columns" class="settings-hidden-columns csv-empty">No globally hidden columns loaded.</div>
           </div>
-          <div class="settings-section">
-            <div class="settings-tool-title">Tags</div>
+          <div id="settings-tags" class="settings-section">
+            <div class="settings-section-header">
+              <div>
+                <div class="settings-tool-title">Tags</div>
+                <div class="csv-summary">Create reusable sidebar tags and their row accent colors.</div>
+              </div>
+            </div>
             <div class="tag-manager-grid">
               <label>
                 <span class="csv-summary">Tag name</span>
@@ -290,40 +314,50 @@ __MKEXP2_STYLES__
             </div>
             <div id="tag-list" class="tag-list"></div>
           </div>
-          <div class="settings-tool">
-            <div>
-              <div class="settings-tool-title">Codex cleanup</div>
-              <div class="csv-summary">Archive active Codex-tagged experiments unless they are starred or submit-locked.</div>
+          <div id="settings-maintenance" class="settings-section">
+            <div class="settings-section-header">
+              <div>
+                <div class="settings-tool-title">Maintenance</div>
+                <div class="csv-summary">Archive old experiment groups and refresh local plotting support caches.</div>
+              </div>
             </div>
-            <button id="archive-codex-experiments" class="icon-text-button">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
-              <span>Archive Codex</span>
-            </button>
-          </div>
-          <div id="archive-codex-output" class="csv-empty hidden"></div>
-          <div class="settings-tool">
-            <div>
-              <div class="settings-tool-title">Archive subdirectory</div>
-              <div class="csv-summary">Archive active experiments in one subdirectory, skipping starred or submit-locked experiments.</div>
+            <div class="settings-tool-stack">
+              <div class="settings-tool">
+                <div>
+                  <div class="settings-tool-title">Codex cleanup</div>
+                  <div class="csv-summary">Archive active Codex-tagged experiments unless they are starred or submit-locked.</div>
+                </div>
+                <button id="archive-codex-experiments" class="icon-text-button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+                  <span>Archive Codex</span>
+                </button>
+              </div>
+              <div id="archive-codex-output" class="csv-empty hidden"></div>
+              <div class="settings-tool">
+                <div>
+                  <div class="settings-tool-title">Archive subdirectory</div>
+                  <div class="csv-summary">Archive active experiments in one subdirectory, skipping starred or submit-locked experiments.</div>
+                </div>
+                <div class="settings-inline-tool">
+                  <select id="archive-subdir-select" title="Subdirectory"></select>
+                  <button id="archive-subdir-experiments" class="icon-text-button">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+                    <span>Archive</span>
+                  </button>
+                </div>
+              </div>
+              <div id="archive-subdir-output" class="csv-empty hidden"></div>
+              <div class="settings-tool">
+                <div>
+                  <div class="settings-tool-title">Spack R library cache</div>
+                  <div id="spack-cache-summary" class="csv-summary">Not loaded.</div>
+                </div>
+                <button id="spack-cache-refresh" class="icon-text-button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+                  <span>Resolve Spack R cache</span>
+                </button>
+              </div>
             </div>
-            <div class="settings-inline-tool">
-              <select id="archive-subdir-select" title="Subdirectory"></select>
-              <button id="archive-subdir-experiments" class="icon-text-button">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
-                <span>Archive</span>
-              </button>
-            </div>
-          </div>
-          <div id="archive-subdir-output" class="csv-empty hidden"></div>
-          <div class="settings-tool">
-            <div>
-              <div class="settings-tool-title">Spack R library cache</div>
-              <div id="spack-cache-summary" class="csv-summary">Not loaded.</div>
-            </div>
-            <button id="spack-cache-refresh" class="icon-text-button">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
-              <span>Resolve Spack R cache</span>
-            </button>
           </div>
         </div>
       </div>
@@ -518,7 +552,7 @@ __MKEXP2_STYLES__
                 <textarea id="experiment-editor" spellcheck="false" wrap="off"></textarea>
               </div>
               <div id="experiment-editor-tools" class="editor-tools">
-                <button id="insert-postprocess-dsl" type="button" class="small-button">Insert postprocess block</button>
+                <div id="experiment-insert-buttons" class="editor-insert-buttons"></div>
               </div>
               <div id="guided-editor" class="guided-editor hidden">
                 <div id="guided-output" class="csv-empty">Switch to Guided to load the form.</div>
@@ -526,7 +560,6 @@ __MKEXP2_STYLES__
                 <datalist id="guided-repo-ref-suggestions"></datalist>
                 <datalist id="guided-algorithm-base-suggestions"></datalist>
               </div>
-              <div class="muted experiment-editor-meta" id="selected-path"></div>
             </div>
           </div>
           <div class="stack">

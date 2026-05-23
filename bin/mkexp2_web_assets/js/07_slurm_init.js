@@ -127,8 +127,9 @@
     });
     document.getElementById('theme-select').onchange = event => saveTheme(event.target.value);
     document.getElementById('benchmark-base-path').addEventListener('change', () => saveBenchmarkBasePath().catch(err => out(String(err))));
-    document.getElementById('postprocess-save-defaults').onclick = () => savePostprocessDefaults().catch(err => out(String(err)));
-    document.getElementById('insert-postprocess-dsl').onclick = () => insertPostprocessDslAtCursor();
+    document.getElementById('insert-template-add').onclick = () => addInsertTemplate();
+    document.getElementById('insert-templates-reset').onclick = () => resetInsertTemplates();
+    document.getElementById('insert-templates-save').onclick = () => saveInsertTemplates().catch(err => out(String(err)));
     document.getElementById('archive-codex-experiments').onclick = () => archiveCodexExperiments().catch(err => out(String(err)));
     document.getElementById('archive-subdir-experiments').onclick = () => archiveSubdirectoryExperiments().catch(err => out(String(err)));
     document.getElementById('spack-cache-refresh').onclick = () => refreshSpackCache().catch(err => out(String(err)));

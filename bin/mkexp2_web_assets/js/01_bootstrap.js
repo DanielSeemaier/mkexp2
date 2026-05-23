@@ -98,7 +98,7 @@
       shared: false,
       shareId: '',
       shareCommandTemplate: '',
-      settings: { theme: 'light', benchmark_base_path: '', postprocess_defaults: { email_to: '', plots: 'default', email_subject: 'mkexp2 {status}: {experiment_id}', email_body: '' } },
+      settings: { theme: 'light', benchmark_base_path: '', postprocess_defaults: { email_to: '', plots: 'default', email_subject: 'mkexp2 {status}: {experiment_id}', email_body: '' }, insert_templates: [] },
       settingsLoaded: false,
       workspaces: [],
       workspacesLoaded: false

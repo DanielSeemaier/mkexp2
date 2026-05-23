@@ -303,7 +303,8 @@
     function renderGuidedSettings() {
       const input = document.getElementById('benchmark-base-path');
       if (input) input.value = state.settings?.benchmark_base_path || '';
-      renderPostprocessSettings();
+      renderInsertTemplateSettings();
+      renderEditorInsertButtons();
     }
     function postprocessDefaults() {
       return Object.assign({
@@ -313,16 +314,252 @@
         email_body: ''
       }, state.settings?.postprocess_defaults || {});
     }
-    function renderPostprocessSettings() {
+    function defaultInsertTemplates() {
       const defaults = postprocessDefaults();
-      const emailTo = document.getElementById('postprocess-email-to');
-      const plots = document.getElementById('postprocess-plots');
-      const subject = document.getElementById('postprocess-email-subject');
-      const body = document.getElementById('postprocess-email-body');
-      if (emailTo) emailTo.value = defaults.email_to || '';
-      if (plots) plots.value = defaults.plots || 'default';
-      if (subject) subject.value = defaults.email_subject || 'mkexp2 {status}: {experiment_id}';
-      if (body) body.value = defaults.email_body || '';
+      return [{
+        id: 'postprocess',
+        name: 'Postprocess block',
+        template: [
+          '# Automatic cleanup-job postprocessing',
+          'Property postprocess.auto true',
+          'Property postprocess.parse true',
+          'Property postprocess.plots {{plots}}',
+          'Property postprocess.email.to {{email_to}}',
+          'Property postprocess.email.subject {{email_subject}}',
+          'Property postprocess.email.body {{email_body}}',
+        ].join('\n'),
+        parameters: [
+          { key: 'plots', label: 'Plot types', type: 'plots', value: defaults.plots || 'default' },
+          { key: 'email_to', label: 'Email recipients', type: 'text', value: defaults.email_to || '' },
+          { key: 'email_subject', label: 'Email subject', type: 'text', value: defaults.email_subject || 'mkexp2 {status}: {experiment_id}' },
+          { key: 'email_body', label: 'Email body template', type: 'textarea', value: defaults.email_body || '' },
+        ],
+      }];
+    }
+    function normalizedInsertTemplates() {
+      const templates = Array.isArray(state.settings?.insert_templates) ? state.settings.insert_templates : [];
+      return templates.length ? templates : defaultInsertTemplates();
+    }
+    function parameterLines(parameters) {
+      return (parameters || []).map(parameter => [
+        parameter.key || '',
+        parameter.label || parameter.key || '',
+        parameter.type || 'text',
+        String(parameter.value || '').replace(/\r?\n/g, '\\n')
+      ].join('|')).join('\n');
+    }
+    function parseParameterLines(text) {
+      return String(text || '').split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map(line => {
+          const [key, label, type, ...rest] = line.split('|');
+          const cleanKey = String(key || '').trim();
+          const cleanType = String(type || 'text').trim().toLowerCase();
+          return {
+            key: cleanKey,
+            label: String(label || cleanKey).trim() || cleanKey,
+            type: ['text', 'textarea', 'plots'].includes(cleanType) ? cleanType : 'text',
+            value: rest.join('|').replace(/\\n/g, '\n')
+          };
+        })
+        .filter(parameter => parameter.key);
+    }
+    function plotParameterSelection(value, plots) {
+      const raw = String(value || 'default').trim();
+      if (raw === 'all') return new Set(plots.map(plot => plot.id));
+      if (!raw || raw === 'default') return new Set(plots.filter(plot => plot.default_selected).map(plot => plot.id));
+      return new Set(raw.split(/\s+/).filter(Boolean));
+    }
+    function renderSettingsPlotParameter(container, value) {
+      if (!state.plotCatalog) {
+        container.className = 'csv-empty';
+        container.textContent = 'Loading plot types...';
+        loadPlotCatalog().then(renderInsertTemplateSettings).catch(err => out(String(err)));
+        return;
+      }
+      const plots = state.plotCatalog?.plots || [];
+      const selected = plotParameterSelection(value, plots);
+      container.className = 'plot-artifact-list settings-plot-list';
+      container.innerHTML = '';
+      const controls = document.createElement('div');
+      controls.className = 'settings-template-plot-actions';
+      for (const [label, nextValue] of [['Default', 'default'], ['All', 'all']]) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'small-button';
+        button.textContent = label;
+        button.onclick = () => {
+          const hidden = container.closest('.settings-template-param')?.querySelector('[data-template-param-value]');
+          if (hidden) hidden.value = nextValue;
+          state.settings.insert_templates = collectInsertTemplatesFromSettings();
+          renderInsertTemplateSettings();
+          renderEditorInsertButtons();
+        };
+        controls.appendChild(button);
+      }
+      container.appendChild(controls);
+      for (const plot of plots) {
+        const label = document.createElement('label');
+        label.className = [
+          'plot-choice',
+          selected.has(plot.id) ? 'selected' : '',
+          plot.expensive ? 'expensive' : ''
+        ].filter(Boolean).join(' ');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = selected.has(plot.id);
+        checkbox.onchange = () => {
+          const next = new Set(selected);
+          if (checkbox.checked) next.add(plot.id);
+          else next.delete(plot.id);
+          const hidden = container.closest('.settings-template-param')?.querySelector('[data-template-param-value]');
+          if (hidden) hidden.value = Array.from(next).join(' ') || 'default';
+          state.settings.insert_templates = collectInsertTemplatesFromSettings();
+          renderInsertTemplateSettings();
+          renderEditorInsertButtons();
+        };
+        const body = document.createElement('div');
+        const title = document.createElement('div');
+        title.className = 'plot-choice-title';
+        title.textContent = plot.name;
+        const desc = document.createElement('div');
+        desc.className = 'plot-choice-desc';
+        const maxText = plot.max_sources === null || plot.max_sources === undefined ? 'any' : plot.max_sources;
+        desc.textContent = `${plot.description} Sources: ${plot.min_sources}-${maxText}.${plot.expensive ? ' Expensive.' : ''}`;
+        body.appendChild(title);
+        body.appendChild(desc);
+        label.appendChild(checkbox);
+        label.appendChild(body);
+        container.appendChild(label);
+      }
+    }
+    function parameterValuesFromCard(card, parameters) {
+      const values = new Map();
+      card.querySelectorAll('[data-template-param-key]').forEach(input => values.set(input.dataset.templateParamKey, input.value));
+      return parameters.map(parameter => Object.assign({}, parameter, {
+        value: values.has(parameter.key) ? values.get(parameter.key) : parameter.value
+      }));
+    }
+    function collectInsertTemplatesFromSettings() {
+      return Array.from(document.querySelectorAll('.insert-template-card')).map((card, index) => {
+        const parsed = parseParameterLines(card.querySelector('.insert-template-parameters')?.value || '');
+        return {
+          id: card.dataset.templateId || `template-${index + 1}`,
+          name: card.querySelector('.insert-template-name')?.value.trim() || `Button ${index + 1}`,
+          template: card.querySelector('.insert-template-body')?.value || '',
+          parameters: parameterValuesFromCard(card, parsed)
+        };
+      }).filter(template => template.name && template.template);
+    }
+    function renderTemplateParameter(container, parameter) {
+      const row = document.createElement('div');
+      row.className = 'settings-template-param';
+      const label = document.createElement('label');
+      label.className = 'create-field';
+      const title = document.createElement('span');
+      title.className = 'create-field-label';
+      title.textContent = parameter.label || parameter.key;
+      label.appendChild(title);
+      if (parameter.type === 'textarea') {
+        const input = document.createElement('textarea');
+        input.dataset.templateParamKey = parameter.key;
+        input.dataset.templateParamValue = 'true';
+        input.value = parameter.value || '';
+        label.appendChild(input);
+      } else if (parameter.type === 'plots') {
+        const hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.dataset.templateParamKey = parameter.key;
+        hidden.dataset.templateParamValue = 'true';
+        hidden.value = parameter.value || 'default';
+        label.appendChild(hidden);
+        const plots = document.createElement('div');
+        label.appendChild(plots);
+        renderSettingsPlotParameter(plots, hidden.value);
+      } else {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.dataset.templateParamKey = parameter.key;
+        input.dataset.templateParamValue = 'true';
+        input.value = parameter.value || '';
+        label.appendChild(input);
+      }
+      row.appendChild(label);
+      container.appendChild(row);
+    }
+    function renderInsertTemplateSettings() {
+      const list = document.getElementById('insert-template-list');
+      if (!list) return;
+      const templates = normalizedInsertTemplates();
+      list.innerHTML = '';
+      for (const [index, template] of templates.entries()) {
+        const card = document.createElement('div');
+        card.className = 'insert-template-card';
+        card.dataset.templateId = template.id || `template-${index + 1}`;
+        const header = document.createElement('div');
+        header.className = 'insert-template-header';
+        const name = document.createElement('input');
+        name.className = 'insert-template-name';
+        name.type = 'text';
+        name.value = template.name || `Button ${index + 1}`;
+        name.placeholder = 'Button label';
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'small-button';
+        remove.textContent = 'Remove';
+        remove.onclick = () => {
+          state.settings.insert_templates = templates.filter((_, itemIndex) => itemIndex !== index);
+          renderInsertTemplateSettings();
+          renderEditorInsertButtons();
+        };
+        header.appendChild(name);
+        header.appendChild(remove);
+        card.appendChild(header);
+        const params = document.createElement('div');
+        params.className = 'insert-template-param-list';
+        for (const parameter of template.parameters || []) renderTemplateParameter(params, parameter);
+        card.appendChild(params);
+        const details = document.createElement('details');
+        details.className = 'insert-template-details';
+        const summary = document.createElement('summary');
+        summary.textContent = 'Template definition';
+        details.appendChild(summary);
+        const parameterLabel = document.createElement('label');
+        parameterLabel.className = 'create-field';
+        const parameterTitle = document.createElement('span');
+        parameterTitle.className = 'create-field-label';
+        parameterTitle.textContent = 'Parameters: key|label|type|default';
+        const parameterText = document.createElement('textarea');
+        parameterText.className = 'insert-template-parameters';
+        parameterText.value = parameterLines(template.parameters || []);
+        parameterLabel.appendChild(parameterTitle);
+        parameterLabel.appendChild(parameterText);
+        details.appendChild(parameterLabel);
+        const bodyLabel = document.createElement('label');
+        bodyLabel.className = 'create-field';
+        const bodyTitle = document.createElement('span');
+        bodyTitle.className = 'create-field-label';
+        bodyTitle.textContent = 'Inserted text';
+        const body = document.createElement('textarea');
+        body.className = 'insert-template-body';
+        body.value = template.template || '';
+        bodyLabel.appendChild(bodyTitle);
+        bodyLabel.appendChild(body);
+        details.appendChild(bodyLabel);
+        const apply = document.createElement('button');
+        apply.type = 'button';
+        apply.className = 'small-button';
+        apply.textContent = 'Apply parameter list';
+        apply.onclick = () => {
+          state.settings.insert_templates = collectInsertTemplatesFromSettings();
+          renderInsertTemplateSettings();
+          renderEditorInsertButtons();
+        };
+        details.appendChild(apply);
+        card.appendChild(details);
+        list.appendChild(card);
+      }
     }
     async function loadUiSettings() {
       if (state.shared) {
@@ -364,40 +601,34 @@
       state.benchmarkSets = [];
       state.benchmarkSetsFor = '';
     }
-    function postprocessDefaultsFromFields() {
-      return {
-        email_to: document.getElementById('postprocess-email-to')?.value.trim() || '',
-        plots: document.getElementById('postprocess-plots')?.value.trim() || 'default',
-        email_subject: document.getElementById('postprocess-email-subject')?.value.trim() || 'mkexp2 {status}: {experiment_id}',
-        email_body: document.getElementById('postprocess-email-body')?.value || ''
-      };
-    }
-    async function savePostprocessDefaults() {
-      await saveUiSettingsPatch({ postprocess_defaults: postprocessDefaultsFromFields() });
-    }
     function zshSingleQuote(value) {
       return `'${String(value ?? '').replace(/'/g, `'\\''`)}'`;
     }
-    function postprocessDslSnippet(defaults) {
-      const resolved = defaults || postprocessDefaults();
-      const lines = [
-        '# Automatic cleanup-job postprocessing',
-        'Property postprocess.auto true',
-        'Property postprocess.parse true',
-        `Property postprocess.plots ${zshSingleQuote(resolved.plots || 'default')}`,
-      ];
-      if (resolved.email_to) lines.push(`Property postprocess.email.to ${zshSingleQuote(resolved.email_to)}`);
-      if (resolved.email_subject) lines.push(`Property postprocess.email.subject ${zshSingleQuote(resolved.email_subject)}`);
-      if (resolved.email_body) {
-        const body = resolved.email_body.replace(/\r?\n/g, '\\n');
-        lines.push(`Property postprocess.email.body ${zshSingleQuote(body)}`);
+    function templateParameterMap(template) {
+      const values = {};
+      for (const parameter of template.parameters || []) {
+        values[parameter.key] = parameter.type === 'textarea'
+          ? String(parameter.value || '').replace(/\r?\n/g, '\\n')
+          : String(parameter.value || '');
       }
-      return `${lines.join('\n')}\n`;
+      return values;
     }
-    function insertPostprocessDslAtCursor() {
+    function expandInsertTemplate(template) {
+      const values = templateParameterMap(template);
+      const lines = String(template.template || '').split(/\r?\n/);
+      return `${lines.map(line => {
+        let drop = false;
+        const rendered = line.replace(/{{\s*([A-Za-z0-9_.-]+)(?::(raw|quote))?\s*}}/g, (_, key, mode) => {
+          const value = values[key] ?? '';
+          if (!String(value).trim()) drop = true;
+          return mode === 'raw' ? value : zshSingleQuote(value);
+        });
+        return drop ? null : rendered;
+      }).filter(line => line !== null).join('\n')}\n`;
+    }
+    function insertTextAtEditorCursor(snippet) {
       if (!state.selected || state.shared || state.selectedArchived) return;
       if (state.editorMode === 'guided') return;
-      const snippet = postprocessDslSnippet(postprocessDefaults());
       const start = Number.isInteger(editor.selectionStart) ? editor.selectionStart : editor.value.length;
       const end = Number.isInteger(editor.selectionEnd) ? editor.selectionEnd : start;
       const prefix = editor.value.slice(0, start);
@@ -412,6 +643,48 @@
       editor.setSelectionRange(cursor, cursor);
       state.editorDirty = true;
       renderEditorMode();
+    }
+    function insertTemplateAtCursor(index) {
+      const template = normalizedInsertTemplates()[index];
+      if (!template) return;
+      insertTextAtEditorCursor(expandInsertTemplate(template));
+    }
+    function renderEditorInsertButtons() {
+      const box = document.getElementById('experiment-insert-buttons');
+      if (!box) return;
+      const templates = normalizedInsertTemplates();
+      box.innerHTML = '';
+      templates.forEach((template, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'small-button';
+        button.textContent = template.name || `Insert ${index + 1}`;
+        button.disabled = Boolean(state.shared || state.selectedArchived || !state.selected || state.editorMode === 'guided');
+        button.title = button.disabled
+          ? 'Select an editable text-mode experiment first.'
+          : `Insert ${template.name || 'template'} at the cursor.`;
+        button.onclick = () => insertTemplateAtCursor(index);
+        box.appendChild(button);
+      });
+    }
+    async function saveInsertTemplates() {
+      await saveUiSettingsPatch({ insert_templates: collectInsertTemplatesFromSettings() });
+    }
+    function addInsertTemplate() {
+      state.settings.insert_templates = collectInsertTemplatesFromSettings();
+      state.settings.insert_templates.push({
+        id: `template-${Date.now()}`,
+        name: 'New insert button',
+        template: '# Inserted Experiment DSL',
+        parameters: []
+      });
+      renderInsertTemplateSettings();
+      renderEditorInsertButtons();
+    }
+    function resetInsertTemplates() {
+      state.settings.insert_templates = defaultInsertTemplates();
+      renderInsertTemplateSettings();
+      renderEditorInsertButtons();
     }
     function decodeColumnSignature(signature) {
       const text = String(signature || '');

@@ -1295,10 +1295,45 @@ class Mkexp2WebApp:
             "email_subject": str(raw_postprocess.get("email_subject") or "mkexp2 {status}: {experiment_id}").strip(),
             "email_body": str(raw_postprocess.get("email_body") or "").strip(),
         }
+        raw_templates = payload.get("insert_templates")
+        insert_templates = []
+        if isinstance(raw_templates, list):
+            for index, item in enumerate(raw_templates):
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip()
+                template = str(item.get("template") or "")
+                if not name or not template:
+                    continue
+                raw_parameters = item.get("parameters")
+                parameters = []
+                if isinstance(raw_parameters, list):
+                    for param in raw_parameters:
+                        if not isinstance(param, dict):
+                            continue
+                        key = str(param.get("key") or param.get("name") or "").strip()
+                        if not key:
+                            continue
+                        kind = str(param.get("type") or "text").strip().lower()
+                        if kind not in ("text", "textarea", "plots"):
+                            kind = "text"
+                        parameters.append({
+                            "key": key,
+                            "label": str(param.get("label") or key).strip() or key,
+                            "type": kind,
+                            "value": str(param.get("value") or ""),
+                        })
+                insert_templates.append({
+                    "id": str(item.get("id") or f"template-{index + 1}").strip() or f"template-{index + 1}",
+                    "name": name,
+                    "template": template,
+                    "parameters": parameters,
+                })
         return {
             "theme": theme,
             "benchmark_base_path": benchmark_base_path,
             "postprocess_defaults": postprocess_defaults,
+            "insert_templates": insert_templates,
         }
 
     def read_settings(self):

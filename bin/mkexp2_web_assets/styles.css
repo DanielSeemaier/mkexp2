@@ -679,18 +679,12 @@
       align-self: flex-start;
     }
     .experiment-editor-header .panel-title,
-    .experiment-editor-date,
-    .experiment-editor-meta {
+    .experiment-editor-date {
       overflow-wrap: anywhere;
     }
     .experiment-editor-date {
       margin-top: 2px;
       font-size: 12px;
-    }
-    .experiment-editor-meta {
-      margin-top: 8px;
-      font-size: 12px;
-      text-align: right;
     }
     .editor-mode-toggle {
       display: inline-flex;
@@ -764,6 +758,13 @@
       justify-content: flex-end;
       gap: 8px;
       margin-top: 8px;
+    }
+    .editor-insert-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+      min-width: 0;
     }
     .editor-tools .small-button {
       padding: 5px 8px;
@@ -2419,6 +2420,11 @@
     .modal-title {
       font-weight: 750;
     }
+    .modal-subtitle {
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+    }
     .modal-body {
       display: grid;
       gap: 12px;
@@ -2665,10 +2671,41 @@
     .settings-modal {
       width: min(1040px, 100%);
     }
+    .settings-nav {
+      position: sticky;
+      top: -14px;
+      z-index: 2;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 10px 0;
+      margin-top: -14px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+    }
+    .settings-nav a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .settings-nav a:hover,
+    .settings-nav a:focus-visible {
+      border-color: var(--tab-active-border);
+      color: var(--tab-active-text);
+      background: var(--tab-active-bg);
+      outline: none;
+    }
     .settings-token {
       display: grid;
       gap: 6px;
-      margin-bottom: 12px;
     }
     .settings-token label {
       font-weight: 750;
@@ -2706,7 +2743,6 @@
       justify-content: space-between;
       gap: 12px;
       padding: 10px;
-      margin-bottom: 12px;
       border: 1px solid var(--border);
       border-radius: 6px;
       background: var(--surface);
@@ -2723,6 +2759,7 @@
       display: inline-flex;
       gap: 8px;
       align-items: center;
+      flex-wrap: wrap;
       flex: 0 0 auto;
     }
     .settings-inline-tool select {
@@ -2731,19 +2768,95 @@
     .settings-section {
       display: grid;
       gap: 8px;
-      padding-top: 12px;
-      margin-bottom: 12px;
+      padding-top: 14px;
       border-top: 1px solid var(--border);
+      scroll-margin-top: 52px;
+    }
+    .settings-section:first-of-type {
+      border-top: 0;
+      padding-top: 0;
+    }
+    .settings-section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 2px;
+    }
+    .settings-subsection {
+      display: grid;
+      gap: 8px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--border);
+    }
+    .settings-subsection-title {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+    .settings-tool-stack {
+      display: grid;
+      gap: 8px;
+    }
+    .insert-template-list {
+      display: grid;
+      gap: 10px;
+    }
+    .insert-template-card {
+      display: grid;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+    }
+    .insert-template-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .insert-template-param-list {
+      display: grid;
+      gap: 8px;
+    }
+    .insert-template-details {
+      display: grid;
+      gap: 8px;
+    }
+    .insert-template-details[open] {
+      gap: 10px;
+    }
+    .insert-template-details summary {
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .insert-template-parameters,
+    .insert-template-body {
+      min-height: 82px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      resize: vertical;
+    }
+    .insert-template-body {
+      min-height: 132px;
+    }
+    .settings-template-plot-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 6px 0;
+    }
+    .settings-plot-list {
+      margin-top: 6px;
     }
     .settings-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
-    }
-    #postprocess-email-body {
-      min-height: 96px;
-      resize: vertical;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     .workspace-list {
       display: grid;
@@ -3236,6 +3349,22 @@
         width: 100%;
         max-width: 100%;
         flex-basis: auto;
+      }
+      .settings-nav {
+        top: -14px;
+      }
+      .settings-tool {
+        align-items: stretch;
+        flex-direction: column;
+      }
+      .settings-inline-tool {
+        width: 100%;
+      }
+      .settings-inline-tool button,
+      .settings-inline-tool select,
+      .settings-tool > button {
+        width: 100%;
+        max-width: 100%;
       }
       .settings-grid {
         grid-template-columns: 1fr;
