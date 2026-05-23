@@ -500,7 +500,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}", mkexp2_web.HTML)
         self.assertIn("date.textContent = created || 'unknown'", mkexp2_web.HTML)
         self.assertIn("function selectedDateText", mkexp2_web.HTML)
-        self.assertIn("setSelectedExperimentMetadata(id, data.path, data)", mkexp2_web.HTML)
+        self.assertIn("data.experiment_file || data.path", mkexp2_web.HTML)
         self.assertIn('id="copy-experiment"', mkexp2_web.HTML)
         self.assertIn('id="copy-modal"', mkexp2_web.HTML)
         self.assertIn("async function copyExperiment", mkexp2_web.HTML)
@@ -689,6 +689,11 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="archive-pane"', mkexp2_web.HTML)
         self.assertIn("archive-mode", mkexp2_web.HTML)
         self.assertIn(".app.archive-mode .main", mkexp2_web.HTML)
+        self.assertIn("height: 100vh;", mkexp2_web.HTML)
+        self.assertIn("overflow: hidden;", mkexp2_web.HTML)
+        self.assertIn("display: flex;", mkexp2_web.HTML)
+        self.assertIn("flex: 1 1 auto;", mkexp2_web.HTML)
+        self.assertIn("min-height: 0;", mkexp2_web.HTML)
         self.assertIn("grid-column: 4;", mkexp2_web.HTML)
         self.assertIn("archivePaneOpen", mkexp2_web.HTML)
         self.assertIn("state.archivePaneOpen = Boolean(options.keepArchivePane);", mkexp2_web.HTML)
@@ -854,6 +859,9 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('class="experiment-editor-heading"', mkexp2_web.HTML)
         self.assertIn('class="muted experiment-editor-date" id="selected-date"', mkexp2_web.HTML)
         self.assertIn('class="muted experiment-editor-meta" id="selected-path"', mkexp2_web.HTML)
+        self.assertIn("text-align: right;", mkexp2_web.HTML)
+        source = (ROOT / "bin" / "mkexp2_web.py").read_text(encoding="utf-8")
+        self.assertIn('"experiment_file": str(exp_path / "Experiment")', source)
         self.assertLess(
             mkexp2_web.HTML.index('id="selected-title"'),
             mkexp2_web.HTML.index('id="selected-date"'),

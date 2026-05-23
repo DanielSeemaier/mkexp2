@@ -3749,10 +3749,12 @@ HTML = r"""<!doctype html>
       background: var(--panel);
       padding: 18px;
       min-width: 0;
-      overflow: auto;
+      height: 100vh;
+      overflow: hidden;
+      flex-direction: column;
     }
     .app.archive-mode .archive-pane {
-      display: block;
+      display: flex;
     }
     .sidebar-resizer {
       width: 8px;
@@ -3838,7 +3840,8 @@ HTML = r"""<!doctype html>
     .archive-list {
       display: grid;
       gap: 8px;
-      max-height: 60vh;
+      flex: 1 1 auto;
+      min-height: 0;
       overflow: auto;
     }
     .archive-search {
@@ -4172,6 +4175,7 @@ HTML = r"""<!doctype html>
     .experiment-editor-meta {
       margin-top: 8px;
       font-size: 12px;
+      text-align: right;
     }
     .panel-title {
       font-weight: 700;
@@ -11683,7 +11687,7 @@ HTML = r"""<!doctype html>
       const data = await api(`/api/experiments/${encodeURIComponent(id)}/experiment`);
       if (state.selected !== id || state.selectionSeq !== selectionId) return;
       clearTransientOutput();
-      setSelectedExperimentMetadata(id, data.path, data);
+      setSelectedExperimentMetadata(id, data.experiment_file || data.path, data);
       setEditorValue(data.experiment);
       state.editorDirty = false;
       setExperimentTagInState(id, data.tag || null);
@@ -11755,7 +11759,7 @@ HTML = r"""<!doctype html>
       const data = await api(`/api/experiments/${encodeURIComponent(id)}/experiment`);
       if (state.selected !== id || state.selectionSeq !== selectionId) return;
       clearTransientOutput();
-      setSelectedExperimentMetadata(id, data.path, data);
+      setSelectedExperimentMetadata(id, data.experiment_file || data.path, data);
       setEditorValue(data.experiment);
       state.editorDirty = false;
       setExperimentTagInState(id, data.tag || null);
@@ -11779,7 +11783,7 @@ HTML = r"""<!doctype html>
       state.algorithmLoadSeq += 1;
       clearAlgorithmChoices();
       setView('experiment-view').catch(err => out(String(err)));
-      setSelectedExperimentMetadata(id, data.path, data);
+      setSelectedExperimentMetadata(id, data.experiment_file || data.path, data);
       setEditorValue(data.experiment);
       state.editorDirty = false;
       renderSubmitLock(data.submit_lock);
@@ -12957,6 +12961,7 @@ def make_handler(app):
                 payload = {
                     "id": experiment_id,
                     "path": str(exp_path),
+                    "experiment_file": str(exp_path / "Experiment"),
                     "experiment": (exp_path / "Experiment").read_text(encoding="utf-8"),
                     "submit_lock": app.submit_lock(experiment_id),
                     "read_only": True,
@@ -13163,6 +13168,7 @@ def make_handler(app):
                     payload = {
                         "id": experiment_id,
                         "path": str(exp_path),
+                        "experiment_file": str(exp_path / "Experiment"),
                         "experiment": (exp_path / "Experiment").read_text(encoding="utf-8"),
                         "submit_lock": {"locked": False, "fields": {}} if archived else app.submit_lock(experiment_id),
                         "tag": app.tag_for_experiment(experiment_id),
