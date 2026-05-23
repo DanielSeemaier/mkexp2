@@ -717,6 +717,8 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("--tab-active-bg: #0f766e;", mkexp2_web.HTML)
         self.assertIn("background: var(--tab-active-bg);", mkexp2_web.HTML)
         self.assertIn("color: var(--tab-active-text);", mkexp2_web.HTML)
+        self.assertIn(".describe-filter button.active", mkexp2_web.HTML)
+        self.assertIn("border-color: var(--tab-active-border);", mkexp2_web.HTML)
         self.assertIn("THEME_STORAGE_KEY", mkexp2_web.HTML)
         self.assertIn("async function loadUiSettings", mkexp2_web.HTML)
         self.assertIn("async function saveTheme", mkexp2_web.HTML)

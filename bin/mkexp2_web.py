@@ -3823,8 +3823,9 @@ HTML = r"""<!doctype html>
       font-size: 12px;
     }
     .describe-filter button.active {
-      color: white;
-      background: var(--text);
+      color: var(--tab-active-text);
+      background: var(--tab-active-bg);
+      border-color: var(--tab-active-border);
     }
     .describe-section {
       display: grid;
