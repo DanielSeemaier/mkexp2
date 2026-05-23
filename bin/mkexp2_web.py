@@ -1045,7 +1045,7 @@ class Mkexp2WebApp:
     def normalize_settings(self, payload):
         payload = payload if isinstance(payload, dict) else {}
         theme = str(payload.get("theme") or "light").strip().lower()
-        if theme not in ("light", "dark"):
+        if theme not in ("light", "dark", "system"):
             theme = "light"
         return {"theme": theme}
 
@@ -3034,7 +3034,8 @@ HTML = r"""<!doctype html>
   <script>
     (() => {
       const theme = localStorage.getItem('mkexp2-theme') || 'light';
-      if (theme === 'dark') document.documentElement.dataset.theme = 'dark';
+      const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (theme === 'dark' || (theme === 'system' && systemDark)) document.documentElement.dataset.theme = 'dark';
     })();
   </script>
   <style>
@@ -5373,11 +5374,10 @@ HTML = r"""<!doctype html>
       background: var(--surface);
       cursor: pointer;
     }
-    .theme-toggle input {
-      width: 16px;
-      height: 16px;
-      margin: 0;
-      flex: 0 0 auto;
+    .theme-toggle select {
+      width: 150px;
+      flex: 0 0 150px;
+      padding: 7px 9px;
     }
     .theme-toggle-title {
       display: block;
@@ -5853,12 +5853,16 @@ HTML = r"""<!doctype html>
           </div>
           <div class="settings-section">
             <div class="settings-tool-title">Appearance</div>
-            <label class="theme-toggle" for="theme-dark-toggle">
+            <label class="theme-toggle" for="theme-select">
               <span>
-                <span class="theme-toggle-title">Dark mode</span>
-                <span class="theme-toggle-desc">Use a darker color scheme for this web UI.</span>
+                <span class="theme-toggle-title">Appearance</span>
+                <span class="theme-toggle-desc">Use a fixed theme or follow the system color scheme.</span>
               </span>
-              <input id="theme-dark-toggle" type="checkbox">
+              <select id="theme-select">
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+                <option value="system">System</option>
+              </select>
             </label>
           </div>
           <div class="settings-section">
@@ -6403,6 +6407,16 @@ HTML = r"""<!doctype html>
     const THEME_STORAGE_KEY = 'mkexp2-theme';
     const SIDEBAR_WIDTH_KEY = 'mkexp2-sidebar-width';
     const DEFAULT_SIDEBAR_WIDTH = 320;
+    if (window.matchMedia) {
+      const systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const onSystemThemeChange = () => {
+        if (normalizeTheme(state.settings?.theme || localStorage.getItem(THEME_STORAGE_KEY)) === 'system') {
+          applyTheme('system', false);
+        }
+      };
+      if (systemThemeQuery.addEventListener) systemThemeQuery.addEventListener('change', onSystemThemeChange);
+      else if (systemThemeQuery.addListener) systemThemeQuery.addListener(onSystemThemeChange);
+    }
     const MIN_SIDEBAR_WIDTH = 260;
     const MAX_SIDEBAR_WIDTH = 560;
     const allowEmptyToken = __ALLOW_EMPTY_TOKEN__;
@@ -7196,24 +7210,30 @@ HTML = r"""<!doctype html>
         await refreshStatus().catch(err => out(String(err)));
       });
     }
+    function systemPrefersDark() {
+      return Boolean(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
     function normalizeTheme(theme) {
-      return theme === 'dark' ? 'dark' : 'light';
+      return ['light', 'dark', 'system'].includes(theme) ? theme : 'light';
+    }
+    function effectiveTheme(theme) {
+      const normalized = normalizeTheme(theme);
+      return normalized === 'system' ? (systemPrefersDark() ? 'dark' : 'light') : normalized;
     }
     function applyTheme(theme, persistLocal = true) {
       const normalized = normalizeTheme(theme);
+      const effective = effectiveTheme(normalized);
       state.settings = Object.assign({}, state.settings || {}, { theme: normalized });
-      document.documentElement.dataset.theme = normalized;
-      if (normalized === 'light') {
-        delete document.documentElement.dataset.theme;
-      }
+      if (effective === 'dark') document.documentElement.dataset.theme = 'dark';
+      else delete document.documentElement.dataset.theme;
       if (persistLocal) localStorage.setItem(THEME_STORAGE_KEY, normalized);
       renderThemeSetting();
       return normalized;
     }
     function renderThemeSetting() {
-      const toggle = document.getElementById('theme-dark-toggle');
-      if (!toggle) return;
-      toggle.checked = normalizeTheme(state.settings?.theme) === 'dark';
+      const select = document.getElementById('theme-select');
+      if (!select) return;
+      select.value = normalizeTheme(state.settings?.theme);
     }
     async function loadUiSettings() {
       if (state.shared) {
@@ -11508,7 +11528,7 @@ HTML = r"""<!doctype html>
     document.getElementById('tag-save').onclick = () => saveTag().catch(err => out(String(err)));
     document.getElementById('settings-open').onclick = openSettingsDialog;
     document.getElementById('settings-close').onclick = closeSettingsDialog;
-    document.getElementById('theme-dark-toggle').onchange = event => saveTheme(event.target.checked ? 'dark' : 'light');
+    document.getElementById('theme-select').onchange = event => saveTheme(event.target.value);
     document.getElementById('archive-codex-experiments').onclick = () => archiveCodexExperiments().catch(err => out(String(err)));
     document.getElementById('archive-subdir-experiments').onclick = () => archiveSubdirectoryExperiments().catch(err => out(String(err)));
     document.getElementById('spack-cache-refresh').onclick = () => refreshSpackCache().catch(err => out(String(err)));
