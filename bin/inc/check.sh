@@ -157,6 +157,16 @@ _CheckValidateKnownProperties() {
     timelimit.per_instance
     parse.auto
     parse.slurm.timelimit
+    postprocess.auto
+    postprocess.parse
+    postprocess.plots
+    postprocess.plot.no_docker
+    postprocess.plot.threads
+    postprocess.email.to
+    postprocess.email.from
+    postprocess.email.subject
+    postprocess.email.body
+    postprocess.email.attach_plots
     slurm.install.mode
     slurm.install.timelimit
     slurm.dependency

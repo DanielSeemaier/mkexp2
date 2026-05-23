@@ -164,6 +164,9 @@ for local_fn in "${experiment_functions[@]}"; do
     if [[ "$(ResolveRunProperty "parse.auto" "false")" == "true" ]]; then
       MKEXP2_PARSE_AUTO_REQUIRED=1
     fi
+    if [[ "$(ResolveRunProperty "postprocess.auto" "false")" == "true" ]]; then
+      MKEXP2_POSTPROCESS_AUTO_REQUIRED=1
+    fi
   fi
 done
 

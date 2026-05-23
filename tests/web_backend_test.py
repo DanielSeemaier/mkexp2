@@ -454,6 +454,17 @@ class WebBackendTest(unittest.TestCase):
             saved = app.write_settings({"benchmark_base_path": str(repo / "graphs")})
             self.assertEqual(saved["benchmark_base_path"], str(repo / "graphs"))
             self.assertEqual(app.read_settings()["benchmark_base_path"], str(repo / "graphs"))
+            saved = app.write_settings({
+                "postprocess_defaults": {
+                    "email_to": "daniel@example.org",
+                    "plots": "performance-profile running-time-box",
+                    "email_subject": "done {experiment_id}",
+                    "email_body": "Status: {status}",
+                }
+            })
+            self.assertEqual(saved["postprocess_defaults"]["email_to"], "daniel@example.org")
+            self.assertEqual(saved["postprocess_defaults"]["plots"], "performance-profile running-time-box")
+            self.assertEqual(app.read_settings()["postprocess_defaults"]["email_subject"], "done {experiment_id}")
 
     def test_workspaces_create_switch_and_remove(self):
         if mkexp2_web.shutil.which("git") is None:

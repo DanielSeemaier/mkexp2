@@ -1286,7 +1286,20 @@ class Mkexp2WebApp:
         if theme not in ("light", "dark", "system"):
             theme = "light"
         benchmark_base_path = str(payload.get("benchmark_base_path") or "").strip()
-        return {"theme": theme, "benchmark_base_path": benchmark_base_path}
+        raw_postprocess = payload.get("postprocess_defaults")
+        if not isinstance(raw_postprocess, dict):
+            raw_postprocess = {}
+        postprocess_defaults = {
+            "email_to": str(raw_postprocess.get("email_to") or "").strip(),
+            "plots": str(raw_postprocess.get("plots") or "default").strip() or "default",
+            "email_subject": str(raw_postprocess.get("email_subject") or "mkexp2 {status}: {experiment_id}").strip(),
+            "email_body": str(raw_postprocess.get("email_body") or "").strip(),
+        }
+        return {
+            "theme": theme,
+            "benchmark_base_path": benchmark_base_path,
+            "postprocess_defaults": postprocess_defaults,
+        }
 
     def read_settings(self):
         path = self.settings_path()

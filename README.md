@@ -193,6 +193,9 @@ AlgorithmProperty KaMinPar repo_url https://github.com/KaHIP/KaMinPar.git
 Property slurm.install.mode job
 Property slurm.install.timelimit 02:00:00
 Property parse.auto true
+Property postprocess.auto true
+Property postprocess.email.to results@example.org
+Property postprocess.plots 'performance-profile running-time-box'
 
 DefineAlgorithm KaMinPar-Dev KaMinPar
 AlgorithmProperty KaMinPar-Dev repo_ref origin/my/branch
@@ -320,6 +323,11 @@ Example:
     - relative path from experiment directory
     - bundled parser name in `mkexp2/parsers/`
     - local parser name in `./parsers/` or `./`
+- Postprocess support:
+  - `Property postprocess.auto true` makes the generated cleanup step parse, create managed plot artifacts, and optionally send email
+  - `Property postprocess.plots default|all|'<plot ids>'` selects managed plot ids from `mkexp2 plot --list --json`
+  - `Property postprocess.email.to user@example.org` sends a completion email with generated PDFs attached when a mailer is available
+  - optional templates: `postprocess.email.subject` and `postprocess.email.body` support placeholders such as `{status}`, `{experiment_id}`, `{experiment_path}`, and `{plots}`
 - Probe support:
   - `mkexp2 probe` lists all `Experiment*` functions as JSON
   - `mkexp2 probe <experiment>` returns declared and resolved experiment state as JSON

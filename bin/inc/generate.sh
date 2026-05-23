@@ -642,6 +642,9 @@ submit_cleanup_slurm() {
   local dep_arg=""
   local cleanup_script=""
   local out=""
+  local postprocess_command=""
+  local postprocess_helper=""
+  local postprocess_mkexp2=""
 
   if [[ -n "$PARSE_JOB_ID" ]]; then
     dep_ids+=("$PARSE_JOB_ID")
@@ -662,9 +665,29 @@ submit_cleanup_slurm() {
 
   mkdir -p "$SUBMIT_DIR/.mkexp2" "$SUBMIT_DIR/slurm"
   cleanup_script="$SUBMIT_DIR/.mkexp2/submit-lock-cleanup-$(date +%Y%m%d-%H%M%S)-$$.sh"
+  if (( ${MKEXP2_POSTPROCESS_AUTO_REQUIRED:-0} )); then
+    local postprocess_log_dir="$SUBMIT_DIR/logs/postprocess"
+    local postprocess_log_file="$postprocess_log_dir/${MKEXP2_RUN_ID}.log"
+    postprocess_helper="$MKEXP2_HOME/bin/mkexp2_postprocess.py"
+    postprocess_mkexp2="$MKEXP2_HOME/bin/mkexp2"
+    postprocess_command=$(
+      printf '%s\n' \
+        "mkdir -p ${(qqq)postprocess_log_dir}" \
+        "echo \"[mkexp2] postprocess log: ${(qqq)postprocess_log_file}\"" \
+        "set +e" \
+        "python3 ${(qqq)postprocess_helper} --mkexp2 ${(qqq)postprocess_mkexp2} --experiment-dir ${(qqq)SUBMIT_DIR} --run-id ${(qqq)MKEXP2_RUN_ID} > ${(qqq)postprocess_log_file} 2>&1" \
+        "postprocess_exit_code=\$?" \
+        "set -e" \
+        "if (( postprocess_exit_code != 0 )); then" \
+        "  echo \"[mkexp2] postprocess failed, log: ${(qqq)postprocess_log_file}\"" \
+        "  tail -n 200 ${(qqq)postprocess_log_file}" \
+        "fi"
+    )
+  fi
   cat > "$cleanup_script" <<CLEANUP
 #!/usr/bin/env zsh
 set -euo pipefail
+$postprocess_command
 rm -f ${(qqq)SUBMIT_LOCK_FILE}
 CLEANUP
   chmod +x "$cleanup_script"
@@ -682,6 +705,32 @@ run_install_local() {
 
   echo "==> Installing dependencies"
   "$mkexp2_bin" install "$@"
+}
+
+run_postprocess_local() {
+  local mkexp2_home="$1"
+  local run_id="$2"
+  local helper="$mkexp2_home/bin/mkexp2_postprocess.py"
+  local log_dir="$SUBMIT_DIR/logs/postprocess"
+  local log_file="$log_dir/${run_id}.log"
+
+  if [[ ! -f "$helper" ]]; then
+    echo "warning: postprocess helper not found: $helper" >&2
+    return 0
+  fi
+
+  mkdir -p "$log_dir"
+  echo "==> Postprocessing results"
+  echo "[mkexp2] postprocess log: $log_file"
+  set +e
+  python3 "$helper" --mkexp2 "$mkexp2_home/bin/mkexp2" --experiment-dir "$SUBMIT_DIR" --run-id "$run_id" > "$log_file" 2>&1
+  local postprocess_exit_code=$?
+  set -e
+  if (( postprocess_exit_code != 0 )); then
+    echo "warning: postprocess failed, log: $log_file" >&2
+    tail -n 80 "$log_file" >&2
+  fi
+  return 0
 }
 SCRIPT
 
@@ -1172,6 +1221,9 @@ FinalizeGenerateOutputs() {
 
   echo "validate_selected_algorithms" >> "$PWD/submit.sh"
   echo "acquire_submit_lock" >> "$PWD/submit.sh"
+  printf 'MKEXP2_HOME=%q\n' "$MKEXP2_HOME" >> "$PWD/submit.sh"
+  printf 'MKEXP2_RUN_ID=%q\n' "$MKEXP2_RUN_ID" >> "$PWD/submit.sh"
+  printf 'MKEXP2_POSTPROCESS_AUTO_REQUIRED=%d\n' "$MKEXP2_POSTPROCESS_AUTO_REQUIRED" >> "$PWD/submit.sh"
   if (( MKEXP2_LOCAL_HAS_RUN_JOBS && MKEXP2_SLURM_HAS_RUN_JOBS )); then
     echo "append_submit_lock_line system mixed" >> "$PWD/submit.sh"
   elif (( MKEXP2_SLURM_HAS_RUN_JOBS )); then
@@ -1241,6 +1293,11 @@ FinalizeGenerateOutputs() {
       } >> "$PWD/submit.sh"
       EchoStep "Enabled auto-parse in submit script"
     fi
+  fi
+
+  if (( MKEXP2_POSTPROCESS_AUTO_REQUIRED && MKEXP2_LOCAL_HAS_RUN_JOBS && ! MKEXP2_SLURM_HAS_RUN_JOBS )); then
+    printf 'run_postprocess_local %q %q\n' "$MKEXP2_HOME" "$MKEXP2_RUN_ID" >> "$PWD/submit.sh"
+    EchoStep "Enabled auto-postprocess in submit script"
   fi
 
   if (( MKEXP2_SLURM_HAS_RUN_JOBS )); then

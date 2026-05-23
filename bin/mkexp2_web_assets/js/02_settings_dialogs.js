@@ -303,6 +303,26 @@
     function renderGuidedSettings() {
       const input = document.getElementById('benchmark-base-path');
       if (input) input.value = state.settings?.benchmark_base_path || '';
+      renderPostprocessSettings();
+    }
+    function postprocessDefaults() {
+      return Object.assign({
+        email_to: '',
+        plots: 'default',
+        email_subject: 'mkexp2 {status}: {experiment_id}',
+        email_body: ''
+      }, state.settings?.postprocess_defaults || {});
+    }
+    function renderPostprocessSettings() {
+      const defaults = postprocessDefaults();
+      const emailTo = document.getElementById('postprocess-email-to');
+      const plots = document.getElementById('postprocess-plots');
+      const subject = document.getElementById('postprocess-email-subject');
+      const body = document.getElementById('postprocess-email-body');
+      if (emailTo) emailTo.value = defaults.email_to || '';
+      if (plots) plots.value = defaults.plots || 'default';
+      if (subject) subject.value = defaults.email_subject || 'mkexp2 {status}: {experiment_id}';
+      if (body) body.value = defaults.email_body || '';
     }
     async function loadUiSettings() {
       if (state.shared) {
@@ -343,6 +363,47 @@
       await saveUiSettingsPatch({ benchmark_base_path: input?.value.trim() || '' });
       state.benchmarkSets = [];
       state.benchmarkSetsFor = '';
+    }
+    function postprocessDefaultsFromFields() {
+      return {
+        email_to: document.getElementById('postprocess-email-to')?.value.trim() || '',
+        plots: document.getElementById('postprocess-plots')?.value.trim() || 'default',
+        email_subject: document.getElementById('postprocess-email-subject')?.value.trim() || 'mkexp2 {status}: {experiment_id}',
+        email_body: document.getElementById('postprocess-email-body')?.value || ''
+      };
+    }
+    async function savePostprocessDefaults() {
+      await saveUiSettingsPatch({ postprocess_defaults: postprocessDefaultsFromFields() });
+    }
+    function zshSingleQuote(value) {
+      return `'${String(value ?? '').replace(/'/g, `'\\''`)}'`;
+    }
+    async function insertPostprocessDsl() {
+      if (!state.selected || state.shared || state.selectedArchived) return;
+      await savePostprocessDefaults();
+      const defaults = postprocessDefaultsFromFields();
+      const lines = [
+        '',
+        '# Automatic cleanup-job postprocessing',
+        'Property postprocess.auto true',
+        'Property postprocess.parse true',
+        `Property postprocess.plots ${zshSingleQuote(defaults.plots || 'default')}`,
+      ];
+      if (defaults.email_to) lines.push(`Property postprocess.email.to ${zshSingleQuote(defaults.email_to)}`);
+      if (defaults.email_subject) lines.push(`Property postprocess.email.subject ${zshSingleQuote(defaults.email_subject)}`);
+      if (defaults.email_body) {
+        const body = defaults.email_body.replace(/\r?\n/g, '\\n');
+        lines.push(`Property postprocess.email.body ${zshSingleQuote(body)}`);
+      }
+      const snippet = `${lines.join('\n')}\n`;
+      if (state.editorMode === 'guided') {
+        await switchEditorMode('text');
+      }
+      const next = editor.value.trimEnd() + snippet;
+      setEditorValue(next);
+      state.editorDirty = true;
+      renderEditorMode();
+      closeSettingsDialog();
     }
     function decodeColumnSignature(signature) {
       const text = String(signature || '');

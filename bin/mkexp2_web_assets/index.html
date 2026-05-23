@@ -244,6 +244,37 @@ __MKEXP2_STYLES__
             <div class="csv-summary">Used to prefill and autocomplete Graph entries in guided editing. Leave empty to disable.</div>
           </div>
           <div class="settings-section">
+            <div class="settings-tool-title">Postprocessing DSL defaults</div>
+            <div class="settings-grid">
+              <label class="create-field">
+                <span class="create-field-label">Email recipients</span>
+                <input id="postprocess-email-to" type="text" placeholder="name@example.org">
+              </label>
+              <label class="create-field">
+                <span class="create-field-label">Plot types</span>
+                <input id="postprocess-plots" type="text" placeholder="default">
+              </label>
+            </div>
+            <label class="create-field">
+              <span class="create-field-label">Email subject</span>
+              <input id="postprocess-email-subject" type="text" placeholder="mkexp2 {status}: {experiment_id}">
+            </label>
+            <label class="create-field">
+              <span class="create-field-label">Email body template</span>
+              <textarea id="postprocess-email-body" spellcheck="true" placeholder="Experiment: {experiment_id}"></textarea>
+            </label>
+            <div class="settings-tool">
+              <div class="csv-summary">Saved here as authoring defaults; Insert DSL writes the corresponding `Property postprocess.*` lines into the current Experiment file.</div>
+              <div class="settings-inline-tool">
+                <button id="postprocess-save-defaults">Save defaults</button>
+                <button id="postprocess-insert-dsl" class="icon-text-button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                  <span>Insert DSL</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="settings-section">
             <div class="settings-tool-title">Results columns</div>
             <div id="settings-hidden-columns" class="settings-hidden-columns csv-empty">No globally hidden columns loaded.</div>
           </div>

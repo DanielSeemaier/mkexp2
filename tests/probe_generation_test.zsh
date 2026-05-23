@@ -52,6 +52,9 @@ Property slurm.install.mode job
 Property slurm.install.timelimit 02:00:00
 Property parse.auto true
 Property parse.slurm.timelimit 00:30:00
+Property postprocess.auto true
+Property postprocess.email.to results@example.org
+Property postprocess.plots running-time-box
 Property timelimit 01:02:03
 
 ExperimentAlpha() {
@@ -130,6 +133,12 @@ EOF
     fi
     if ! grep -q '^submit_parse_slurm ' submit.sh; then
       fail "submit script contains parse job submission"
+    fi
+    if ! grep -q '^MKEXP2_POSTPROCESS_AUTO_REQUIRED=1$' submit.sh; then
+      fail "submit script records postprocess requirement"
+    fi
+    if ! grep -q 'mkexp2_postprocess.py' submit.sh; then
+      fail "submit script cleanup path can run postprocess helper"
     fi
   )
 
