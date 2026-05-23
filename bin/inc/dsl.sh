@@ -75,6 +75,10 @@ Graphs() {
   local ext="${2:-}"
   local filename=""
 
+  _graph_directive_commands+=("Graphs")
+  _graph_directive_paths+=("$dir")
+  _graph_directive_extensions+=("$ext")
+
   if [[ -n "$ext" ]]; then
     for filename in "$dir"/*."$ext"(N); do
       _graphs+=("${filename%.*}")
@@ -88,7 +92,11 @@ Graphs() {
 }
 
 Graph() {
-  _graphs+=("${1%.*}")
+  local graph="${1%.*}"
+  _graph_directive_commands+=("Graph")
+  _graph_directive_paths+=("$graph")
+  _graph_directive_extensions+=("")
+  _graphs+=("$graph")
 }
 
 GetAlgorithmBase() {

@@ -760,7 +760,6 @@
     .guided-editor.hidden {
       display: none;
     }
-    .guided-toolbar,
     .guided-section-header,
     .guided-card-header,
     .guided-inline-actions {
@@ -822,8 +821,14 @@
       align-items: center;
       min-width: 0;
     }
+    .guided-property-row {
+      grid-template-columns: minmax(150px, 0.75fr) minmax(0, 1.25fr) auto auto;
+    }
     .guided-graph-row {
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: minmax(95px, 0.35fr) minmax(0, 1fr) minmax(80px, 0.3fr) auto auto;
+    }
+    .guided-placeholder-button {
+      visibility: hidden;
     }
     .guided-check-grid {
       display: grid;
@@ -844,10 +849,6 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-    }
-    .guided-hint {
-      color: var(--muted);
-      font-size: 12px;
     }
     .grid {
       display: grid;

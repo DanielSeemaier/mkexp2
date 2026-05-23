@@ -312,18 +312,120 @@
         names.add(partitioner.name);
         for (const alias of partitioner.aliases || []) names.add(alias.name);
       }
+      for (const algorithm of state.guidedForm?.algorithm_definitions || []) {
+        if (algorithm.name) names.add(algorithm.name);
+      }
       return Array.from(names).sort((left, right) => left.localeCompare(right));
     }
-    function pluginDefaultKeys(base, describe = state.guidedModel?.describe) {
-      const partitioners = describePartitionerMap(describe);
-      const direct = partitioners.get(base);
-      if (direct) return new Set((direct.defaults || []).map(prop => prop.key));
-      for (const partitioner of partitioners.values()) {
-        if ((partitioner.aliases || []).some(alias => alias.name === base)) {
-          return new Set((partitioner.defaults || []).map(prop => prop.key));
-        }
+    function updateGuidedBaseSuggestions() {
+      const datalist = document.getElementById('guided-algorithm-base-suggestions');
+      if (!datalist) return;
+      datalist.innerHTML = '';
+      for (const name of guidedBaseOptions()) {
+        const option = document.createElement('option');
+        option.value = name;
+        datalist.appendChild(option);
       }
-      return new Set();
+    }
+    function describeSystemMap(describe = state.guidedModel?.describe) {
+      const map = new Map();
+      for (const system of describe?.systems || []) map.set(system.name, system);
+      return map;
+    }
+    function normalizePropertyMetadata(prop) {
+      return {
+        key: String(prop?.key || '').trim(),
+        value: String(prop?.value ?? ''),
+        allowed: String(prop?.allowed || ''),
+        closed: Boolean(prop?.closed),
+        values: Array.isArray(prop?.values) ? prop.values.map(value => String(value)) : [],
+        when: String(prop?.when || ''),
+      };
+    }
+    function mergePropertyCatalog(catalog, properties) {
+      for (const raw of properties || []) {
+        const prop = normalizePropertyMetadata(raw);
+        if (prop.key) catalog.set(prop.key, prop);
+      }
+      return catalog;
+    }
+    function guidedAlgorithmDefinition(name) {
+      return (state.guidedForm?.algorithm_definitions || []).find(algorithm => algorithm.name === name) || null;
+    }
+    function describePartitionerForBase(base, describe = state.guidedModel?.describe, seen = new Set()) {
+      const value = String(base || '').trim();
+      if (!value || seen.has(value)) return null;
+      seen.add(value);
+      const partitioners = describePartitionerMap(describe);
+      const direct = partitioners.get(value);
+      if (direct) return { partitioner: direct, alias: null };
+      for (const partitioner of partitioners.values()) {
+        const alias = (partitioner.aliases || []).find(item => item.name === value);
+        if (alias) return { partitioner, alias };
+      }
+      const definition = guidedAlgorithmDefinition(value);
+      if (definition?.base) return describePartitionerForBase(definition.base, describe, seen);
+      return null;
+    }
+    function systemPropertyCatalog(systemName) {
+      const catalog = new Map();
+      const systems = describeSystemMap();
+      const selected = systems.get(systemName);
+      if (selected) {
+        mergePropertyCatalog(catalog, selected.defaults || []);
+      } else {
+        for (const system of systems.values()) mergePropertyCatalog(catalog, system.defaults || []);
+      }
+      return catalog;
+    }
+    function algorithmPropertyCatalog(base) {
+      const catalog = new Map();
+      const resolved = describePartitionerForBase(base);
+      mergePropertyCatalog(catalog, resolved?.partitioner?.defaults || []);
+      mergePropertyCatalog(catalog, resolved?.alias?.properties || []);
+      mergePropertyCatalog(catalog, guidedPropertyRows(guidedAlgorithmDefinition(base)?.properties || []));
+      return catalog;
+    }
+    function guidedPropertyCatalog(context) {
+      if (context?.kind === 'algorithm') return algorithmPropertyCatalog(context.base || '');
+      return systemPropertyCatalog(context?.system || state.guidedForm?.system || '');
+    }
+    function pluginDefaultKeys(base, describe = state.guidedModel?.describe) {
+      const resolved = describePartitionerForBase(base, describe);
+      return new Set((resolved?.partitioner?.defaults || []).map(prop => prop.key));
+    }
+    function explicitGuidedAlgorithmProperty(base, key, seen = new Set()) {
+      const value = String(base || '').trim();
+      if (!value || seen.has(value)) return '';
+      seen.add(value);
+      const definition = guidedAlgorithmDefinition(value);
+      if (!definition) return '';
+      const direct = guidedPropertyRows(definition.properties || []).find(prop => prop.key === key && prop.value);
+      if (direct) return direct.value;
+      return explicitGuidedAlgorithmProperty(definition.base, key, seen);
+    }
+    function defaultRepoUrlForBase(base) {
+      return explicitGuidedAlgorithmProperty(base, 'repo_url') || algorithmPropertyCatalog(base).get('repo_url')?.value || '';
+    }
+    function guidedPropertyKeyOptions(catalog, rows) {
+      const keys = new Set(catalog.keys());
+      for (const row of rows || []) {
+        if (row.key) keys.add(row.key);
+      }
+      const priority = ['repo_url', 'repo_ref', 'parser', 'binary', 'build_target', 'cmake_flags', 'build_opts', 'build_options'];
+      return Array.from(keys).sort((left, right) => {
+        const leftPriority = priority.includes(left) ? priority.indexOf(left) : 99;
+        const rightPriority = priority.includes(right) ? priority.indexOf(right) : 99;
+        return leftPriority - rightPriority || left.localeCompare(right);
+      });
+    }
+    function suggestedGuidedProperty(context, rows) {
+      const catalog = guidedPropertyCatalog(context);
+      const used = new Set((rows || []).map(row => row.key).filter(Boolean));
+      const keys = guidedPropertyKeyOptions(catalog, rows);
+      const key = keys.find(item => !used.has(item)) || keys[0] || '';
+      const meta = catalog.get(key);
+      return { key, value: meta?.value || '' };
     }
     function guidedPropertiesForAlgorithm(algorithm, describe) {
       const defaults = pluginDefaultKeys(algorithm.base, describe);
@@ -381,11 +483,18 @@
       const basePath = model?.settings?.benchmark_base_path || state.settings?.benchmark_base_path || '';
       const formExperiments = experiments.map((experiment, index) => {
         const declared = experiment.declared || {};
-        const graphValues = guidedLineList(declared.graphs?.length ? declared.graphs : (experiment.resolved?.graphs || []).map(graph => graph.spec));
+        const graphDirectives = Array.isArray(declared.graph_directives) && declared.graph_directives.length
+          ? declared.graph_directives.map(graph => ({
+              kind: graph.command === 'Graphs' ? 'Graphs' : 'Graph',
+              path: graph.path || '',
+              extension: graph.extension || '',
+            })).filter(graph => graph.path)
+          : guidedLineList(declared.graphs?.length ? declared.graphs : (experiment.resolved?.graphs || []).map(graph => graph.spec))
+              .map(graph => ({ kind: 'Graph', path: graph, extension: '' }));
         return {
           function: experiment.experiment?.function || `Experiment${index + 1}`,
           algorithms: guidedTextList(declared.algorithms?.length ? declared.algorithms : (experiment.resolved?.algorithms || []).map(algorithm => algorithm.name)),
-          graphs: graphValues.length ? graphValues : (basePath ? [basePath] : []),
+          graphs: graphDirectives.length ? graphDirectives : (basePath ? [{ kind: 'Graphs', path: basePath, extension: '' }] : []),
           ks: guidedTextList(declared.ks || []),
           seeds: guidedTextList(declared.seeds || []),
           epsilons: guidedTextList(declared.epsilons || []),
@@ -401,7 +510,7 @@
         experiments: formExperiments.length ? formExperiments : [{
           function: 'ExperimentWeb',
           algorithms: Array.from(algorithmMap.keys()),
-          graphs: basePath ? [basePath] : [],
+          graphs: basePath ? [{ kind: 'Graphs', path: basePath, extension: '' }] : [],
           ks: ['2'],
           seeds: ['1'],
           epsilons: ['0.03'],
@@ -436,6 +545,15 @@
       select.value = value || options[0] || '';
       return select;
     }
+    function guidedPropertyValueControl(meta, value = '') {
+      const values = meta?.values || [];
+      if (values.length) {
+        return guidedSelect('guided-property-value', values, value || meta?.value || values[0] || '');
+      }
+      const input = guidedInput('guided-property-value', value || '', meta?.value || 'value');
+      if (meta?.key === 'repo_ref') input.setAttribute('list', 'guided-repo-ref-suggestions');
+      return input;
+    }
     function guidedField(label, control) {
       const wrapper = document.createElement('label');
       wrapper.className = 'guided-field';
@@ -454,16 +572,41 @@
       button.closest('.guided-card, .guided-row')?.remove();
       markGuidedDirty();
     }
-    function renderGuidedPropertyRows(container, properties, ownerClass) {
+    function renderGuidedPropertyRows(container, properties, ownerClass, context = {}) {
       container.innerHTML = '';
-      const rows = properties?.length ? properties : [{ key: '', value: '' }];
-      for (const prop of rows) {
+      const rows = guidedPropertyRows(properties);
+      const catalog = guidedPropertyCatalog(context);
+      const options = guidedPropertyKeyOptions(catalog, rows);
+      rows.forEach((prop, index) => {
+        const key = prop.key || options[0] || '';
+        const meta = catalog.get(key) || { key, value: '', values: [], closed: false };
         const row = document.createElement('div');
-        row.className = `guided-row ${ownerClass}`;
-        row.appendChild(guidedInput('guided-property-key', prop.key || '', 'property'));
-        const value = guidedInput('guided-property-value', prop.value || '', 'value');
-        if (prop.key === 'repo_ref') value.setAttribute('list', 'guided-repo-ref-suggestions');
+        row.className = `guided-row guided-property-row ${ownerClass}`;
+        row.dataset.propertyIndex = String(index);
+        const keySelect = guidedSelect('guided-property-key', options, key);
+        keySelect.title = meta.when || meta.allowed || key;
+        keySelect.onchange = () => {
+          const nextRows = collectGuidedPropertyRows(container);
+          const nextMeta = catalog.get(keySelect.value);
+          nextRows[index] = { key: keySelect.value, value: nextMeta?.value || '' };
+          renderGuidedPropertyRows(container, nextRows, ownerClass, context);
+          markGuidedDirty();
+        };
+        row.appendChild(keySelect);
+        const value = guidedPropertyValueControl(meta, prop.value || '');
         row.appendChild(value);
+        const fetch = document.createElement('button');
+        fetch.type = 'button';
+        fetch.textContent = 'Fetch refs';
+        fetch.className = 'guided-fetch-refs';
+        if (key === 'repo_ref' && context.kind === 'algorithm') {
+          fetch.onclick = () => fetchGuidedRepoRefs(fetch).catch(err => out(String(err)));
+        } else {
+          fetch.disabled = true;
+          fetch.setAttribute('aria-hidden', 'true');
+          fetch.classList.add('guided-placeholder-button');
+        }
+        row.appendChild(fetch);
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.textContent = 'x';
@@ -471,21 +614,23 @@
         remove.onclick = () => removeGuidedCard(remove);
         row.appendChild(remove);
         container.appendChild(row);
-      }
+      });
     }
     function collectGuidedPropertyRows(container) {
-      return Array.from(container.querySelectorAll('.guided-row')).map(row => ({
+      return Array.from(container.querySelectorAll('.guided-property-row')).map(row => ({
         key: row.querySelector('.guided-property-key')?.value.trim() || '',
         value: row.querySelector('.guided-property-value')?.value.trim() || '',
       })).filter(prop => prop.key);
     }
     async function fetchGuidedRepoRefs(button) {
       const card = button.closest('[data-guided-algorithm]');
-      const repoUrl = Array.from(card.querySelectorAll('.guided-algorithm-property')).find(row =>
+      const explicitRepoUrl = Array.from(card.querySelectorAll('.guided-algorithm-property')).find(row =>
         row.querySelector('.guided-property-key')?.value.trim() === 'repo_url'
       )?.querySelector('.guided-property-value')?.value.trim();
+      const base = card.querySelector('.guided-algorithm-base')?.value.trim() || '';
+      const repoUrl = explicitRepoUrl || defaultRepoUrlForBase(base);
       if (!repoUrl) {
-        alert('Set repo_url first.');
+        alert('No repo_url set and no default repo_url is known for this base.');
         return;
       }
       await withBusyButton(button, 'Fetching...', async () => {
@@ -518,33 +663,40 @@
       title.textContent = algorithm.name || 'Algorithm';
       const actions = document.createElement('div');
       actions.className = 'guided-inline-actions';
-      const fetch = document.createElement('button');
-      fetch.type = 'button';
-      fetch.textContent = 'Fetch refs';
-      fetch.onclick = () => fetchGuidedRepoRefs(fetch).catch(err => out(String(err)));
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.textContent = 'Remove';
       remove.onclick = () => removeGuidedCard(remove);
-      actions.appendChild(fetch);
       actions.appendChild(remove);
       header.appendChild(title);
       header.appendChild(actions);
       const grid = document.createElement('div');
       grid.className = 'guided-grid';
+      const baseInput = guidedInput('guided-algorithm-base', algorithm.base || '', 'KaMinPar or existing algorithm');
+      baseInput.setAttribute('list', 'guided-algorithm-base-suggestions');
       grid.appendChild(guidedField('Name', guidedInput('guided-algorithm-name', algorithm.name || '', 'MyVariant')));
-      grid.appendChild(guidedField('Base / alias', guidedSelect('guided-algorithm-base', guidedBaseOptions(), algorithm.base || '')));
+      grid.appendChild(guidedField('Base / alias', baseInput));
       grid.appendChild(guidedField('CLI arguments', guidedInput('guided-algorithm-args', algorithm.args || '', '-P strong')));
       const propList = document.createElement('div');
       propList.className = 'guided-row-list guided-algorithm-properties';
-      renderGuidedPropertyRows(propList, algorithm.properties || [], 'guided-algorithm-property');
+      const renderAlgorithmProperties = rows => renderGuidedPropertyRows(
+        propList,
+        rows,
+        'guided-algorithm-property',
+        { kind: 'algorithm', base: baseInput.value.trim() }
+      );
+      baseInput.addEventListener('change', () => {
+        renderAlgorithmProperties(collectGuidedPropertyRows(propList));
+        markGuidedDirty();
+      });
+      renderAlgorithmProperties(algorithm.properties || []);
       const addProp = document.createElement('button');
       addProp.type = 'button';
       addProp.textContent = 'Add property';
       addProp.onclick = () => {
         const rows = collectGuidedPropertyRows(propList);
-        rows.push({ key: '', value: '' });
-        renderGuidedPropertyRows(propList, rows, 'guided-algorithm-property');
+        rows.push(suggestedGuidedProperty({ kind: 'algorithm', base: baseInput.value.trim() }, rows));
+        renderAlgorithmProperties(rows);
         markGuidedDirty();
       };
       card.appendChild(header);
@@ -553,15 +705,78 @@
       card.appendChild(addProp);
       container.appendChild(card);
     }
+    function normalizeGuidedGraphRows(graphs) {
+      const rows = Array.isArray(graphs) ? graphs : [];
+      return rows.map(graph => {
+        if (typeof graph === 'object' && graph !== null) {
+          return {
+            kind: graph.kind === 'Graphs' || graph.command === 'Graphs' ? 'Graphs' : 'Graph',
+            path: String(graph.path || graph.value || '').trim(),
+            extension: String(graph.extension || graph.ext || '').trim().replace(/^\./, ''),
+          };
+        }
+        return { kind: 'Graph', path: String(graph || '').trim(), extension: '' };
+      }).filter(graph => graph.path || graph.kind === 'Graphs');
+    }
+    function collectGuidedGraphRows(container) {
+      return Array.from(container.querySelectorAll('.guided-graph-row')).map(row => ({
+        kind: row.querySelector('.guided-graph-kind')?.value || 'Graph',
+        path: row.querySelector('.guided-graph')?.value.trim() || '',
+        extension: row.querySelector('.guided-graph-extension')?.value.trim().replace(/^\./, '') || '',
+      })).filter(graph => graph.path);
+    }
+    async function expandGuidedGraphDirectory(button) {
+      if (!state.selected) return;
+      const row = button.closest('.guided-graph-row');
+      const container = row?.parentElement;
+      if (!row || !container) return;
+      const path = row.querySelector('.guided-graph')?.value.trim() || '';
+      const extension = row.querySelector('.guided-graph-extension')?.value.trim().replace(/^\./, '') || '';
+      if (!path) {
+        alert('Set a graph directory first.');
+        return;
+      }
+      await withBusyButton(button, 'Expanding...', async () => {
+        const data = await api(`/api/experiments/${encodeURIComponent(state.selected)}/graph-directory`, {
+          method: 'POST',
+          body: JSON.stringify({ path, extension })
+        });
+        const entries = data.entries || [];
+        if (!entries.length) {
+          alert('No graph files found in that directory.');
+          return;
+        }
+        const rows = collectGuidedGraphRows(container);
+        const index = Array.from(container.querySelectorAll('.guided-graph-row')).indexOf(row);
+        rows.splice(index, 1, ...entries.map(entry => ({ kind: 'Graph', path: entry.path, extension: '' })));
+        renderGuidedGraphRows(container, rows);
+        markGuidedDirty();
+      });
+    }
     function renderGuidedGraphRows(container, graphs) {
       container.innerHTML = '';
-      const rows = graphs?.length ? graphs : [''];
-      for (const graph of rows) {
+      const rows = normalizeGuidedGraphRows(graphs);
+      for (const graph of (rows.length ? rows : [{ kind: 'Graphs', path: '', extension: '' }])) {
         const row = document.createElement('div');
         row.className = 'guided-row guided-graph-row';
-        const input = guidedInput('guided-graph', graph || '', 'graph file or benchmark set');
+        const kind = guidedSelect('guided-graph-kind', ['Graphs', 'Graph'], graph.kind || 'Graphs');
+        row.appendChild(kind);
+        const input = guidedInput('guided-graph', graph.path || '', 'graph file or benchmark set');
         input.setAttribute('list', 'guided-graph-suggestions');
         row.appendChild(input);
+        const extension = guidedInput('guided-graph-extension', graph.extension || '', 'ext');
+        row.appendChild(extension);
+        const expand = document.createElement('button');
+        expand.type = 'button';
+        expand.textContent = 'Expand';
+        expand.title = 'Replace this directory with one Graph entry per file';
+        expand.disabled = kind.value !== 'Graphs';
+        kind.onchange = () => {
+          expand.disabled = kind.value !== 'Graphs';
+          markGuidedDirty();
+        };
+        expand.onclick = () => expandGuidedGraphDirectory(expand).catch(err => out(String(err)));
+        row.appendChild(expand);
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.textContent = 'x';
@@ -617,8 +832,8 @@
       addGraph.type = 'button';
       addGraph.textContent = 'Add graph';
       addGraph.onclick = () => {
-        const rows = Array.from(graphList.querySelectorAll('.guided-graph')).map(input => input.value.trim()).filter(Boolean);
-        rows.push(state.settings?.benchmark_base_path || '');
+        const rows = collectGuidedGraphRows(graphList);
+        rows.push({ kind: 'Graphs', path: state.settings?.benchmark_base_path || '', extension: '' });
         renderGuidedGraphRows(graphList, rows);
         markGuidedDirty();
       };
@@ -640,6 +855,7 @@
       }
       box.className = 'guided-editor';
       box.innerHTML = '';
+      updateGuidedBaseSuggestions();
       const systems = (state.guidedModel?.describe?.systems || []).map(system => system.name).sort();
       const basics = document.createElement('section');
       basics.className = 'guided-section';
@@ -655,14 +871,25 @@
       basicsHeader.appendChild(addGlobal);
       const basicsGrid = document.createElement('div');
       basicsGrid.className = 'guided-grid';
-      basicsGrid.appendChild(guidedField('System', guidedSelect('guided-system', systems, form.system || '')));
+      const systemSelect = guidedSelect('guided-system', systems, form.system || '');
+      basicsGrid.appendChild(guidedField('System', systemSelect));
       const globalRows = document.createElement('div');
       globalRows.className = 'guided-row-list guided-global-properties';
-      renderGuidedPropertyRows(globalRows, form.properties || [], 'guided-global-property');
+      const renderGlobalProperties = rows => renderGuidedPropertyRows(
+        globalRows,
+        rows,
+        'guided-global-property',
+        { kind: 'system', system: systemSelect.value }
+      );
+      systemSelect.addEventListener('change', () => {
+        renderGlobalProperties(collectGuidedPropertyRows(globalRows));
+        markGuidedDirty();
+      });
+      renderGlobalProperties(form.properties || []);
       addGlobal.onclick = () => {
         const rows = collectGuidedPropertyRows(globalRows);
-        rows.push({ key: '', value: '' });
-        renderGuidedPropertyRows(globalRows, rows, 'guided-global-property');
+        rows.push(suggestedGuidedProperty({ kind: 'system', system: systemSelect.value }, rows));
+        renderGlobalProperties(rows);
         markGuidedDirty();
       };
       basics.appendChild(basicsHeader);
@@ -706,7 +933,7 @@
         state.guidedForm.experiments.push({
           function: `Experiment${state.guidedForm.experiments.length + 1}`,
           algorithms: (state.guidedForm.algorithm_definitions || []).map(algorithm => algorithm.name),
-          graphs: state.settings?.benchmark_base_path ? [state.settings.benchmark_base_path] : [],
+          graphs: state.settings?.benchmark_base_path ? [{ kind: 'Graphs', path: state.settings.benchmark_base_path, extension: '' }] : [],
           ks: ['2'],
           seeds: ['1'],
           epsilons: ['0.03'],
@@ -742,7 +969,7 @@
         experiments: Array.from(box.querySelectorAll('[data-guided-experiment]')).map(card => ({
           function: card.querySelector('.guided-experiment-function')?.value.trim() || '',
           algorithms: Array.from(card.querySelectorAll('.guided-check input:checked')).map(input => input.value),
-          graphs: Array.from(card.querySelectorAll('.guided-graph')).map(input => input.value.trim()).filter(Boolean),
+          graphs: collectGuidedGraphRows(card.querySelector('.guided-graphs') || document.createElement('div')),
           ks: guidedTextList(card.querySelector('.guided-experiment-ks')?.value || ''),
           seeds: guidedTextList(card.querySelector('.guided-experiment-seeds')?.value || ''),
           epsilons: guidedTextList(card.querySelector('.guided-experiment-epsilons')?.value || ''),

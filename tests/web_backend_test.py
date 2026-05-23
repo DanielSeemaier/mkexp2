@@ -231,7 +231,10 @@ class WebBackendTest(unittest.TestCase):
                         {
                             "function": "Guided",
                             "algorithms": ["Baseline"],
-                            "graphs": [str(graph_dir), "inputs/single.graph"],
+                            "graphs": [
+                                {"kind": "Graphs", "path": str(graph_dir)},
+                                {"kind": "Graph", "path": "inputs/single.graph"},
+                            ],
                             "ks": ["2", "16"],
                             "seeds": ["1", "2"],
                             "epsilons": ["0.03"],
@@ -282,6 +285,23 @@ class WebBackendTest(unittest.TestCase):
             self.assertTrue(any(item["path"].endswith("/paper") and item["kind"] == "directory" for item in all_sets["sets"]))
             self.assertTrue(any(item["path"].endswith("/paper/small.graph") and item["kind"] == "file" for item in filtered["sets"]))
             self.assertFalse(any(item["path"].endswith("notes.txt") for item in all_sets["sets"]))
+
+    def test_guided_graph_directory_expands_relative_graphs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "guided"
+            (exp / "graphs").mkdir(parents=True)
+            (exp / "graphs" / "a.metis").write_text("graph\n", encoding="utf-8")
+            (exp / "graphs" / "b.graph").write_text("graph\n", encoding="utf-8")
+            (exp / "graphs" / "notes.txt").write_text("ignore\n", encoding="utf-8")
+            (exp / "Experiment").write_text("ExperimentOld() { :; }\n", encoding="utf-8")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "%Y.%m.%d-<name>", "token")
+
+            all_graphs = app.graph_directory("guided", {"path": "graphs"})
+            metis_only = app.graph_directory("guided", {"path": "graphs", "extension": "metis"})
+
+            self.assertEqual([item["path"] for item in all_graphs["entries"]], ["graphs/a", "graphs/b"])
+            self.assertEqual([item["path"] for item in metis_only["entries"]], ["graphs/a"])
 
     def test_guided_repo_refs_fetches_branches_and_tags(self):
         if mkexp2_web.shutil.which("git") is None:
@@ -571,13 +591,19 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="guided-editor"', mkexp2_web.HTML)
         self.assertIn('id="guided-graph-suggestions"', mkexp2_web.HTML)
         self.assertIn('id="guided-repo-ref-suggestions"', mkexp2_web.HTML)
+        self.assertIn('id="guided-algorithm-base-suggestions"', mkexp2_web.HTML)
         self.assertIn('id="benchmark-base-path"', mkexp2_web.HTML)
         self.assertIn("async function loadGuidedEditor", mkexp2_web.HTML)
         self.assertIn("function guidedFormFromModel", mkexp2_web.HTML)
         self.assertIn("async function fetchGuidedRepoRefs", mkexp2_web.HTML)
+        self.assertIn("function expandGuidedGraphDirectory", mkexp2_web.HTML)
+        self.assertIn("function guidedPropertyCatalog", mkexp2_web.HTML)
         self.assertIn("/api/benchmark-sets", mkexp2_web.HTML)
         self.assertIn("/api/repo-refs", mkexp2_web.HTML)
+        self.assertIn("/graph-directory", mkexp2_web.HTML)
         self.assertIn("/guided/render", mkexp2_web.HTML)
+        self.assertNotIn("Built from mkexp2 probe/describe metadata", mkexp2_web.HTML)
+        self.assertNotIn('id="guided-reload"', mkexp2_web.HTML)
         self.assertNotIn("Manual override", mkexp2_web.HTML)
         self.assertNotIn('id="force"', mkexp2_web.HTML)
         self.assertNotIn('id="save"', mkexp2_web.HTML)

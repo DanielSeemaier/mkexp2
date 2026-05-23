@@ -1949,6 +1949,39 @@ class Mkexp2WebApp:
                 break
         return {"base_path": str(base), "sets": results, "truncated": seen > max_seen or len(results) >= max_results}
 
+    def graph_directory(self, experiment_id, payload):
+        path_text = str((payload or {}).get("path") or "").strip()
+        if not path_text:
+            raise ValueError("graph directory path is required")
+        extension = str((payload or {}).get("extension") or "").strip().lstrip(".")
+        experiment_path = self.readable_experiment_path(experiment_id)
+        raw_path = Path(os.path.expanduser(path_text))
+        directory = raw_path if raw_path.is_absolute() else (experiment_path / raw_path)
+        directory = directory.resolve()
+        if not directory.is_dir():
+            raise ValueError(f"not a graph directory: {path_text}")
+        graph_suffixes = {".graph", ".metis", ".parhip"}
+        entries = []
+        for child in sorted(directory.iterdir(), key=lambda item: item.name):
+            if not child.is_file():
+                continue
+            if extension:
+                if child.suffix != f".{extension}":
+                    continue
+            elif child.suffix not in graph_suffixes:
+                continue
+            if raw_path.is_absolute():
+                display_path = str(child.with_suffix(""))
+            else:
+                display_path = (Path(path_text) / child.name).with_suffix("").as_posix()
+            entries.append({
+                "path": display_path,
+                "name": child.stem,
+                "extension": child.suffix.lstrip("."),
+                "absolute_path": str(child),
+            })
+        return {"directory": str(directory), "entries": entries}
+
     def plot_backend_status(self):
         now = time.time()
         if self._plot_backend_cache and now - self._plot_backend_cache_at < 15:
@@ -3608,6 +3641,31 @@ def normalize_form_lines(value):
     return [line.strip() for line in str(value or "").splitlines() if line.strip()]
 
 
+def normalize_form_graphs(value):
+    rows = []
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict):
+                path = str(item.get("path") or item.get("value") or "").strip()
+                if not path:
+                    continue
+                command = str(item.get("command") or item.get("kind") or "Graph").strip()
+                if command not in {"Graph", "Graphs"}:
+                    command = "Graph"
+                extension = str(item.get("extension") or item.get("ext") or "").strip().lstrip(".")
+                rows.append({"command": command, "path": path, "extension": extension})
+            else:
+                path = str(item).strip()
+                if path:
+                    rows.append({"command": "", "path": path, "extension": ""})
+        return rows
+    for line in str(value or "").splitlines():
+        path = line.strip()
+        if path:
+            rows.append({"command": "", "path": path, "extension": ""})
+    return rows
+
+
 def sanitize_function_name(value, fallback):
     raw = str(value or "").strip()
     if not raw:
@@ -3678,7 +3736,7 @@ def experiment_from_form(name, form):
             continue
         function = sanitize_function_name(experiment.get("function"), fallback_function if index == 0 else f"{fallback_function}{index + 1}")
         selected_algorithms = normalize_form_list(experiment.get("algorithms"))
-        graphs = normalize_form_lines(experiment.get("graphs"))
+        graphs = normalize_form_graphs(experiment.get("graphs"))
         ks = normalize_form_list(experiment.get("ks") or ["2"])
         seeds = normalize_form_list(experiment.get("seeds") or ["1"])
         epsilons = normalize_form_list(experiment.get("epsilons") or ["0.03"])
@@ -3687,9 +3745,12 @@ def experiment_from_form(name, form):
         if selected_algorithms:
             lines.append("  Algorithms " + zsh_words(selected_algorithms))
         for graph in graphs:
-            graph_path = Path(os.path.expanduser(graph))
-            graph_command = "Graphs" if graph_path.is_dir() else "Graph"
-            lines.append(f"  {graph_command} " + shlex.quote(graph))
+            graph_path = Path(os.path.expanduser(graph["path"]))
+            graph_command = graph["command"] or ("Graphs" if graph_path.is_dir() else "Graph")
+            graph_line = f"  {graph_command} " + shlex.quote(graph["path"])
+            if graph_command == "Graphs" and graph.get("extension"):
+                graph_line += " " + shlex.quote(graph["extension"])
+            lines.append(graph_line)
         if ks:
             lines.append("  Ks " + zsh_words(ks))
         if seeds:
@@ -4231,6 +4292,10 @@ def make_handler(app):
                 match = re.match(r"^/api/experiments/([^/]+)/guided/render$", path)
                 if match:
                     json_response(self, 200, app.render_guided_experiment(urllib.parse.unquote(match.group(1)), payload))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/graph-directory$", path)
+                if match:
+                    json_response(self, 200, app.graph_directory(urllib.parse.unquote(match.group(1)), payload))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/plot-artifacts$", path)
                 if match:

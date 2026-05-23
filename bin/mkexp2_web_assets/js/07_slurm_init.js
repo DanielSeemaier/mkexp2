@@ -132,7 +132,6 @@
     document.getElementById('spack-cache-refresh').onclick = () => refreshSpackCache().catch(err => out(String(err)));
     document.getElementById('editor-mode-text').onclick = () => switchEditorMode('text').catch(err => out(String(err)));
     document.getElementById('editor-mode-guided').onclick = () => withBusyButton('editor-mode-guided', 'Loading...', () => switchEditorMode('guided')).catch(err => out(String(err)));
-    document.getElementById('guided-reload').onclick = () => withBusyButton('guided-reload', 'Reloading...', () => loadGuidedEditor(true)).catch(err => out(String(err)));
     document.getElementById('check').onclick = checkExperiment;
     document.getElementById('describe-toggle').onclick = () => toggleDescribePanel().catch(err => out(String(err)));
     document.getElementById('describe-search').oninput = event => {

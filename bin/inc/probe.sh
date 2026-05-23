@@ -301,10 +301,27 @@ ProbeEmitDeclaredAlgorithmProperties() {
   printf '}'
 }
 
+ProbeEmitDeclaredGraphDirectives() {
+  local sep=""
+  local i=0
+
+  printf '['
+  for (( i = 1; i <= ${#_graph_directive_commands[@]}; i++ )); do
+    printf '%s{' "$sep"
+    printf '"command":%s,' "$(JsonString "${_graph_directive_commands[$i]}")"
+    printf '"path":%s,' "$(JsonString "${_graph_directive_paths[$i]}")"
+    printf '"extension":%s' "$(JsonString "${_graph_directive_extensions[$i]}")"
+    printf '}'
+    sep=","
+  done
+  printf ']'
+}
+
 ProbeEmitDeclaredSection() {
   printf '{'
   printf '"algorithms":%s,' "$(ProbeEmitStringArray "${_algorithms[@]}")"
   printf '"graphs":%s,' "$(ProbeEmitStringArray "${_graphs[@]}")"
+  printf '"graph_directives":%s,' "$(ProbeEmitDeclaredGraphDirectives)"
   printf '"ks":%s,' "$(ProbeEmitScalarArray "${_ks[@]}")"
   printf '"seeds":%s,' "$(ProbeEmitScalarArray "${_seeds[@]}")"
   printf '"epsilons":%s,' "$(ProbeEmitScalarArray "${_epsilons[@]}")"
