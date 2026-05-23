@@ -3323,7 +3323,7 @@ HTML = r"""<!doctype html>
     }
     .archive-nav {
       margin-top: 12px;
-      padding-top: 10px;
+      padding-top: 14px;
       border-top: 1px solid var(--border);
     }
     .archive-nav-button {
@@ -9087,11 +9087,17 @@ HTML = r"""<!doctype html>
     function renderArchivedExperimentItem(container, exp) {
       const item = document.createElement('div');
       item.className = 'archive-item';
-      const text = document.createElement('button');
-      text.type = 'button';
+      item.tabIndex = 0;
+      item.setAttribute('role', 'button');
+      item.setAttribute('aria-label', `Open archived experiment ${exp.id}`);
+      item.onclick = () => selectArchivedExperiment(exp.id).catch(err => out(String(err)));
+      item.onkeydown = event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        selectArchivedExperiment(exp.id).catch(err => out(String(err)));
+      };
+      const text = document.createElement('div');
       text.className = 'archive-open-button';
-      text.setAttribute('aria-label', `Open archived experiment ${exp.id}`);
-      text.onclick = () => selectArchivedExperiment(exp.id).catch(err => out(String(err)));
       const name = document.createElement('div');
       name.className = 'archive-name';
       name.textContent = exp.label || exp.name || exp.id;
