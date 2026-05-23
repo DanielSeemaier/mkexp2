@@ -4508,40 +4508,15 @@ HTML = r"""<!doctype html>
       gap: 8px;
       color: var(--muted);
     }
-    .auto-reload-status {
-      display: inline-flex;
+    .panel-title-with-status {
+      display: flex;
       align-items: center;
-      gap: 6px;
-      min-height: 16px;
-      margin-top: 3px;
-      color: var(--muted);
-      font-size: 12px;
+      gap: 8px;
     }
-    .auto-reload-status::before {
-      content: "";
-      width: 7px;
-      height: 7px;
-      border-radius: 999px;
-      background: currentColor;
-      opacity: 0.75;
-      flex: 0 0 auto;
-    }
-    .auto-reload-status.is-refreshing {
-      color: var(--accent);
-    }
-    .auto-reload-status.is-refreshing::before {
-      width: 10px;
-      height: 10px;
-      border: 2px solid currentColor;
-      border-right-color: transparent;
-      background: transparent;
-      animation: spin 0.75s linear infinite;
-    }
-    .auto-reload-status.is-error {
-      color: var(--danger);
-    }
-    .auto-reload-status.hidden {
-      display: none;
+    .progress-title-spinner {
+      width: 14px;
+      height: 14px;
+      border-width: 2px;
     }
     .progress-experiment-header,
     .progress-row {
@@ -6855,8 +6830,10 @@ HTML = r"""<!doctype html>
             <section class="panel">
               <div class="panel-header">
                 <div>
-                  <div class="panel-title">Progress</div>
-                  <div id="progress-auto-status" class="auto-reload-status hidden" aria-live="polite"></div>
+                  <div class="panel-title panel-title-with-status">
+                    <span>Progress</span>
+                    <span id="progress-loading-indicator" class="loading-spinner progress-title-spinner hidden" aria-label="Progress loading"></span>
+                  </div>
                 </div>
                 <button id="refresh-progress" class="icon-button" aria-label="Reload progress" title="Reload progress">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
@@ -7117,13 +7094,7 @@ HTML = r"""<!doctype html>
       plotGenerationRunning: false,
       spackCache: null,
       progressTimer: null,
-      progressStatusTimer: null,
       progressLoadSeq: 0,
-      progressAutoReloading: false,
-      progressAutoReloadError: '',
-      progressLastLoadedAt: null,
-      progressNextReloadAt: null,
-      progressComplete: false,
       description: null,
       descriptionFor: null,
       descriptionEditing: false,
@@ -11430,111 +11401,28 @@ HTML = r"""<!doctype html>
       if (!state.selected || !state.selectedArchived || state.shared) return;
       await unarchiveExperiment(state.selected, document.getElementById('unarchive-nav'), { keepArchivePane: true });
     }
-    function formatAutoReloadTime(timestamp) {
-      if (!timestamp) return '';
-      return new Date(timestamp).toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-      });
-    }
-    function ensureProgressStatusTimer() {
-      if (state.progressStatusTimer) return;
-      state.progressStatusTimer = setInterval(renderProgressAutoStatus, 1000);
-    }
-    function stopProgressStatusTimer() {
-      if (!state.progressStatusTimer) return;
-      clearInterval(state.progressStatusTimer);
-      state.progressStatusTimer = null;
-    }
-    function resetProgressAutoStatus() {
-      state.progressAutoReloading = false;
-      state.progressAutoReloadError = '';
-      state.progressLastLoadedAt = null;
-      state.progressNextReloadAt = null;
-      state.progressComplete = false;
-      renderProgressAutoStatus();
-    }
-    function renderProgressAutoStatus() {
-      const status = document.getElementById('progress-auto-status');
-      if (!status) return;
-      status.className = 'auto-reload-status hidden';
-      status.textContent = '';
-      status.title = '';
-      if (!state.selected || state.selectedArchived) {
-        stopProgressStatusTimer();
-        return;
-      }
-      if (state.progressAutoReloading) {
-        status.className = 'auto-reload-status is-refreshing';
-        status.textContent = 'Auto reloading progress...';
-        ensureProgressStatusTimer();
-        return;
-      }
-      const updated = state.progressLastLoadedAt ? `updated ${formatAutoReloadTime(state.progressLastLoadedAt)}` : '';
-      if (state.progressTimer) {
-        const nextSeconds = state.progressNextReloadAt
-          ? Math.max(0, Math.ceil((state.progressNextReloadAt - Date.now()) / 1000))
-          : 15;
-        status.className = state.progressAutoReloadError
-          ? 'auto-reload-status is-error'
-          : 'auto-reload-status';
-        status.textContent = state.progressAutoReloadError
-          ? `Auto reload failed; retry in ${nextSeconds}s${updated ? ` · ${updated}` : ''}`
-          : `Auto reload in ${nextSeconds}s${updated ? ` · ${updated}` : ''}`;
-        status.title = state.progressAutoReloadError;
-        ensureProgressStatusTimer();
-        return;
-      }
-      if (state.progressLastLoadedAt) {
-        status.className = state.progressAutoReloadError
-          ? 'auto-reload-status is-error'
-          : 'auto-reload-status';
-        status.textContent = state.progressAutoReloadError
-          ? `Auto reload failed · ${updated}`
-          : `${state.progressComplete ? 'Complete' : 'Updated'} · ${updated}`;
-        status.title = state.progressAutoReloadError;
-      }
-      stopProgressStatusTimer();
+    function setProgressLoading(active) {
+      const spinner = document.getElementById('progress-loading-indicator');
+      if (!spinner) return;
+      spinner.classList.toggle('hidden', !active);
     }
     function startProgressPolling() {
-      if (state.progressTimer) {
-        renderProgressAutoStatus();
-        return;
-      }
-      state.progressNextReloadAt = Date.now() + 15000;
+      if (state.progressTimer) return;
       state.progressTimer = setTimeout(() => {
         state.progressTimer = null;
-        state.progressNextReloadAt = null;
         if (state.selected) loadProgress({ quiet: true, auto: true }).catch(err => out(String(err)));
-        else renderProgressAutoStatus();
       }, 15000);
-      renderProgressAutoStatus();
     }
     function stopProgressPolling() {
       if (state.progressTimer) {
         clearTimeout(state.progressTimer);
         state.progressTimer = null;
       }
-      state.progressNextReloadAt = null;
-      renderProgressAutoStatus();
     }
     function renderProgressLoading(experimentId = state.selected) {
       if (!state.selected || (experimentId && state.selected !== experimentId)) return;
       stopProgressPolling();
-      resetProgressAutoStatus();
-      const box = document.getElementById('progress-output');
-      box.className = 'progress-output';
-      box.innerHTML = '';
-      const row = document.createElement('div');
-      row.className = 'progress-loading';
-      const spinner = document.createElement('span');
-      spinner.className = 'loading-spinner';
-      const text = document.createElement('span');
-      text.textContent = 'Loading progress...';
-      row.appendChild(spinner);
-      row.appendChild(text);
-      box.appendChild(row);
+      setProgressLoading(true);
     }
     async function openProgressLog(path) {
       const logPath = String(path || '');
@@ -11565,14 +11453,14 @@ HTML = r"""<!doctype html>
       const progress = result?.progress_json || null;
       if (!state.selected) {
         stopProgressPolling();
-        resetProgressAutoStatus();
+        setProgressLoading(false);
         box.className = 'csv-empty';
         box.textContent = 'Select an experiment first.';
         return;
       }
       if (!result) {
         stopProgressPolling();
-        resetProgressAutoStatus();
+        setProgressLoading(false);
         box.className = 'csv-empty';
         box.textContent = 'Run progress to count finished log files against expected runs.';
         return;
@@ -11630,13 +11518,13 @@ HTML = r"""<!doctype html>
           }
           box.appendChild(card);
         }
-        state.progressComplete = Boolean(progress.complete);
         if (progress.complete) stopProgressPolling();
         else startProgressPolling();
-        renderProgressAutoStatus();
+        setProgressLoading(false);
         return;
       }
       stopProgressPolling();
+      setProgressLoading(false);
       const text = stripAnsi(`${command?.stdout || ''}${command?.stderr ? `\n${command.stderr}` : ''}`).trim();
       box.className = text ? 'progress-output' : 'csv-empty';
       box.textContent = text || 'No progress output.';
@@ -11646,24 +11534,13 @@ HTML = r"""<!doctype html>
       if (!experimentId) return;
       if (state.selectedArchived && experimentId === state.selected) return;
       const loadId = ++state.progressLoadSeq;
-      if (!options.quiet) renderProgressLoading(experimentId);
-      if (options.auto) {
-        state.progressAutoReloading = true;
-        state.progressAutoReloadError = '';
-        state.progressNextReloadAt = null;
-        renderProgressAutoStatus();
-      }
+      renderProgressLoading(experimentId);
       let result = null;
       try {
         result = await api(`/api/experiments/${encodeURIComponent(experimentId)}/progress`);
       } catch (err) {
-        if (state.selected === experimentId && state.progressLoadSeq === loadId && options.auto) {
-          state.progressAutoReloading = false;
-          state.progressAutoReloadError = firstLines(err?.message || String(err), 1);
-          state.progressLastLoadedAt = Date.now();
-          startProgressPolling();
-          renderProgressAutoStatus();
-        }
+        if (state.selected === experimentId && state.progressLoadSeq === loadId) setProgressLoading(false);
+        if (state.selected === experimentId && state.progressLoadSeq === loadId && options.auto) startProgressPolling();
         if (state.selected === experimentId && state.progressLoadSeq === loadId && !options.quiet) {
           stopProgressPolling();
           const box = document.getElementById('progress-output');
@@ -11673,9 +11550,6 @@ HTML = r"""<!doctype html>
         throw err;
       }
       if (state.selected !== experimentId || state.progressLoadSeq !== loadId) return;
-      state.progressAutoReloading = false;
-      state.progressAutoReloadError = '';
-      state.progressLastLoadedAt = Date.now();
       renderSubmitLock(result.submit_lock);
       renderProgress(result);
     }
