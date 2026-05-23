@@ -3763,6 +3763,12 @@ HTML = r"""<!doctype html>
       background: var(--danger);
       color: #ffffff;
     }
+    :root[data-theme="dark"] .submit-cancel-nav,
+    :root[data-theme="dark"] .submit-cancel-nav:hover {
+      border-color: #dc2626;
+      background: #dc2626;
+      color: #ffffff;
+    }
     .submit-cancel-nav.hidden {
       display: none;
     }

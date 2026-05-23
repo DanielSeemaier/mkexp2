@@ -592,6 +592,8 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="cancel-submit-nav"', mkexp2_web.HTML)
         self.assertIn("cancelSubmittedExperiment", mkexp2_web.HTML)
         self.assertIn("/cancel-submit", mkexp2_web.HTML)
+        self.assertIn(':root[data-theme="dark"] .submit-cancel-nav', mkexp2_web.HTML)
+        self.assertIn('background: #dc2626;', mkexp2_web.HTML)
         self.assertIn('id="unarchive-nav"', mkexp2_web.HTML)
         self.assertIn("unarchiveSelectedExperiment", mkexp2_web.HTML)
         self.assertIn('id="share-experiment" class="icon-button" aria-label="Share experiment"', mkexp2_web.HTML)
