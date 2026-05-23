@@ -4161,8 +4161,12 @@ HTML = r"""<!doctype html>
       align-self: flex-start;
     }
     .experiment-editor-header .panel-title,
-    .experiment-editor-header #selected-path {
+    .experiment-editor-meta {
       overflow-wrap: anywhere;
+    }
+    .experiment-editor-meta {
+      margin-top: 8px;
+      font-size: 12px;
     }
     .panel-title {
       font-weight: 700;
@@ -6819,7 +6823,6 @@ HTML = r"""<!doctype html>
             <div class="panel-header experiment-editor-header">
               <div class="experiment-editor-heading">
                 <div class="panel-title" id="selected-title">Experiment</div>
-                <div class="muted" id="selected-path"></div>
               </div>
               <div class="actions check-action">
                 <span id="check-indicator" class="check-indicator hidden" aria-live="polite"></span>
@@ -6831,6 +6834,7 @@ HTML = r"""<!doctype html>
                 <pre id="experiment-highlight" class="editor-highlight" aria-hidden="true"></pre>
                 <textarea id="experiment-editor" spellcheck="false" wrap="off"></textarea>
               </div>
+              <div class="muted experiment-editor-meta" id="selected-path"></div>
             </div>
           </div>
           <div class="stack">

@@ -851,6 +851,11 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="create-open" class="icon-button" aria-label="Create experiment"', mkexp2_web.HTML)
         self.assertIn('class="panel-header experiment-editor-header"', mkexp2_web.HTML)
         self.assertIn('class="experiment-editor-heading"', mkexp2_web.HTML)
+        self.assertIn('class="muted experiment-editor-meta" id="selected-path"', mkexp2_web.HTML)
+        self.assertLess(
+            mkexp2_web.HTML.index('id="experiment-editor"'),
+            mkexp2_web.HTML.index('id="selected-path"'),
+        )
         self.assertIn(".experiment-editor-header .check-action", mkexp2_web.HTML)
         self.assertIn("overflow-wrap: anywhere;", mkexp2_web.HTML)
         self.assertIn('id="create-modal"', mkexp2_web.HTML)
