@@ -3380,11 +3380,24 @@ HTML = r"""<!doctype html>
       border: 1px solid var(--border);
       border-radius: 6px;
       background: var(--surface);
-      cursor: pointer;
     }
     .archive-item:hover {
       border-color: var(--accent);
       background: var(--accent-soft);
+    }
+    .archive-open-button {
+      height: auto;
+      min-width: 0;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      cursor: pointer;
+    }
+    .archive-open-button:hover {
+      background: transparent;
     }
     .archive-name {
       font-weight: 700;
@@ -5105,6 +5118,12 @@ HTML = r"""<!doctype html>
       padding: 12px 14px;
       border-bottom: 1px solid var(--border);
       background: var(--surface);
+      flex: 0 0 auto;
+    }
+    .modal-header-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
       flex: 0 0 auto;
     }
     .modal-footer {
@@ -9068,16 +9087,11 @@ HTML = r"""<!doctype html>
     function renderArchivedExperimentItem(container, exp) {
       const item = document.createElement('div');
       item.className = 'archive-item';
-      item.tabIndex = 0;
-      item.setAttribute('role', 'button');
-      item.setAttribute('aria-label', `Open archived experiment ${exp.id}`);
-      item.onclick = () => selectArchivedExperiment(exp.id).catch(err => out(String(err)));
-      item.onkeydown = event => {
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        event.preventDefault();
-        selectArchivedExperiment(exp.id).catch(err => out(String(err)));
-      };
-      const text = document.createElement('div');
+      const text = document.createElement('button');
+      text.type = 'button';
+      text.className = 'archive-open-button';
+      text.setAttribute('aria-label', `Open archived experiment ${exp.id}`);
+      text.onclick = () => selectArchivedExperiment(exp.id).catch(err => out(String(err)));
       const name = document.createElement('div');
       name.className = 'archive-name';
       name.textContent = exp.label || exp.name || exp.id;
