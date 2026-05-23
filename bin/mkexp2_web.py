@@ -5207,16 +5207,14 @@ HTML = r"""<!doctype html>
       gap: 5px;
       min-width: 0;
     }
-    .plot-source-remove,
-    .plot-artifact-mini-button {
+    .plot-source-remove {
       width: 28px;
       height: 28px;
       padding: 0;
       align-self: start;
       color: var(--muted);
     }
-    .plot-source-remove:hover,
-    .plot-artifact-mini-button:hover {
+    .plot-source-remove:hover {
       color: var(--danger);
       border-color: #fecaca;
       background: #fff1f2;
@@ -11988,7 +11986,7 @@ HTML = r"""<!doctype html>
       const meta = document.createElement('div');
       meta.className = 'plot-artifact-meta';
       const sources = (artifact.sources || []).map(source => source.alias || source.name || source.file).join(', ');
-      meta.textContent = `${artifact.label || artifact.plot_id}; ${sources}; ${formatBytes(artifact.size)}; ${artifact.created_at || artifact.modified_at || ''}`;
+      meta.textContent = `${sources || 'no sources'}; ${formatBytes(artifact.size)}`;
       body.appendChild(title);
       body.appendChild(meta);
       const open = document.createElement('span');
@@ -12001,16 +11999,7 @@ HTML = r"""<!doctype html>
         clearPlotPdfUrl();
         renderPlotPanel();
       };
-      const del = document.createElement('button');
-      del.type = 'button';
-      del.className = 'icon-button plot-artifact-mini-button';
-      del.textContent = 'x';
-      del.title = `Delete ${artifact.label || artifact.id}`;
-      del.setAttribute('aria-label', `Delete plot ${artifact.label || artifact.id}`);
-      del.onclick = () => deletePlotArtifact(artifact.id, del).catch(err => out(String(err)));
       item.appendChild(button);
-      if (!state.shared) item.appendChild(del);
-      else item.appendChild(document.createElement('span'));
       container.appendChild(item);
     }
     function renderPlotArtifactGroup(container, group) {
@@ -12231,20 +12220,6 @@ HTML = r"""<!doctype html>
       state.plotPdfVersion = version;
       renderPlotPanel();
       return state.plotPdfUrl;
-    }
-    async function deletePlotArtifact(artifactId, button = null) {
-      if (!state.selected || state.shared) return;
-      if (!confirm('Delete this plot PDF?')) return;
-      await withBusyButton(button, '', async () => {
-        await api(`/api/experiments/${encodeURIComponent(state.selected)}/plot-artifacts/${encodeURIComponent(artifactId)}`, {
-          method: 'DELETE'
-        });
-        if (state.selectedPlotArtifact === artifactId) {
-          state.selectedPlotArtifact = '';
-          clearPlotPdfUrl();
-        }
-        await loadPlotInfo();
-      });
     }
     async function deletePlotArtifactSet(setId, label, button = null) {
       if (!state.selected || state.shared) return;
