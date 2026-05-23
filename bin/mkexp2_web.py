@@ -4385,6 +4385,41 @@ HTML = r"""<!doctype html>
       gap: 8px;
       color: var(--muted);
     }
+    .auto-reload-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 16px;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .auto-reload-status::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: currentColor;
+      opacity: 0.75;
+      flex: 0 0 auto;
+    }
+    .auto-reload-status.is-refreshing {
+      color: var(--accent);
+    }
+    .auto-reload-status.is-refreshing::before {
+      width: 10px;
+      height: 10px;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      background: transparent;
+      animation: spin 0.75s linear infinite;
+    }
+    .auto-reload-status.is-error {
+      color: var(--danger);
+    }
+    .auto-reload-status.hidden {
+      display: none;
+    }
     .progress-experiment-header,
     .progress-row {
       display: grid;
@@ -5083,16 +5118,15 @@ HTML = r"""<!doctype html>
       justify-content: flex-end;
       align-items: center;
     }
-    .plot-generation-status {
+    .plot-generate-footer {
+      align-items: center;
+    }
+    .modal-footer-actions {
       display: inline-flex;
       align-items: center;
-      gap: 7px;
-      color: var(--muted);
-      font-size: 12px;
-      white-space: nowrap;
-    }
-    .plot-generation-status.hidden {
-      display: none;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-left: auto;
     }
     .plot-option {
       display: inline-flex;
@@ -6157,12 +6191,28 @@ HTML = r"""<!doctype html>
       .compare-grid { grid-template-columns: 1fr; }
       .logs-browser { grid-template-columns: 1fr; }
       .chips { grid-template-columns: 1fr; }
+      .plot-grid { grid-template-columns: 1fr; }
       .workspace-row,
       .workspace-create-row {
         grid-template-columns: 1fr;
       }
       .workspace-actions {
         justify-content: flex-start;
+      }
+      .plot-generate-footer {
+        align-items: stretch;
+        flex-direction: column;
+      }
+      .plot-generate-footer .plot-option,
+      .modal-footer-actions {
+        width: 100%;
+      }
+      .modal-footer-actions {
+        justify-content: stretch;
+        margin-left: 0;
+      }
+      .modal-footer-actions button {
+        flex: 1 1 0;
       }
       .theme-toggle {
         display: grid;
@@ -6566,14 +6616,16 @@ HTML = r"""<!doctype html>
             <span class="csv-summary">Artifact label</span>
             <input id="plot-label" type="text" placeholder="Auto-generated label">
           </label>
+        </div>
+        <div class="modal-footer plot-generate-footer">
           <label class="plot-option" id="plot-no-docker-label" title="Use host R instead of Docker">
             <input id="plot-no-docker" type="checkbox">
             <span>No docker</span>
           </label>
-        </div>
-        <div class="modal-footer">
-          <button id="plot-generate-cancel">Cancel</button>
-          <button id="plot-results" class="primary">Generate</button>
+          <div class="modal-footer-actions">
+            <button id="plot-generate-cancel">Cancel</button>
+            <button id="plot-results" class="primary">Generate</button>
+          </div>
         </div>
       </div>
     </div>
@@ -6658,6 +6710,7 @@ HTML = r"""<!doctype html>
               <div class="panel-header">
                 <div>
                   <div class="panel-title">Progress</div>
+                  <div id="progress-auto-status" class="auto-reload-status hidden" aria-live="polite"></div>
                 </div>
                 <button id="refresh-progress" class="icon-button" aria-label="Reload progress" title="Reload progress">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
@@ -6813,14 +6866,10 @@ HTML = r"""<!doctype html>
               <div class="panel-title">Plots</div>
             </div>
             <div class="actions plot-actions check-action">
-              <span id="plot-running" class="plot-generation-status hidden" aria-live="polite">
-                <span class="loading-spinner" aria-hidden="true"></span>
-                <span>Generating...</span>
-              </span>
               <span id="plot-indicator" class="check-indicator hidden" aria-live="polite"></span>
-              <button id="plot-add-open" class="icon-text-button" aria-label="Add plot artifacts" title="Add plot artifacts">
+              <button id="plot-add-open" class="icon-text-button" aria-label="Create plot artifacts" title="Create plot artifacts">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-                <span>Add</span>
+                <span>Create</span>
               </button>
             </div>
           </div>
@@ -6922,7 +6971,13 @@ HTML = r"""<!doctype html>
       plotGenerationRunning: false,
       spackCache: null,
       progressTimer: null,
+      progressStatusTimer: null,
       progressLoadSeq: 0,
+      progressAutoReloading: false,
+      progressAutoReloadError: '',
+      progressLastLoadedAt: null,
+      progressNextReloadAt: null,
+      progressComplete: false,
       description: null,
       descriptionFor: null,
       descriptionEditing: false,
@@ -7140,6 +7195,32 @@ HTML = r"""<!doctype html>
       indicator.textContent = '';
       indicator.title = '';
       indicator.removeAttribute('aria-label');
+    }
+    function setPlotCreateButtonContent(button, running = false) {
+      if (!button) return;
+      button.innerHTML = '';
+      if (running) {
+        const spinner = document.createElement('span');
+        spinner.className = 'loading-spinner';
+        spinner.setAttribute('aria-hidden', 'true');
+        const label = document.createElement('span');
+        label.textContent = 'Generating...';
+        button.appendChild(spinner);
+        button.appendChild(label);
+        return;
+      }
+      const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      icon.setAttribute('viewBox', '0 0 24 24');
+      icon.setAttribute('aria-hidden', 'true');
+      for (const d of ['M12 5v14', 'M5 12h14']) {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', d);
+        icon.appendChild(path);
+      }
+      const label = document.createElement('span');
+      label.textContent = 'Create';
+      button.appendChild(icon);
+      button.appendChild(label);
     }
     function firstLines(text, limit = 6) {
       return stripAnsi(String(text || ''))
@@ -11100,20 +11181,99 @@ HTML = r"""<!doctype html>
       if (!state.selected || !state.selectedArchived || state.shared) return;
       await unarchiveExperiment(state.selected, document.getElementById('unarchive-nav'), { keepArchivePane: true });
     }
+    function formatAutoReloadTime(timestamp) {
+      if (!timestamp) return '';
+      return new Date(timestamp).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+    }
+    function ensureProgressStatusTimer() {
+      if (state.progressStatusTimer) return;
+      state.progressStatusTimer = setInterval(renderProgressAutoStatus, 1000);
+    }
+    function stopProgressStatusTimer() {
+      if (!state.progressStatusTimer) return;
+      clearInterval(state.progressStatusTimer);
+      state.progressStatusTimer = null;
+    }
+    function resetProgressAutoStatus() {
+      state.progressAutoReloading = false;
+      state.progressAutoReloadError = '';
+      state.progressLastLoadedAt = null;
+      state.progressNextReloadAt = null;
+      state.progressComplete = false;
+      renderProgressAutoStatus();
+    }
+    function renderProgressAutoStatus() {
+      const status = document.getElementById('progress-auto-status');
+      if (!status) return;
+      status.className = 'auto-reload-status hidden';
+      status.textContent = '';
+      status.title = '';
+      if (!state.selected || state.selectedArchived) {
+        stopProgressStatusTimer();
+        return;
+      }
+      if (state.progressAutoReloading) {
+        status.className = 'auto-reload-status is-refreshing';
+        status.textContent = 'Auto reloading progress...';
+        ensureProgressStatusTimer();
+        return;
+      }
+      const updated = state.progressLastLoadedAt ? `updated ${formatAutoReloadTime(state.progressLastLoadedAt)}` : '';
+      if (state.progressTimer) {
+        const nextSeconds = state.progressNextReloadAt
+          ? Math.max(0, Math.ceil((state.progressNextReloadAt - Date.now()) / 1000))
+          : 15;
+        status.className = state.progressAutoReloadError
+          ? 'auto-reload-status is-error'
+          : 'auto-reload-status';
+        status.textContent = state.progressAutoReloadError
+          ? `Auto reload failed; retry in ${nextSeconds}s${updated ? ` · ${updated}` : ''}`
+          : `Auto reload in ${nextSeconds}s${updated ? ` · ${updated}` : ''}`;
+        status.title = state.progressAutoReloadError;
+        ensureProgressStatusTimer();
+        return;
+      }
+      if (state.progressLastLoadedAt) {
+        status.className = state.progressAutoReloadError
+          ? 'auto-reload-status is-error'
+          : 'auto-reload-status';
+        status.textContent = state.progressAutoReloadError
+          ? `Auto reload failed · ${updated}`
+          : `${state.progressComplete ? 'Complete' : 'Updated'} · ${updated}`;
+        status.title = state.progressAutoReloadError;
+      }
+      stopProgressStatusTimer();
+    }
     function startProgressPolling() {
-      if (state.progressTimer) return;
-      state.progressTimer = setInterval(() => {
-        if (state.selected) loadProgress({ quiet: true }).catch(err => out(String(err)));
+      if (state.progressTimer) {
+        renderProgressAutoStatus();
+        return;
+      }
+      state.progressNextReloadAt = Date.now() + 15000;
+      state.progressTimer = setTimeout(() => {
+        state.progressTimer = null;
+        state.progressNextReloadAt = null;
+        if (state.selected) loadProgress({ quiet: true, auto: true }).catch(err => out(String(err)));
+        else renderProgressAutoStatus();
       }, 15000);
+      renderProgressAutoStatus();
     }
     function stopProgressPolling() {
-      if (!state.progressTimer) return;
-      clearInterval(state.progressTimer);
-      state.progressTimer = null;
+      if (state.progressTimer) {
+        clearTimeout(state.progressTimer);
+        state.progressTimer = null;
+      }
+      state.progressNextReloadAt = null;
+      renderProgressAutoStatus();
     }
     function renderProgressLoading(experimentId = state.selected) {
       if (!state.selected || (experimentId && state.selected !== experimentId)) return;
       stopProgressPolling();
+      resetProgressAutoStatus();
       const box = document.getElementById('progress-output');
       box.className = 'progress-output';
       box.innerHTML = '';
@@ -11133,12 +11293,14 @@ HTML = r"""<!doctype html>
       const progress = result?.progress_json || null;
       if (!state.selected) {
         stopProgressPolling();
+        resetProgressAutoStatus();
         box.className = 'csv-empty';
         box.textContent = 'Select an experiment first.';
         return;
       }
       if (!result) {
         stopProgressPolling();
+        resetProgressAutoStatus();
         box.className = 'csv-empty';
         box.textContent = 'Run progress to count finished log files against expected runs.';
         return;
@@ -11190,8 +11352,10 @@ HTML = r"""<!doctype html>
           }
           box.appendChild(card);
         }
+        state.progressComplete = Boolean(progress.complete);
         if (progress.complete) stopProgressPolling();
         else startProgressPolling();
+        renderProgressAutoStatus();
         return;
       }
       stopProgressPolling();
@@ -11205,10 +11369,23 @@ HTML = r"""<!doctype html>
       if (state.selectedArchived && experimentId === state.selected) return;
       const loadId = ++state.progressLoadSeq;
       if (!options.quiet) renderProgressLoading(experimentId);
+      if (options.auto) {
+        state.progressAutoReloading = true;
+        state.progressAutoReloadError = '';
+        state.progressNextReloadAt = null;
+        renderProgressAutoStatus();
+      }
       let result = null;
       try {
         result = await api(`/api/experiments/${encodeURIComponent(experimentId)}/progress`);
       } catch (err) {
+        if (state.selected === experimentId && state.progressLoadSeq === loadId && options.auto) {
+          state.progressAutoReloading = false;
+          state.progressAutoReloadError = firstLines(err?.message || String(err), 1);
+          state.progressLastLoadedAt = Date.now();
+          startProgressPolling();
+          renderProgressAutoStatus();
+        }
         if (state.selected === experimentId && state.progressLoadSeq === loadId && !options.quiet) {
           stopProgressPolling();
           const box = document.getElementById('progress-output');
@@ -11218,6 +11395,9 @@ HTML = r"""<!doctype html>
         throw err;
       }
       if (state.selected !== experimentId || state.progressLoadSeq !== loadId) return;
+      state.progressAutoReloading = false;
+      state.progressAutoReloadError = '';
+      state.progressLastLoadedAt = Date.now();
       renderSubmitLock(result.submit_lock);
       renderProgress(result);
     }
@@ -11961,7 +12141,9 @@ HTML = r"""<!doctype html>
         addButton.disabled = !state.selected || state.plotGenerationRunning || state.selectedArchived;
         addButton.title = state.selectedArchived
           ? 'Unarchive before generating plots.'
-          : (state.plotGenerationRunning ? 'Plot generation is running' : 'Add plot artifacts');
+          : (state.plotGenerationRunning ? 'Plot generation is running' : 'Create plot artifacts');
+        addButton.setAttribute('aria-label', state.plotGenerationRunning ? 'Generating plot artifacts' : 'Create plot artifacts');
+        setPlotCreateButtonContent(addButton, state.plotGenerationRunning || action?.status === 'running');
       }
       const sourceButton = document.getElementById('add-plot-source');
       if (sourceButton) {
@@ -11973,8 +12155,6 @@ HTML = r"""<!doctype html>
         button.disabled = Boolean(error) || !state.selected || state.selectedArchived;
         button.title = state.selectedArchived ? 'Unarchive before generating plots.' : (error || 'Generate selected plot artifacts');
       }
-      const running = document.getElementById('plot-running');
-      if (running) running.classList.toggle('hidden', !(state.plotGenerationRunning || action?.status === 'running'));
       if (!state.selected) {
         clearPlotIndicator();
         return;
