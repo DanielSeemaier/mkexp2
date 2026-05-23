@@ -314,6 +314,11 @@ def unique_ordered(values):
     return out
 
 
+def slurm_cancel_job_id(job_id):
+    text = str(job_id or "").strip()
+    return re.sub(r"%[A-Za-z0-9_.+\-]+(?=\])", "", text)
+
+
 def process_exists(pid):
     try:
         os.kill(pid, 0)
@@ -708,6 +713,7 @@ class SlurmStatus:
         job_id = str((payload or {}).get("job_id") or "").strip()
         if not re.fullmatch(r"[A-Za-z0-9_.+\-\[\]%,]+", job_id):
             raise ValueError("invalid Slurm job id")
+        cancel_id = slurm_cancel_job_id(job_id)
 
         owner = getpass.getuser()
         squeue = run_command(["squeue", "-h", "-o", SQUEUE_TABLE_FORMAT], timeout=8)
@@ -720,13 +726,14 @@ class SlurmStatus:
         if job.get("user") != owner:
             raise ValueError(f"refusing to cancel job {job_id}: owner is {job.get('user')}, server user is {owner}")
 
-        scancel = run_command(["scancel", job_id], timeout=30)
+        scancel = run_command(["scancel", cancel_id], timeout=30)
         self._cache_until = 0
         if scancel["returncode"] != 0:
-            raise ValueError(scancel["stderr"] or scancel["stdout"] or f"scancel failed for job {job_id}")
+            raise ValueError(scancel["stderr"] or scancel["stdout"] or f"scancel failed for job {cancel_id}")
         return {
             "ok": scancel["returncode"] == 0,
             "job": job,
+            "cancel_job_id": cancel_id,
             "server_user": owner,
             "verify": squeue,
             "scancel": scancel,
@@ -776,10 +783,11 @@ class SlurmStatus:
                 continue
             if job.get("user") != owner:
                 raise ValueError(f"refusing to cancel job {job_id}: owner is {job.get('user')}, server user is {owner}")
-            scancel = run_command(["scancel", job_id], timeout=30)
+            cancel_id = slurm_cancel_job_id(job_id)
+            scancel = run_command(["scancel", cancel_id], timeout=30)
             scancels.append(scancel)
             if scancel["returncode"] != 0:
-                raise ValueError(scancel["stderr"] or scancel["stdout"] or f"scancel failed for job {job_id}")
+                raise ValueError(scancel["stderr"] or scancel["stdout"] or f"scancel failed for job {cancel_id}")
             jobs.append(job)
         self._cache_until = 0
         return {

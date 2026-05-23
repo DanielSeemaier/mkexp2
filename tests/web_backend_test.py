@@ -2498,7 +2498,7 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
                 }
             if argv == ["scancel", "123"]:
                 return {"returncode": 0, "stdout": "", "stderr": ""}
-            if argv == ["scancel", "125_[0-3%1]"]:
+            if argv == ["scancel", "125_[0-3]"]:
                 return {"returncode": 0, "stdout": "", "stderr": ""}
             if argv == ["scancel", "-u", "owner"]:
                 return {"returncode": 0, "stdout": "", "stderr": ""}
@@ -2523,10 +2523,11 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
         self.assertTrue(result["ok"])
         self.assertEqual(result["job"]["user"], "owner")
         self.assertTrue(array_result["ok"])
+        self.assertEqual(array_result["cancel_job_id"], "125_[0-3]")
         self.assertTrue(all_result["ok"])
         self.assertEqual(all_result["server_user"], "owner")
         self.assertIn((["scancel", "123"], 30), calls)
-        self.assertIn((["scancel", "125_[0-3%1]"], 30), calls)
+        self.assertIn((["scancel", "125_[0-3]"], 30), calls)
         self.assertIn((["scancel", "-u", "owner"], 30), calls)
 
     def test_spack_plot_cache_action_uses_fixed_argv(self):
