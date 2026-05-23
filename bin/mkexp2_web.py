@@ -6938,7 +6938,6 @@ HTML = r"""<!doctype html>
           <div class="panel-header">
             <div>
               <div class="panel-title">Results</div>
-              <div id="results-summary" class="csv-summary">No results loaded.</div>
             </div>
             <div class="actions">
               <button id="parse-results">Parse Logs</button>
@@ -9030,7 +9029,6 @@ HTML = r"""<!doctype html>
       }
     }
     function renderResultsWorkspace() {
-      const summary = document.getElementById('results-summary');
       const box = document.getElementById('results');
       const selector = document.getElementById('column-selector');
       const allButton = document.getElementById('columns-all');
@@ -9050,7 +9048,6 @@ HTML = r"""<!doctype html>
       allButton.disabled = true;
       noneButton.disabled = true;
       if (!state.selected) {
-        summary.textContent = 'No experiment selected.';
         box.className = 'csv-empty';
         box.textContent = 'Select an experiment first.';
         selector.className = 'column-selector';
@@ -9058,7 +9055,6 @@ HTML = r"""<!doctype html>
         return;
       }
       if (!state.results.length) {
-        summary.textContent = 'No CSV files loaded.';
         box.className = 'csv-empty';
         box.textContent = 'No CSV files loaded.';
         selector.className = 'column-selector';
@@ -9068,7 +9064,6 @@ HTML = r"""<!doctype html>
       const selectedFiles = state.selectedResults.map(findResult).filter(Boolean);
       if (!selectedFiles.length) {
         state.compareColumnModes = {};
-        summary.textContent = `${state.results.length} CSV file(s) loaded.`;
         box.onscroll = null;
         box.className = 'csv-empty';
         box.textContent = 'Select one or more algorithms above.';
@@ -9080,7 +9075,6 @@ HTML = r"""<!doctype html>
       if (selectedFiles.length === 1) {
         state.compareColumnModes = {};
         const file = selectedFiles[0];
-        summary.textContent = `${state.results.length} CSV file(s), ${file.rows.length} row(s) in ${csvLabel(file.name)}`;
         renderColumnSelector(selector, file.headers, renderResultsWorkspace);
         allButton.disabled = false;
         noneButton.disabled = false;
@@ -9091,13 +9085,11 @@ HTML = r"""<!doctype html>
       }
 
       const headers = headersForFiles(selectedFiles);
-      summary.textContent = `${selectedFiles.length}-way comparison: ${selectedFiles.map(file => csvLabel(file.name)).join(' vs ')}`;
       const rowCount = selectedFiles[0].rows.length;
       const mismatch = selectedFiles.find(file => file.rows.length !== rowCount);
       if (mismatch) {
         const details = selectedFiles.map(file => `${csvLabel(file.name)} has ${file.rows.length}`).join(', ');
         const message = `Cannot compare: row counts differ (${details}).`;
-        summary.textContent = message;
         selector.className = 'csv-empty status-bad';
         selector.textContent = 'Row-wise comparison is disabled until all selected CSV files have the same number of rows.';
         box.onscroll = null;

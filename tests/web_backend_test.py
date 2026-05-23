@@ -976,6 +976,7 @@ class WebBackendTest(unittest.TestCase):
 
     def test_html_contains_csv_tabs_and_comparison_view(self):
         self.assertIn('data-view="results-view"', mkexp2_web.HTML)
+        self.assertNotIn('id="results-summary"', mkexp2_web.HTML)
         self.assertNotIn('data-view="compare-view"', mkexp2_web.HTML)
         self.assertIn('id="result-file-tabs"', mkexp2_web.HTML)
         self.assertNotIn('id="add-compare"', mkexp2_web.HTML)
