@@ -3234,10 +3234,14 @@ HTML = r"""<!doctype html>
       grid-template-columns: var(--sidebar-width) 8px minmax(0, 1fr);
       min-height: 100vh;
     }
+    .app.archive-mode {
+      grid-template-columns: var(--sidebar-width) minmax(260px, 340px) 8px minmax(0, 1fr);
+    }
     .app.share-mode {
       grid-template-columns: minmax(0, 1fr);
     }
     .app.share-mode .sidebar,
+    .app.share-mode .archive-pane,
     .app.share-mode .sidebar-resizer,
     .app.share-mode .submit-panel,
     .app.share-mode .danger-zone,
@@ -3263,6 +3267,17 @@ HTML = r"""<!doctype html>
       padding: 18px;
       min-width: 0;
       overflow: auto;
+    }
+    .archive-pane {
+      display: none;
+      border-right: 1px solid var(--border);
+      background: var(--panel);
+      padding: 18px;
+      min-width: 0;
+      overflow: auto;
+    }
+    .app.archive-mode .archive-pane {
+      display: block;
     }
     .sidebar-resizer {
       width: 8px;
@@ -3304,6 +3319,32 @@ HTML = r"""<!doctype html>
       display: grid;
       gap: 6px;
       margin-top: 12px;
+    }
+    .archive-nav {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+    .archive-nav-button {
+      width: 100%;
+      justify-content: flex-start;
+      text-align: left;
+      font-weight: 750;
+    }
+    .archive-nav-button.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--text);
+    }
+    .archive-pane-header {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 12px;
+    }
+    .archive-pane-title {
+      font-weight: 800;
+      font-size: 14px;
     }
     .pinned-experiments {
       display: grid;
@@ -5606,7 +5647,9 @@ HTML = r"""<!doctype html>
     .hidden { display: none; }
     @media (max-width: 980px) {
       .app { grid-template-columns: 1fr; }
+      .app.archive-mode { grid-template-columns: 1fr; }
       .sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
+      .archive-pane { border-right: 0; border-bottom: 1px solid var(--border); }
       .sidebar-resizer { display: none; }
       .main { grid-column: auto; }
       .grid { grid-template-columns: 1fr; }
@@ -5625,9 +5668,6 @@ HTML = r"""<!doctype html>
           <button id="create-open" class="icon-button" aria-label="Create experiment" title="Create experiment">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
           </button>
-          <button id="archive-open" class="icon-button" aria-label="Archived experiments" title="Archived experiments">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
-          </button>
           <button id="git-open" class="icon-button" aria-label="Git status" title="Git status">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M8.5 7.5 16 15"/></svg>
           </button>
@@ -5637,6 +5677,9 @@ HTML = r"""<!doctype html>
         </div>
       </div>
       <div id="experiments" class="experiment-list"></div>
+      <div class="archive-nav">
+        <button id="archive-open" class="archive-nav-button" aria-label="Show archived experiments">Archive</button>
+      </div>
       <section class="sidebar-nodes">
         <div class="sidebar-section-header">
           <div class="sidebar-section-title">Nodes</div>
@@ -5651,6 +5694,14 @@ HTML = r"""<!doctype html>
         </div>
         <div id="slurm-status" class="node-list muted">No status loaded.</div>
       </section>
+    </aside>
+    <aside id="archive-pane" class="archive-pane" aria-label="Archived experiments">
+      <div class="archive-pane-header">
+        <div class="archive-pane-title">Archive</div>
+        <div id="archive-summary" class="csv-summary">No archived experiments loaded.</div>
+      </div>
+      <input id="archive-search" class="archive-search" type="search" placeholder="Search archived experiments">
+      <div id="archive-list" class="archive-list csv-empty">Open Archive to load archived experiments.</div>
     </aside>
     <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" tabindex="0"></div>
     <div id="create-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="create-modal-title">
@@ -5696,28 +5747,6 @@ HTML = r"""<!doctype html>
         <div class="modal-footer">
           <button id="create-cancel">Cancel</button>
           <button id="create-submit" class="primary">Create</button>
-        </div>
-      </div>
-    </div>
-    <div id="archive-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="archive-modal-title">
-      <div class="modal">
-        <div class="modal-header">
-          <div>
-            <div id="archive-modal-title" class="modal-title">Archived Experiments</div>
-            <div id="archive-summary" class="csv-summary">No archived experiments loaded.</div>
-          </div>
-          <button id="archive-close" class="icon-button" aria-label="Close archived experiments" title="Close">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-          </button>
-        </div>
-        <div class="modal-body">
-          <input id="archive-search" class="archive-search" type="search" placeholder="Search archived experiments">
-          <div id="archive-list" class="archive-list csv-empty">Open the dialog to load archived experiments.</div>
-        </div>
-        <div class="modal-footer">
-          <button id="archive-refresh" class="icon-button" aria-label="Reload archived experiments" title="Reload archived experiments">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
-          </button>
         </div>
       </div>
     </div>
@@ -6316,6 +6345,7 @@ HTML = r"""<!doctype html>
       openDirs: new Set(),
       archivedOpenDirs: new Set(),
       archiveQuery: '',
+      archivePaneOpen: false,
       experimentSubdirectories: [],
       results: [],
       resultsFor: null,
@@ -8965,6 +8995,15 @@ HTML = r"""<!doctype html>
       renderPinnedExperiments(list);
       const unpinned = state.experiments.filter(exp => !state.pinnedExperiments.has(exp.id));
       renderExperimentTree(list, experimentTree(unpinned));
+      renderArchivePaneState();
+    }
+    function renderArchivePaneState() {
+      document.querySelector('.app')?.classList.toggle('archive-mode', Boolean(state.archivePaneOpen));
+      const button = document.getElementById('archive-open');
+      if (button) {
+        button.classList.toggle('active', Boolean(state.archivePaneOpen));
+        button.setAttribute('aria-expanded', state.archivePaneOpen ? 'true' : 'false');
+      }
     }
     function renderArchivedExperimentTree(container, node, prefix = '') {
       const folders = Array.from(node.folders.entries()).sort((left, right) => left[0].localeCompare(right[0]));
@@ -9080,8 +9119,9 @@ HTML = r"""<!doctype html>
       renderArchivedExperiments();
       return state.archivedExperiments;
     }
-    async function openArchiveDialog() {
-      document.getElementById('archive-modal').classList.remove('hidden');
+    async function openArchivePane() {
+      state.archivePaneOpen = true;
+      renderArchivePaneState();
       const search = document.getElementById('archive-search');
       if (search) search.value = state.archiveQuery || '';
       await loadArchivedExperiments({ force: true }).catch(err => {
@@ -9089,9 +9129,6 @@ HTML = r"""<!doctype html>
         list.className = 'archive-list csv-empty status-bad';
         list.textContent = String(err);
       });
-    }
-    function closeArchiveDialog() {
-      document.getElementById('archive-modal').classList.add('hidden');
     }
     async function togglePinnedExperiment(id) {
       if (state.pinnedExperiments.has(id)) state.pinnedExperiments.delete(id);
@@ -10410,7 +10447,6 @@ HTML = r"""<!doctype html>
       renderSubmitButton();
       renderExperimentsList();
       renderArchivedExperiments();
-      closeArchiveDialog();
       const data = await api(`/api/experiments/${encodeURIComponent(id)}/experiment`);
       if (state.selected !== id || state.selectionSeq !== selectionId) return;
       clearTransientOutput();
@@ -11280,7 +11316,6 @@ HTML = r"""<!doctype html>
         'queue-modal',
         'share-modal',
         'git-modal',
-        'archive-modal',
         'download-modal',
         'copy-modal',
         'create-modal',
@@ -11449,9 +11484,7 @@ HTML = r"""<!doctype html>
     document.getElementById('copy-name').oninput = updateCopyPreview;
     document.getElementById('copy-template').oninput = updateCopyPreview;
     document.getElementById('copy-template-override').onchange = updateCopyPreview;
-    document.getElementById('archive-open').onclick = () => withBusyButton('archive-open', '', openArchiveDialog).catch(err => out(String(err)));
-    document.getElementById('archive-close').onclick = closeArchiveDialog;
-    document.getElementById('archive-refresh').onclick = () => withBusyButton('archive-refresh', '', () => loadArchivedExperiments({ force: true })).catch(err => out(String(err)));
+    document.getElementById('archive-open').onclick = () => withBusyButton('archive-open', 'Loading...', openArchivePane).catch(err => out(String(err)));
     document.getElementById('archive-search').oninput = event => {
       state.archiveQuery = event.target.value || '';
       renderArchivedExperiments();
