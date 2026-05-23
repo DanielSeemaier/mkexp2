@@ -1,5 +1,3 @@
-#!/usr/bin/env zsh
-
 System slurm
 Property slurm.partition diffie
 Property slurm.use_array true
@@ -20,4 +18,3 @@ Experiment() {
   Algorithms Baseline
   Algorithms MyBranch
 }
-

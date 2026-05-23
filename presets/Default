@@ -1,5 +1,3 @@
-#!/usr/bin/env zsh
-
 # v2 default preset. Starts with Mock so install+generate works without network.
 
 System local
