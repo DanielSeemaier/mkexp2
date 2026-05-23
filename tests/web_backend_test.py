@@ -524,6 +524,13 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('aria-label="Reload logs"', mkexp2_web.HTML)
         self.assertIn("async function loadLogs", mkexp2_web.HTML)
         self.assertIn("async function loadLogFile", mkexp2_web.HTML)
+        self.assertIn("async function parseSelectedLogFile", mkexp2_web.HTML)
+        self.assertIn("/log-parse", mkexp2_web.HTML)
+        self.assertIn("Parse File", mkexp2_web.HTML)
+        self.assertIn("function renderLogParseResult", mkexp2_web.HTML)
+        self.assertIn("function highlightedLogHtml", mkexp2_web.HTML)
+        self.assertIn(".log-match", mkexp2_web.HTML)
+        self.assertIn(".log-parse-cell", mkexp2_web.HTML)
         self.assertIn("ensureLogsLoaded", mkexp2_web.HTML)
         self.assertNotIn('data-view="install-log-view"', mkexp2_web.HTML)
         self.assertNotIn('id="load-install-log"', mkexp2_web.HTML)
@@ -938,7 +945,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertNotIn("/install-log", mkexp2_web.HTML)
         self.assertIn("function renderMarkdown", mkexp2_web.HTML)
         self.assertIn("/\\.md$/i.test(state.logContent.relative_path || '')", mkexp2_web.HTML)
-        self.assertIn("renderMarkdown(state.logContent.content || '', content)", mkexp2_web.HTML)
+        self.assertIn("renderMarkdown(state.logContent.content || '', markdown)", mkexp2_web.HTML)
         self.assertIn("markdown-doc", mkexp2_web.HTML)
         self.assertNotIn(".markdown-doc {\n      border:", mkexp2_web.HTML)
         self.assertIn("cores", mkexp2_web.HTML)
@@ -1068,6 +1075,53 @@ class WebBackendTest(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 app.log_file("exp", "../Experiment")
+
+    def test_single_log_parse_uses_configured_parser(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            parser_dir = exp / "parsers"
+            log_dir = exp / "logs" / "Algo" / "Run"
+            parser_dir.mkdir(parents=True)
+            log_dir.mkdir(parents=True)
+            (exp / "Experiment").write_text(
+                "#!/usr/bin/env zsh\n"
+                "System local\n"
+                "DefineAlgorithm Algo KaMinPar\n"
+                "AlgorithmProperty Algo parser ./parsers/single.awk\n"
+                "ExperimentRun() {\n"
+                "  Algorithms Algo\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            (parser_dir / "single.awk").write_text(
+                "BEGIN { print \"Cut,Time\" }\n"
+                "/^cut=/ { cut=$0; sub(/^cut=/, \"\", cut) }\n"
+                "/^time=/ { time=$0; sub(/^time=/, \"\", time) }\n"
+                "/^__END_FILE__/ { print cut \",\" time }\n",
+                encoding="utf-8",
+            )
+            (log_dir / "graph___k2_seed1_eps0.03_P1x1x1.log").write_text(
+                "cut=42\n"
+                "time=1.25\n",
+                encoding="utf-8",
+            )
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            parsed = app.parse_log_file("exp", "Algo/Run/graph___k2_seed1_eps0.03_P1x1x1.log")
+
+            self.assertTrue(parsed["parsed"])
+            self.assertEqual(parsed["algorithm"], "Algo")
+            self.assertEqual(parsed["parser"]["spec"], "./parsers/single.awk")
+            self.assertEqual(parsed["headers"], ["Cut", "Time"])
+            self.assertEqual(parsed["rows"], [["42", "1.25"]])
+            self.assertIn("Cut,Time", parsed["csv"])
+            self.assertIn("-f", parsed["command"]["argv"])
+
+            with self.assertRaises(ValueError):
+                app.parse_log_file("exp", "install.md")
+            with self.assertRaises(ValueError):
+                app.parse_log_file("exp", "../Experiment")
 
     def test_pinned_experiments_are_stored_server_side(self):
         with tempfile.TemporaryDirectory() as tmp:

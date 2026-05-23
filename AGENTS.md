@@ -115,6 +115,8 @@ There is no linting configuration or CI setup.
 
    Archive-pane navigation keeps the normal experiment tree visible; clicking a normal experiment closes the archive pane, clicking an archived row highlights it and opens it in the main pane, and the archived-view navbar Unarchive action keeps the pane open while selecting the restored active experiment.
 
+   The Logs tab can parse one selected run `.log` file on demand without writing `results/*.csv`: the backend resolves the log's algorithm parser from `mkexp2 probe --all --algorithms`, runs that awk parser on a single `__BEGIN_FILE__` stream, returns CSV rows, and the UI renders the CSV values with matching color highlights in the log preview.
+
    The top navigation tabs use dedicated active-tab contrast CSS variables so selected tabs remain readable in both light and dark themes.
 
    The Submit panel keeps the submit action in the panel header as an icon-only play button, with busy/lock state reflected by the button disabled state and tooltip. Algorithm choices are rendered without an extra bordered per-experiment container so the panel has one less visible hierarchy level.

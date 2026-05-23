@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import argparse
+import csv
 import datetime as _dt
 import getpass
 import html
+import io
 import json
 import mimetypes
 import os
@@ -176,6 +178,50 @@ def run_command(argv, cwd=None, timeout=60):
             cwd=str(cwd) if cwd else None,
             text=True,
             stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            shell=False,
+        )
+        return {
+            "argv": list(argv),
+            "cwd": str(cwd) if cwd else None,
+            "returncode": proc.returncode,
+            "stdout": proc.stdout[-MAX_TEXT_RESPONSE:],
+            "stderr": proc.stderr[-MAX_TEXT_RESPONSE:],
+            "elapsed_seconds": round(time.time() - started, 3),
+            "timed_out": False,
+        }
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "argv": list(argv),
+            "cwd": str(cwd) if cwd else None,
+            "returncode": 124,
+            "stdout": (exc.stdout or "")[-MAX_TEXT_RESPONSE:] if isinstance(exc.stdout, str) else "",
+            "stderr": (exc.stderr or "")[-MAX_TEXT_RESPONSE:] if isinstance(exc.stderr, str) else "",
+            "elapsed_seconds": round(time.time() - started, 3),
+            "timed_out": True,
+        }
+    except FileNotFoundError as exc:
+        return {
+            "argv": list(argv),
+            "cwd": str(cwd) if cwd else None,
+            "returncode": 127,
+            "stdout": "",
+            "stderr": str(exc),
+            "elapsed_seconds": round(time.time() - started, 3),
+            "timed_out": False,
+        }
+
+
+def run_command_with_input(argv, input_text, cwd=None, timeout=60):
+    started = time.time()
+    try:
+        proc = subprocess.run(
+            list(argv),
+            cwd=str(cwd) if cwd else None,
+            text=True,
+            input=input_text,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout,
@@ -2994,6 +3040,118 @@ class Mkexp2WebApp:
             "truncated": len(content) > MAX_TEXT_RESPONSE,
         }
 
+    def resolve_parser_script_path(self, experiment_path, parser_spec):
+        parser_spec = str(parser_spec or "").strip()
+        if not parser_spec:
+            return None
+        exp_path = Path(experiment_path).resolve()
+        candidate = Path(parser_spec)
+        if candidate.is_absolute():
+            resolved = candidate.resolve()
+            return resolved if resolved.is_file() else None
+        if "/" in parser_spec:
+            resolved = (exp_path / parser_spec).resolve()
+            return resolved if resolved.is_file() else None
+
+        filename = parser_spec if parser_spec.endswith(".awk") else f"{parser_spec}.awk"
+        candidates = [
+            self.mkexp2_root() / "plugins" / "parsers" / filename,
+            self.mkexp2_root() / "plugins" / "parsers" / f".{filename}",
+            exp_path / "plugins" / "parsers" / filename,
+            exp_path / "parsers" / filename,
+            exp_path / filename,
+        ]
+        for item in candidates:
+            resolved = item.resolve()
+            if resolved.is_file():
+                return resolved
+        return None
+
+    def parser_for_log_algorithm(self, experiment_id, algorithm, experiment_label=""):
+        exp_path = self.readable_experiment_path(experiment_id)
+        probe = self.read_command(experiment_id, ["probe", "--all", "--algorithms"], timeout=60)
+        candidates = []
+        if probe["returncode"] == 0 and probe["stdout"].strip():
+            try:
+                payload = json.loads(probe["stdout"])
+            except json.JSONDecodeError:
+                payload = {}
+            for experiment in payload.get("experiments") or []:
+                exp_name = str((experiment.get("experiment") or {}).get("name") or "")
+                function_name = str((experiment.get("experiment") or {}).get("function") or "")
+                for item in ((experiment.get("resolved") or {}).get("algorithms") or []):
+                    if item.get("name") != algorithm:
+                        continue
+                    parser = item.get("parser") or {}
+                    spec = parser.get("spec") or algorithm
+                    parser_path = parser.get("resolved_path") or ""
+                    candidates.append({
+                        "algorithm": algorithm,
+                        "experiment": exp_name,
+                        "function": function_name,
+                        "spec": spec,
+                        "resolved_path": parser_path,
+                        "found": bool(parser.get("found")),
+                    })
+
+        chosen = None
+        if candidates:
+            lowered_label = str(experiment_label or "").lower()
+            for item in candidates:
+                if lowered_label and lowered_label in {str(item.get("experiment") or "").lower(), str(item.get("function") or "").lower()}:
+                    chosen = item
+                    break
+            if chosen is None:
+                chosen = next((item for item in candidates if item.get("found")), None) or candidates[0]
+        else:
+            chosen = {"algorithm": algorithm, "experiment": "", "function": "", "spec": algorithm, "resolved_path": "", "found": False}
+
+        parser_path = Path(chosen.get("resolved_path") or "") if chosen.get("resolved_path") else None
+        if not parser_path or not parser_path.is_file():
+            parser_path = self.resolve_parser_script_path(exp_path, chosen.get("spec") or algorithm)
+        if not parser_path:
+            raise ValueError(f"no parser script for {algorithm} (spec='{chosen.get('spec') or algorithm}')")
+        chosen["resolved_path"] = str(parser_path)
+        chosen["found"] = True
+        return chosen
+
+    def parse_log_file(self, experiment_id, rel_path):
+        rel_text = str(rel_path or "").strip("/")
+        parts = rel_text.split("/") if rel_text else []
+        if len(parts) < 2 or not rel_text.endswith(".log"):
+            raise ValueError("select a run log under logs/<algorithm>/.../*.log")
+        algorithm = parts[0]
+        experiment_label = parts[1] if len(parts) > 2 else ""
+        path = self.log_path(experiment_id, rel_text)
+        if not path.is_file():
+            raise ValueError("log path is not a file")
+        parser = self.parser_for_log_algorithm(experiment_id, algorithm, experiment_label=experiment_label)
+        parser_file = Path(parser["resolved_path"]).resolve()
+        awk = shutil.which("awk") or "awk"
+        awk_args = [awk]
+        lib_file = parser_file.parent / ".csv.awk"
+        if lib_file.is_file():
+            awk_args.extend(["-f", str(lib_file)])
+        awk_args.extend(["-f", str(parser_file)])
+        marker = path.name[:-4] if path.name.endswith(".log") else path.name
+        content = strip_ansi(path.read_text(encoding="utf-8", errors="replace"))
+        stream = f"__BEGIN_FILE__ {marker}\n{content}\n__END_FILE__\n"
+        command = run_command_with_input(awk_args, stream, cwd=self.readable_experiment_path(experiment_id), timeout=30)
+        csv_text = command["stdout"] if command["returncode"] == 0 else ""
+        rows = []
+        if csv_text.strip():
+            rows = list(csv.reader(io.StringIO(csv_text)))
+        return {
+            "path": rel_text,
+            "algorithm": algorithm,
+            "parser": parser,
+            "command": command,
+            "parsed": command["returncode"] == 0,
+            "csv": csv_text,
+            "headers": rows[0] if rows else [],
+            "rows": rows[1:] if len(rows) > 1 else [],
+        }
+
 
 def experiment_from_form(name, form):
     function = "Experiment" + re.sub(r"[^A-Za-z0-9]+", "", name.title())
@@ -5523,6 +5681,67 @@ HTML = r"""<!doctype html>
       min-width: 0;
       min-height: 0;
     }
+    .log-file-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .log-file-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--muted);
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .log-parse-result {
+      margin-bottom: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .log-parse-summary {
+      padding: 8px 10px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .log-parse-table-wrap {
+      overflow: auto;
+    }
+    .log-parse-table {
+      min-width: max-content;
+      font-size: 12px;
+    }
+    .log-parse-table th,
+    .log-parse-table td {
+      padding: 6px 8px;
+      white-space: nowrap;
+    }
+    .log-parse-cell,
+    .log-match {
+      color: var(--parse-fg);
+      background: var(--parse-bg);
+    }
+    .log-parse-cell {
+      box-shadow: inset 3px 0 0 var(--parse-fg);
+      font-weight: 650;
+    }
+    .log-match {
+      border-radius: 3px;
+      padding: 0 2px;
+    }
+    .parse-color-0 { --parse-fg: #0f766e; --parse-bg: #ccfbf1; }
+    .parse-color-1 { --parse-fg: #1d4ed8; --parse-bg: #dbeafe; }
+    .parse-color-2 { --parse-fg: #a16207; --parse-bg: #fef3c7; }
+    .parse-color-3 { --parse-fg: #be123c; --parse-bg: #ffe4e6; }
+    .parse-color-4 { --parse-fg: #7c3aed; --parse-bg: #ede9fe; }
+    .parse-color-5 { --parse-fg: #15803d; --parse-bg: #dcfce7; }
+    .parse-color-6 { --parse-fg: #c2410c; --parse-bg: #ffedd5; }
+    .parse-color-7 { --parse-fg: #0369a1; --parse-bg: #e0f2fe; }
     .log-content pre {
       margin: 0;
       max-height: calc(100vh - 230px);
@@ -5535,6 +5754,14 @@ HTML = r"""<!doctype html>
       padding: 12px;
       font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
+    :root[data-theme="dark"] .parse-color-0 { --parse-fg: #99f6e4; --parse-bg: #134e4a; }
+    :root[data-theme="dark"] .parse-color-1 { --parse-fg: #bfdbfe; --parse-bg: #1e3a8a; }
+    :root[data-theme="dark"] .parse-color-2 { --parse-fg: #fde68a; --parse-bg: #713f12; }
+    :root[data-theme="dark"] .parse-color-3 { --parse-fg: #fecdd3; --parse-bg: #881337; }
+    :root[data-theme="dark"] .parse-color-4 { --parse-fg: #ddd6fe; --parse-bg: #4c1d95; }
+    :root[data-theme="dark"] .parse-color-5 { --parse-fg: #bbf7d0; --parse-bg: #14532d; }
+    :root[data-theme="dark"] .parse-color-6 { --parse-fg: #fed7aa; --parse-bg: #7c2d12; }
+    :root[data-theme="dark"] .parse-color-7 { --parse-fg: #bae6fd; --parse-bg: #0c4a6e; }
     .markdown-doc {
       color: var(--text);
       max-height: calc(100vh - 210px);
@@ -6406,6 +6633,8 @@ HTML = r"""<!doctype html>
       logsFor: null,
       selectedLog: '',
       logContent: null,
+      logParseResult: null,
+      logParseFor: '',
       submitLock: null,
       submitBusy: false,
       plotBackend: null,
@@ -7864,6 +8093,120 @@ HTML = r"""<!doctype html>
     function findResult(name) {
       return state.results.find(file => file.name === name) || null;
     }
+    function escapeRegExp(value) {
+      return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+    function isParseableLogPath(path) {
+      const parts = String(path || '').split('/').filter(Boolean);
+      return parts.length >= 2 && /\.log$/i.test(parts[parts.length - 1] || '');
+    }
+    function logParseMatchesSelected() {
+      return Boolean(
+        state.logParseResult
+        && state.logParseFor
+        && state.selectedLog
+        && state.logParseFor === state.selectedLog
+      );
+    }
+    function logParseHighlightDefs(result, logText) {
+      if (!result?.parsed || !result?.headers?.length || !Array.isArray(result.rows)) return [];
+      const skipColumns = new Set(['Graph', 'Seed', 'Epsilon', 'Cores', 'Timeout', 'Failed', 'NumNodes', 'NumMPIsPerNode', 'NumThreadsPerMPI']);
+      const seen = new Set();
+      const defs = [];
+      for (const row of result.rows) {
+        result.headers.forEach((header, index) => {
+          const column = String(header || '');
+          if (skipColumns.has(column)) return;
+          const value = String(row[index] ?? '').trim();
+          if (!value || value === '-1') return;
+          if (value.length < 2 && !['N', 'M', 'K'].includes(column)) return;
+          if (!String(logText || '').includes(value)) return;
+          const key = `${column}\u001f${value}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          defs.push({ column, value, className: `parse-color-${defs.length % 8}` });
+        });
+      }
+      return defs;
+    }
+    function logParseClassFor(defs, column, value) {
+      const text = String(value ?? '').trim();
+      const def = defs.find(item => item.column === column && item.value === text);
+      return def ? def.className : '';
+    }
+    function highlightedLogHtml(text, defs) {
+      const values = Array.from(new Map(
+        defs
+          .filter(item => item.value)
+          .sort((left, right) => right.value.length - left.value.length)
+          .map(item => [item.value, item])
+      ).values());
+      if (!values.length) return esc(text || '');
+      const pattern = new RegExp(`(^|[^A-Za-z0-9_.-])(${values.map(item => escapeRegExp(item.value)).join('|')})(?=$|[^A-Za-z0-9_.-])`, 'g');
+      let html = '';
+      let lastIndex = 0;
+      String(text || '').replace(pattern, (match, prefix, value, offset) => {
+        const valueOffset = offset + prefix.length;
+        const def = values.find(item => item.value === value);
+        html += esc(String(text || '').slice(lastIndex, valueOffset));
+        html += `<span class="log-match ${def.className}" title="${esc(def.column)}">${esc(value)}</span>`;
+        lastIndex = valueOffset + value.length;
+        return match;
+      });
+      html += esc(String(text || '').slice(lastIndex));
+      return html;
+    }
+    function renderLogParseResult(container, result, highlights) {
+      if (!result) return;
+      const panel = document.createElement('section');
+      panel.className = 'log-parse-result';
+      const summary = document.createElement('div');
+      summary.className = 'log-parse-summary';
+      if (!result.parsed) {
+        panel.classList.add('status-bad');
+        summary.textContent = firstLines(result.command?.stderr || result.command?.stdout || 'Parser failed.', 4);
+        panel.appendChild(summary);
+        container.appendChild(panel);
+        return;
+      }
+      if (!result.headers?.length || !result.rows?.length) {
+        const empty = document.createElement('div');
+        empty.className = 'csv-empty';
+        empty.textContent = 'Parser produced no CSV rows.';
+        panel.appendChild(empty);
+        container.appendChild(panel);
+        return;
+      }
+      const wrap = document.createElement('div');
+      wrap.className = 'log-parse-table-wrap';
+      const table = document.createElement('table');
+      table.className = 'log-parse-table';
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      for (const header of result.headers) {
+        const th = document.createElement('th');
+        th.textContent = header;
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      for (const row of result.rows) {
+        const tr = document.createElement('tr');
+        result.headers.forEach((header, index) => {
+          const td = document.createElement('td');
+          const colorClass = logParseClassFor(highlights, header, row[index]);
+          if (colorClass) td.className = `log-parse-cell ${colorClass}`;
+          td.textContent = row[index] ?? '';
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      wrap.appendChild(table);
+      panel.appendChild(wrap);
+      container.appendChild(panel);
+    }
     function csvLabel(name) {
       return String(name || '').replace(/\.csv$/i, '');
     }
@@ -8467,10 +8810,31 @@ HTML = r"""<!doctype html>
         && (listing.entries || []).some(entry => entry.type === 'file' && entry.path === state.selectedLog)
       );
       if (selectedLogInListing && state.logContent && state.logContent.relative_path === state.selectedLog) {
+        content.className = 'log-content';
+        content.innerHTML = '';
+        const toolbar = document.createElement('div');
+        toolbar.className = 'log-file-toolbar';
+        const title = document.createElement('div');
+        title.className = 'log-file-title';
+        title.textContent = state.logContent.relative_path || state.selectedLog;
+        toolbar.appendChild(title);
+        const parseButton = document.createElement('button');
+        parseButton.textContent = 'Parse File';
+        parseButton.disabled = !isParseableLogPath(state.selectedLog);
+        parseButton.title = parseButton.disabled
+          ? 'Select a run .log file under logs/<algorithm>/ to parse one file.'
+          : 'Parse this log file with the configured parser.';
+        parseButton.onclick = () => withBusyButton(parseButton, 'Parsing...', () => parseSelectedLogFile()).catch(err => out(String(err)));
+        toolbar.appendChild(parseButton);
+        content.appendChild(toolbar);
+        const parseResult = logParseMatchesSelected() ? state.logParseResult : null;
+        const highlights = logParseHighlightDefs(parseResult, state.logContent.content || '');
+        renderLogParseResult(content, parseResult, highlights);
         const isMarkdown = /\.md$/i.test(state.logContent.relative_path || '');
         if (isMarkdown) {
-          renderMarkdown(state.logContent.content || '', content);
-          content.classList.add('log-content');
+          const markdown = document.createElement('div');
+          renderMarkdown(state.logContent.content || '', markdown);
+          content.appendChild(markdown);
           if (state.logContent.truncated) {
             const note = document.createElement('div');
             note.className = 'csv-summary';
@@ -8478,8 +8842,9 @@ HTML = r"""<!doctype html>
             content.appendChild(note);
           }
         } else {
-          content.className = 'log-content';
-          content.innerHTML = `<pre>${esc(state.logContent.content || '')}</pre>`;
+          const pre = document.createElement('pre');
+          pre.innerHTML = highlightedLogHtml(state.logContent.content || '', highlights);
+          content.appendChild(pre);
         }
       } else {
         content.className = 'log-content';
@@ -8494,6 +8859,8 @@ HTML = r"""<!doctype html>
       if (directoryChanged) {
         state.selectedLog = '';
         state.logContent = null;
+        state.logParseResult = null;
+        state.logParseFor = '';
         renderLogsWorkspace();
       }
       const query = new URLSearchParams({ dir: state.logsDir, limit: '500' });
@@ -8504,8 +8871,23 @@ HTML = r"""<!doctype html>
     async function loadLogFile(path) {
       if (!state.selected) return;
       state.selectedLog = path;
+      state.logParseResult = null;
+      state.logParseFor = '';
       const query = new URLSearchParams({ path });
       state.logContent = await api(`/api/experiments/${encodeURIComponent(state.selected)}/log?${query.toString()}`);
+      renderLogsWorkspace();
+    }
+    async function parseSelectedLogFile() {
+      if (!state.selected || !state.selectedLog || !isParseableLogPath(state.selectedLog)) return;
+      const experimentId = state.selected;
+      const logPath = state.selectedLog;
+      const result = await api(`/api/experiments/${encodeURIComponent(experimentId)}/log-parse`, {
+        method: 'POST',
+        body: JSON.stringify({ path: logPath })
+      });
+      if (state.selected !== experimentId || state.selectedLog !== logPath) return;
+      state.logParseResult = result;
+      state.logParseFor = logPath;
       renderLogsWorkspace();
     }
     async function ensureLogsLoaded() {
@@ -9912,6 +10294,8 @@ HTML = r"""<!doctype html>
       state.logsFor = null;
       state.selectedLog = '';
       state.logContent = null;
+      state.logParseResult = null;
+      state.logParseFor = '';
       state.plotSources = null;
       state.plotSourcesFor = null;
       state.plotSourcesInitializedFor = null;
@@ -10413,6 +10797,8 @@ HTML = r"""<!doctype html>
       state.logsFor = null;
       state.selectedLog = '';
       state.logContent = null;
+      state.logParseResult = null;
+      state.logParseFor = '';
       state.submitLock = null;
       state.plotSources = null;
       state.plotSourcesFor = null;
@@ -10481,6 +10867,8 @@ HTML = r"""<!doctype html>
       state.logsFor = null;
       state.selectedLog = '';
       state.logContent = null;
+      state.logParseResult = null;
+      state.logParseFor = '';
       state.submitLock = { locked: false, fields: {} };
       state.plotSources = null;
       state.plotSourcesFor = null;
@@ -11802,7 +12190,7 @@ def make_handler(app):
 
         def handle_share_post(self, parsed):
             path = parsed.path
-            match = re.match(r"^/api/share/([^/]+)/(parse|plot-artifacts|probe)$", path)
+            match = re.match(r"^/api/share/([^/]+)/(parse|plot-artifacts|probe|log-parse)$", path)
             if not match:
                 json_response(self, 404, {"error": "not found"})
                 return
@@ -11815,6 +12203,9 @@ def make_handler(app):
                 return
             if action == "probe":
                 json_response(self, 200, app.probe_payload(experiment_id, payload))
+                return
+            if action == "log-parse":
+                json_response(self, 200, app.parse_log_file(experiment_id, payload.get("path") or ""))
                 return
             json_response(self, 202, app.create_shared_plot_artifacts_action(experiment_id, payload))
 
@@ -12091,7 +12482,7 @@ def make_handler(app):
                     else:
                         json_response(self, 200, app.unarchive_experiment(experiment_id))
                     return
-                match = re.match(r"^/api/experiments/([^/]+)/(check|probe|submit|submit-preview|parse|plot)$", path)
+                match = re.match(r"^/api/experiments/([^/]+)/(check|probe|submit|submit-preview|parse|log-parse|plot)$", path)
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
                     action = match.group(2)
@@ -12109,6 +12500,9 @@ def make_handler(app):
                         return
                     if action == "parse":
                         json_response(self, 202, app.parse_action(experiment_id))
+                        return
+                    if action == "log-parse":
+                        json_response(self, 200, app.parse_log_file(experiment_id, payload.get("path") or ""))
                         return
                     if action == "plot":
                         json_response(self, 202, app.plot_action(experiment_id, payload))
