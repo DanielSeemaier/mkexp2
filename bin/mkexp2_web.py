@@ -3305,7 +3305,7 @@ HTML = r"""<!doctype html>
       justify-content: space-between;
       align-items: center;
       gap: 8px;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
     }
     .brand-actions {
       display: inline-flex;
@@ -3322,10 +3322,10 @@ HTML = r"""<!doctype html>
     .experiment-list {
       display: grid;
       gap: 6px;
-      margin-top: 12px;
+      margin-top: 14px;
     }
     .archive-nav {
-      margin-top: 12px;
+      margin-top: 14px;
       padding-top: 14px;
       border-top: 1px solid var(--border);
     }
@@ -3390,6 +3390,10 @@ HTML = r"""<!doctype html>
       border-color: var(--accent);
       background: var(--accent-soft);
       outline: none;
+    }
+    .archive-item.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
     }
     .archive-open-button {
       height: auto;
@@ -3568,7 +3572,7 @@ HTML = r"""<!doctype html>
       background: #fef9c3;
     }
     .sidebar-nodes {
-      margin-top: 18px;
+      margin-top: 14px;
       padding-top: 14px;
       border-top: 1px solid var(--border);
     }
@@ -9098,7 +9102,7 @@ HTML = r"""<!doctype html>
     }
     function renderArchivedExperimentItem(container, exp) {
       const item = document.createElement('div');
-      item.className = 'archive-item';
+      item.className = 'archive-item' + (state.selectedArchived && state.selected === exp.id ? ' active' : '');
       item.tabIndex = 0;
       item.setAttribute('role', 'button');
       item.setAttribute('aria-label', `Open archived experiment ${exp.id}`);
@@ -10244,7 +10248,8 @@ HTML = r"""<!doctype html>
         await refreshExperiments({ force: true });
       });
     }
-    async function unarchiveExperiment(id, button) {
+    async function unarchiveExperiment(id, button, options = {}) {
+      const keepArchivePane = Boolean(options.keepArchivePane);
       await withBusyButton(button, 'Unarchiving...', async () => {
         const result = await api(`/api/experiments/${encodeURIComponent(id)}/unarchive`, { method: 'POST' });
         await Promise.all([
@@ -10252,13 +10257,13 @@ HTML = r"""<!doctype html>
           loadArchivedExperiments({ force: true })
         ]);
         if (state.selected === id && result.active_id) {
-          await selectExperiment(result.active_id);
+          await selectExperiment(result.active_id, { keepArchivePane });
         }
       });
     }
     async function unarchiveSelectedExperiment() {
       if (!state.selected || !state.selectedArchived || state.shared) return;
-      await unarchiveExperiment(state.selected, document.getElementById('unarchive-nav'));
+      await unarchiveExperiment(state.selected, document.getElementById('unarchive-nav'), { keepArchivePane: true });
     }
     function startProgressPolling() {
       if (state.progressTimer) return;
@@ -10381,11 +10386,11 @@ HTML = r"""<!doctype html>
       renderSubmitLock(result.submit_lock);
       renderProgress(result);
     }
-    async function selectExperiment(id) {
+    async function selectExperiment(id, options = {}) {
       const selectionId = ++state.selectionSeq;
       state.selected = id;
       state.selectedArchived = false;
-      state.archivePaneOpen = false;
+      state.archivePaneOpen = Boolean(options.keepArchivePane);
       state.algorithmLoadSeq += 1;
       state.editorDirty = false;
       clearCheckIndicator();

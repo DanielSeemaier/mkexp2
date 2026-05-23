@@ -113,6 +113,8 @@ There is no linting configuration or CI setup.
 
    The Settings dialog includes a `Codex` cleanup action and a subdirectory archive action. Both archive active matching experiments except experiments that are pinned/starred or currently submit-locked. These actions are reversible directory renames to `<leaf>.archived` and do not auto-commit.
 
+   Archive-pane navigation keeps the normal experiment tree visible; clicking a normal experiment closes the archive pane, clicking an archived row highlights it and opens it in the main pane, and the archived-view navbar Unarchive action keeps the pane open while selecting the restored active experiment.
+
    The top navigation tabs use dedicated active-tab contrast CSS variables so selected tabs remain readable in both light and dark themes.
 
    The Submit panel keeps the submit action in the panel header as an icon-only play button, with busy/lock state reflected by the button disabled state and tooltip. Algorithm choices are rendered without an extra bordered per-experiment container so the panel has one less visible hierarchy level.
