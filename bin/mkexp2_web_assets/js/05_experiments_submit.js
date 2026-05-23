@@ -656,7 +656,7 @@
       item.className = 'experiment-item';
       const button = document.createElement('button');
       button.className = 'experiment-row'
-        + (state.selected === exp.id ? ' active' : '')
+        + (state.sidebarFocus === 'experiments' && state.selected === exp.id ? ' active' : '')
         + (locked ? ' locked' : '')
         + (tag ? ' tagged' : '');
       if (tag && validTagColor(tag.color)) {
@@ -848,6 +848,8 @@
     }
     async function openArchivePane() {
       state.archivePaneOpen = true;
+      state.sidebarFocus = 'archive';
+      renderExperimentsList();
       renderArchivePaneState();
       const search = document.getElementById('archive-search');
       if (search) search.value = state.archiveQuery || '';
@@ -2099,6 +2101,7 @@
       state.selected = id;
       state.selectedArchived = false;
       state.archivePaneOpen = Boolean(options.keepArchivePane);
+      state.sidebarFocus = 'experiments';
       state.algorithmLoadSeq += 1;
       state.editorDirty = false;
       clearCheckIndicator();
@@ -2168,6 +2171,7 @@
       const selectionId = ++state.selectionSeq;
       state.selected = id;
       state.selectedArchived = true;
+      state.sidebarFocus = 'archive';
       state.algorithmLoadSeq += 1;
       state.editorDirty = false;
       clearCheckIndicator();

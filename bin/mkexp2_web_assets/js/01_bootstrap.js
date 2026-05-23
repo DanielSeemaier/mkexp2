@@ -43,6 +43,7 @@
       archivedOpenDirs: new Set(),
       archiveQuery: '',
       archivePaneOpen: false,
+      sidebarFocus: 'experiments',
       experimentSubdirectories: [],
       results: [],
       resultsFor: null,
