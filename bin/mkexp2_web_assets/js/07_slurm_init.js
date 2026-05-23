@@ -147,7 +147,7 @@
         renderDescribeCatalog();
       };
     });
-    document.getElementById('probe-run').onclick = probeExperiment;
+    document.getElementById('probe-toggle').onclick = () => toggleProbePanel().catch(err => out(String(err)));
     document.getElementById('description-edit').onclick = editDescription;
     document.getElementById('description-cancel').onclick = cancelDescriptionEdit;
     document.getElementById('description-save').onclick = saveDescription;

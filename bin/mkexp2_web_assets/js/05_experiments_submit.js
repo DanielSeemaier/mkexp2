@@ -1253,6 +1253,27 @@
         renderDescribeCatalog();
       }
     }
+    function resetProbePanel() {
+      state.probeOpen = false;
+      state.probeLoaded = false;
+      state.probeFor = null;
+      document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Show Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
+      renderProbePanel();
+    }
+    function renderProbePanel() {
+      const body = document.getElementById('probe-body');
+      const button = document.getElementById('probe-toggle');
+      if (body) body.classList.toggle('hidden', !state.probeOpen);
+      if (button) button.textContent = state.probeOpen ? 'Hide Probe' : 'Show Probe';
+    }
+    async function toggleProbePanel() {
+      state.probeOpen = !state.probeOpen;
+      renderProbePanel();
+      if (state.probeOpen && (!state.probeLoaded || state.probeFor !== state.selected)) {
+        await withBusyButton('probe-toggle', 'Loading...', probeExperiment);
+        renderProbePanel();
+      }
+    }
     async function openCreateDialog() {
       document.getElementById('create-modal').classList.remove('hidden');
       document.getElementById('create-name').focus();
@@ -1605,7 +1626,7 @@
       renderLogsWorkspace();
       renderSubmitLock({ locked: false });
       renderProgress(null);
-      document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
+      resetProbePanel();
       renderTagSelect();
       renderExperimentsList();
     }
@@ -2147,7 +2168,7 @@
         if (state.selected === id) out(String(err));
       });
       renderAlgorithmLoading(id);
-      document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
+      resetProbePanel();
       openExperimentAncestors(id);
       renderTagSelect();
       renderExperimentsList();
@@ -2220,7 +2241,7 @@
       const list = document.getElementById('algorithm-list');
       list.className = 'csv-empty';
       list.textContent = 'Archived experiment; unarchive before submitting.';
-      document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
+      resetProbePanel();
       renderTagSelect();
       renderSubmitButton();
       renderExperimentsList();
@@ -2342,7 +2363,7 @@
     async function probeExperiment() {
       if (!state.selected) return;
       const experimentId = state.selected;
-      await withBusyButton('probe-run', 'Running...', async () => {
+      await (async () => {
         document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Running mkexp2 probe...</div>';
         const listing = await api(`/api/experiments/${encodeURIComponent(experimentId)}/probe`, {
           method: 'POST',
@@ -2359,8 +2380,10 @@
           results.push(detail);
         }
         renderProbeResult(results, null);
+        state.probeLoaded = true;
+        state.probeFor = experimentId;
         if (!state.selectedArchived) await loadAlgorithms(experimentId);
-      });
+      })();
     }
     async function loadAlgorithms(experimentId = state.selected, options = {}) {
       if (!experimentId) return;
