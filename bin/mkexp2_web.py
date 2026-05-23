@@ -9340,6 +9340,20 @@ HTML = r"""<!doctype html>
       parts.pop();
       return parts.join('/');
     }
+    function scrollSelectedLogIntoView() {
+      const list = document.getElementById('logs-list');
+      const active = list?.querySelector('.log-entry.active');
+      if (!list || !active) return;
+      const scroll = () => {
+        if (!active.isConnected) return;
+        const listRect = list.getBoundingClientRect();
+        const activeRect = active.getBoundingClientRect();
+        const centeredDelta = activeRect.top - listRect.top - ((list.clientHeight - activeRect.height) / 2);
+        list.scrollTo({ top: Math.max(0, list.scrollTop + centeredDelta), behavior: 'auto' });
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(scroll);
+      else setTimeout(scroll, 0);
+    }
     function renderLogsWorkspace() {
       const pathLabel = document.getElementById('logs-path');
       const list = document.getElementById('logs-list');
@@ -9413,6 +9427,7 @@ HTML = r"""<!doctype html>
         state.selectedLog
         && (listing.entries || []).some(entry => entry.type === 'file' && entry.path === state.selectedLog)
       );
+      if (selectedLogInListing) scrollSelectedLogIntoView();
       if (selectedLogInListing && state.logContent && state.logContent.relative_path === state.selectedLog) {
         content.className = 'log-content';
         content.innerHTML = '';
