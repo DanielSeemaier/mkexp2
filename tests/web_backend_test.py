@@ -322,6 +322,41 @@ class WebBackendTest(unittest.TestCase):
             self.assertTrue((repo / ".mkexp2" / "web-settings.json").is_file())
             self.assertEqual(app.write_settings({"theme": "bad"})["theme"], "light")
 
+    def test_workspaces_create_switch_and_remove(self):
+        if mkexp2_web.shutil.which("git") is None:
+            self.skipTest("git not found")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo_a = root / "repo-a"
+            repo_b = root / "repo-b"
+            repo_a.mkdir()
+            subprocess.run(["git", "init"], cwd=repo_a, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            app = mkexp2_web.Mkexp2WebApp(repo_a, ROOT / "bin" / "mkexp2", "%Y.%m.%d-<name>", "token")
+
+            initial = app.list_workspaces()
+            self.assertEqual(initial["active"], str(repo_a.resolve()))
+            self.assertEqual(initial["workspaces"][0]["path"], str(repo_a.resolve()))
+            self.assertTrue(initial["workspaces"][0]["active"])
+
+            created = app.create_workspace({"path": str(repo_b), "switch": True})
+            self.assertTrue(created["created_directory"])
+            self.assertTrue(created["initialized_git"])
+            self.assertTrue((repo_b / ".git").is_dir())
+            self.assertEqual(app.repo, repo_b.resolve())
+            self.assertTrue(any(item["path"] == str(repo_a.resolve()) for item in created["workspaces"]))
+            self.assertTrue(any(item["path"] == str(repo_b.resolve()) and item["active"] for item in created["workspaces"]))
+
+            switched = app.switch_workspace({"path": str(repo_a)})
+            self.assertEqual(switched["repo"], str(repo_a.resolve()))
+            self.assertEqual(app.repo, repo_a.resolve())
+
+            removed = app.remove_workspace({"path": str(repo_b)})
+            self.assertTrue(removed["removed"])
+            self.assertFalse(any(item["path"] == str(repo_b.resolve()) for item in removed["workspaces"]))
+            self.assertTrue(repo_b.is_dir())
+            with self.assertRaises(ValueError):
+                app.remove_workspace({"path": str(repo_a)})
+
     def test_list_presets_uses_probe_json(self):
         original_run_command = mkexp2_web.run_command
         calls = []
@@ -477,6 +512,13 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("Root files are always included", mkexp2_web.HTML)
         self.assertIn("columnVisibility: {}", mkexp2_web.HTML)
         self.assertIn("function columnSignature", mkexp2_web.HTML)
+        self.assertIn('id="workspace-list"', mkexp2_web.HTML)
+        self.assertIn('id="workspace-path"', mkexp2_web.HTML)
+        self.assertIn('id="workspace-create"', mkexp2_web.HTML)
+        self.assertIn("async function loadWorkspaces", mkexp2_web.HTML)
+        self.assertIn("async function switchWorkspace", mkexp2_web.HTML)
+        self.assertIn("/api/workspaces/switch", mkexp2_web.HTML)
+        self.assertIn("/api/workspaces?path=", mkexp2_web.HTML)
         self.assertIn('id="settings-hidden-columns"', mkexp2_web.HTML)
         self.assertIn("function hiddenColumnGroups", mkexp2_web.HTML)
         self.assertIn("async function removeHiddenColumnDefault", mkexp2_web.HTML)
@@ -760,6 +802,10 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("async function loadUiSettings", mkexp2_web.HTML)
         self.assertIn("async function saveTheme", mkexp2_web.HTML)
         self.assertIn("/api/settings", mkexp2_web.HTML)
+        self.assertIn("Workspaces", mkexp2_web.HTML)
+        self.assertIn("function renderWorkspaces", mkexp2_web.HTML)
+        self.assertIn("async function createWorkspace", mkexp2_web.HTML)
+        self.assertIn("/api/workspaces", mkexp2_web.HTML)
         self.assertIn('id="spack-cache-refresh"', mkexp2_web.HTML)
         self.assertIn("Resolve Spack R cache", mkexp2_web.HTML)
         self.assertIn("/api/plot/spack-r-libs", mkexp2_web.HTML)

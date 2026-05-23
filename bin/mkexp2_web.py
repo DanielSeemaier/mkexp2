@@ -37,6 +37,7 @@ WEB_SHARES_FILE = "web-shares.json"
 WEB_TAGS_FILE = "web-tags.json"
 WEB_COLUMNS_FILE = "web-column-visibility.json"
 WEB_SETTINGS_FILE = "web-settings.json"
+WEB_WORKSPACES_FILE = "web-workspaces.json"
 PLOT_INDEX_FILE = "index.json"
 ARCHIVE_SUFFIX = ".archived"
 EXPERIMENT_SKIP_DIRS = {".git", ".mkexp2", "jobs", "logs", "plots", "results", "slurm"}
@@ -851,6 +852,7 @@ class ActionStore:
 class Mkexp2WebApp:
     def __init__(self, repo, mkexp2, name_template, token, allow_empty_token=False, web_host="127.0.0.1", web_port=8765):
         self.repo = Path(repo).resolve()
+        self.workspace_registry_path = self.repo / WEB_STATE_DIR / WEB_WORKSPACES_FILE
         self.mkexp2 = Path(mkexp2).resolve()
         self.name_template = name_template
         self.token = token
@@ -866,6 +868,7 @@ class Mkexp2WebApp:
         self._archived_experiments_cache = None
         self._archived_experiments_cache_at = 0.0
         self._startup_spack_cache_action = None
+        self._repo_lock = threading.RLock()
 
     def mkexp2_root(self):
         return self.mkexp2.parent.parent
@@ -1043,6 +1046,187 @@ class Mkexp2WebApp:
         self._experiments_cache_at = 0.0
         self._archived_experiments_cache = None
         self._archived_experiments_cache_at = 0.0
+
+    def workspace_path_from_payload(self, payload):
+        if isinstance(payload, dict):
+            value = payload.get("path")
+        else:
+            value = payload
+        value = str(value or "").strip()
+        if not value:
+            raise ValueError("workspace directory is required")
+        return Path(os.path.expandvars(os.path.expanduser(value))).resolve()
+
+    def workspace_git_info(self, path):
+        path = Path(path).resolve()
+        if not path.is_dir():
+            return {"git": False, "git_root": "", "error": "directory does not exist"}
+        result = run_command(["git", "rev-parse", "--show-toplevel"], cwd=path, timeout=10)
+        if result["returncode"] != 0:
+            message = result["stderr"].strip() or result["stdout"].strip()
+            return {"git": False, "git_root": "", "error": message or "not a Git repository"}
+        git_root = Path(result["stdout"].strip()).resolve()
+        return {"git": True, "git_root": str(git_root), "error": ""}
+
+    def workspace_entry(self, path):
+        path = Path(path).resolve()
+        git_info = self.workspace_git_info(path)
+        return {
+            "path": str(path),
+            "name": path.name or str(path),
+            "active": path == self.repo,
+            "exists": path.exists(),
+            "directory": path.is_dir(),
+            "git": bool(git_info["git"]),
+            "git_root": git_info.get("git_root") or "",
+            "valid": path.is_dir() and bool(git_info["git"]),
+            "error": git_info.get("error") or "",
+        }
+
+    def _workspace_paths_from_payload(self, payload):
+        if not isinstance(payload, dict):
+            return []
+        workspaces = payload.get("workspaces") or []
+        if not isinstance(workspaces, list):
+            raise ValueError("invalid workspaces JSON: workspaces is not an array")
+        paths = []
+        seen = set()
+        for item in workspaces:
+            value = item.get("path") if isinstance(item, dict) else item
+            value = str(value or "").strip()
+            if not value:
+                continue
+            path = Path(os.path.expandvars(os.path.expanduser(value))).resolve()
+            key = str(path)
+            if key in seen:
+                continue
+            paths.append(path)
+            seen.add(key)
+        return paths
+
+    def read_workspace_paths(self):
+        path = self.workspace_registry_path
+        if not path.is_file():
+            payload = {}
+        else:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8") or "{}")
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid workspaces JSON: {exc}") from exc
+        paths = self._workspace_paths_from_payload(payload)
+        if str(self.repo) not in {str(item) for item in paths}:
+            paths.insert(0, self.repo)
+        return paths
+
+    def write_workspace_paths(self, paths):
+        normalized = []
+        seen = set()
+        for item in paths:
+            path = Path(item).resolve()
+            key = str(path)
+            if key in seen:
+                continue
+            normalized.append(path)
+            seen.add(key)
+        if str(self.repo) not in seen:
+            normalized.insert(0, self.repo)
+        payload = {
+            "active": str(self.repo),
+            "workspaces": [{"path": str(path)} for path in normalized],
+        }
+        path = self.workspace_registry_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(path)
+        return normalized
+
+    def list_workspaces(self):
+        paths = self.read_workspace_paths()
+        return {
+            "active": str(self.repo),
+            "registry": str(self.workspace_registry_path),
+            "workspaces": [self.workspace_entry(path) for path in paths],
+        }
+
+    def _switch_workspace_locked(self, path, paths=None):
+        path = Path(path).resolve()
+        git_info = self.workspace_git_info(path)
+        if not path.is_dir():
+            raise ValueError(f"workspace directory does not exist: {path}")
+        if not git_info["git"]:
+            raise ValueError(f"workspace is not a Git repository: {path}")
+        previous = self.repo
+        paths = list(paths or self.read_workspace_paths())
+        if str(path) not in {str(item) for item in paths}:
+            paths.append(path)
+        self.repo = path
+        self.invalidate_experiments_cache()
+        self._plot_backend_cache = None
+        self._plot_backend_cache_at = 0.0
+        self.write_workspace_paths(paths)
+        result = self.list_workspaces()
+        result.update(
+            {
+                "switched": True,
+                "previous": str(previous),
+                "repo": str(self.repo),
+                "config": self.config(),
+            }
+        )
+        return result
+
+    def switch_workspace(self, payload):
+        path = self.workspace_path_from_payload(payload)
+        with self._repo_lock:
+            return self._switch_workspace_locked(path)
+
+    def create_workspace(self, payload):
+        path = self.workspace_path_from_payload(payload)
+        switch_after_create = bool(payload.get("switch", True)) if isinstance(payload, dict) else True
+        with self._repo_lock:
+            if path.exists() and not path.is_dir():
+                raise ValueError(f"workspace path exists and is not a directory: {path}")
+            created_directory = not path.exists()
+            path.mkdir(parents=True, exist_ok=True)
+            git_info = self.workspace_git_info(path)
+            initialized_git = False
+            if not git_info["git"]:
+                init = run_command(["git", "init"], cwd=path, timeout=30)
+                if init["returncode"] != 0:
+                    message = init["stderr"].strip() or init["stdout"].strip() or "git init failed"
+                    raise ValueError(message)
+                initialized_git = True
+            paths = self.read_workspace_paths()
+            if str(path) not in {str(item) for item in paths}:
+                paths.append(path)
+            if switch_after_create:
+                result = self._switch_workspace_locked(path, paths=paths)
+            else:
+                self.write_workspace_paths(paths)
+                result = self.list_workspaces()
+            result.update(
+                {
+                    "added": True,
+                    "created": created_directory,
+                    "created_directory": created_directory,
+                    "initialized_git": initialized_git,
+                    "path": str(path),
+                    "switched": switch_after_create and str(self.repo) == str(path),
+                }
+            )
+            return result
+
+    def remove_workspace(self, payload):
+        path = self.workspace_path_from_payload(payload)
+        with self._repo_lock:
+            if path == self.repo:
+                raise ValueError("cannot remove the active workspace")
+            paths = [item for item in self.read_workspace_paths() if item != path]
+            self.write_workspace_paths(paths)
+            result = self.list_workspaces()
+            result.update({"removed": True, "path": str(path)})
+            return result
 
     def pins_path(self):
         return self.repo / WEB_STATE_DIR / WEB_PINS_FILE
@@ -1525,6 +1709,8 @@ class Mkexp2WebApp:
     def config(self):
         return {
             "repo": str(self.repo),
+            "workspace": self.workspace_entry(self.repo),
+            "workspace_registry": str(self.workspace_registry_path),
             "name_template": self.name_template,
             "web_host": self.web_host,
             "web_port": self.web_port,
@@ -5623,6 +5809,52 @@ HTML = r"""<!doctype html>
       margin-bottom: 12px;
       border-top: 1px solid var(--border);
     }
+    .workspace-list {
+      display: grid;
+      gap: 6px;
+    }
+    .workspace-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+    }
+    .workspace-row.active {
+      border-color: var(--tab-active-border);
+      box-shadow: inset 3px 0 0 var(--tab-active-bg);
+    }
+    .workspace-name {
+      font-weight: 750;
+      font-size: 12px;
+      margin-bottom: 2px;
+    }
+    .workspace-path,
+    .workspace-meta {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .workspace-actions {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .workspace-create-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 8px;
+    }
+    .workspace-create-row label {
+      display: grid;
+      gap: 4px;
+    }
     .logs-browser {
       display: grid;
       grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
@@ -5925,6 +6157,22 @@ HTML = r"""<!doctype html>
       .compare-grid { grid-template-columns: 1fr; }
       .logs-browser { grid-template-columns: 1fr; }
       .chips { grid-template-columns: 1fr; }
+      .workspace-row,
+      .workspace-create-row {
+        grid-template-columns: 1fr;
+      }
+      .workspace-actions {
+        justify-content: flex-start;
+      }
+      .theme-toggle {
+        display: grid;
+        align-items: stretch;
+      }
+      .theme-toggle select {
+        width: 100%;
+        max-width: 100%;
+        flex-basis: auto;
+      }
     }
   </style>
 </head>
@@ -6118,6 +6366,21 @@ HTML = r"""<!doctype html>
           <div class="settings-token">
             <label for="token">Session token</label>
             <input id="token" type="password" placeholder="Session token">
+          </div>
+          <div class="settings-section">
+            <div class="settings-tool-title">Workspaces</div>
+            <div id="workspace-list" class="workspace-list csv-empty">No workspaces loaded.</div>
+            <div class="workspace-create-row">
+              <label>
+                <span class="csv-summary">Directory</span>
+                <input id="workspace-path" type="text" placeholder="/path/to/experiment-repo">
+              </label>
+              <button id="workspace-create" class="icon-text-button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                <span>Create</span>
+              </button>
+            </div>
+            <div id="workspace-output" class="csv-empty hidden"></div>
           </div>
           <div class="settings-section">
             <div class="settings-tool-title">Appearance</div>
@@ -6671,7 +6934,9 @@ HTML = r"""<!doctype html>
       shareId: '',
       shareCommandTemplate: '',
       settings: { theme: 'light' },
-      settingsLoaded: false
+      settingsLoaded: false,
+      workspaces: [],
+      workspacesLoaded: false
     };
     const PLOT_RELOAD_DELAY_MS = 5000;
     const THEME_STORAGE_KEY = 'mkexp2-theme';
@@ -7638,6 +7903,10 @@ HTML = r"""<!doctype html>
     function openSettingsDialog() {
       document.getElementById('settings-modal').classList.remove('hidden');
       renderThemeSetting();
+      loadWorkspaces().catch(err => {
+        setWorkspaceOutput(String(err), true);
+        out(String(err));
+      });
       loadUiSettings().catch(err => out(String(err)));
       loadSettingsColumnVisibility().catch(err => out(String(err)));
       refreshTags().catch(err => out(String(err)));
@@ -9308,6 +9577,188 @@ HTML = r"""<!doctype html>
       state.experimentSubdirectories = data.directories || [];
       renderExperimentSubdirectories();
       return state.experimentSubdirectories;
+    }
+    function workspaceStatus(workspace) {
+      if (workspace.active) return 'Active';
+      if (workspace.valid) return 'Git repository';
+      if (!workspace.exists) return 'Missing directory';
+      if (!workspace.directory) return 'Not a directory';
+      return workspace.error || 'Not a Git repository';
+    }
+    function setWorkspaceOutput(message, bad = false) {
+      const output = document.getElementById('workspace-output');
+      if (!output) return;
+      if (!message) {
+        output.className = 'csv-empty hidden';
+        output.textContent = '';
+        output.title = '';
+        return;
+      }
+      output.className = `csv-empty${bad ? ' status-bad' : ''}`;
+      output.textContent = message;
+      output.title = message;
+    }
+    function renderWorkspaces() {
+      const container = document.getElementById('workspace-list');
+      if (!container) return;
+      container.innerHTML = '';
+      if (state.shared) {
+        container.className = 'workspace-list csv-empty';
+        container.textContent = 'Workspace management is disabled for share links.';
+        return;
+      }
+      const workspaces = state.workspaces || [];
+      if (!workspaces.length) {
+        container.className = 'workspace-list csv-empty';
+        container.textContent = state.workspacesLoaded ? 'No workspaces saved.' : 'No workspaces loaded.';
+        return;
+      }
+      container.className = 'workspace-list';
+      for (const workspace of workspaces) {
+        const row = document.createElement('div');
+        row.className = `workspace-row${workspace.active ? ' active' : ''}`;
+        const body = document.createElement('div');
+        const name = document.createElement('div');
+        name.className = 'workspace-name';
+        name.textContent = workspace.name || workspace.path || 'Workspace';
+        const path = document.createElement('div');
+        path.className = 'workspace-path';
+        path.textContent = workspace.path || '';
+        const meta = document.createElement('div');
+        meta.className = 'workspace-meta';
+        meta.textContent = workspaceStatus(workspace);
+        if (workspace.error && !workspace.valid) meta.title = workspace.error;
+        body.appendChild(name);
+        body.appendChild(path);
+        body.appendChild(meta);
+        const actions = document.createElement('div');
+        actions.className = 'workspace-actions';
+        const switchButton = document.createElement('button');
+        switchButton.type = 'button';
+        switchButton.textContent = workspace.active ? 'Active' : 'Switch';
+        switchButton.disabled = workspace.active || !workspace.valid;
+        switchButton.title = workspace.active
+          ? 'Current workspace'
+          : workspace.valid
+            ? `Switch to ${workspace.path}`
+            : (workspace.error || 'Workspace is not switchable');
+        switchButton.onclick = () => switchWorkspace(workspace.path, switchButton).catch(err => {
+          setWorkspaceOutput(String(err), true);
+          out(String(err));
+        });
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'danger';
+        removeButton.textContent = 'Remove';
+        removeButton.disabled = workspace.active;
+        removeButton.title = workspace.active ? 'Cannot remove the active workspace' : 'Remove from the workspace list';
+        removeButton.onclick = () => removeWorkspace(workspace.path, removeButton).catch(err => {
+          setWorkspaceOutput(String(err), true);
+          out(String(err));
+        });
+        actions.appendChild(switchButton);
+        actions.appendChild(removeButton);
+        row.appendChild(body);
+        row.appendChild(actions);
+        container.appendChild(row);
+      }
+    }
+    async function loadWorkspaces() {
+      if (state.shared) {
+        state.workspaces = [];
+        state.workspacesLoaded = true;
+        renderWorkspaces();
+        return state.workspaces;
+      }
+      const result = await api('/api/workspaces');
+      state.workspaces = result.workspaces || [];
+      state.workspacesLoaded = true;
+      renderWorkspaces();
+      return state.workspaces;
+    }
+    function resetWorkspaceState() {
+      stopProgressPolling();
+      state.experiments = [];
+      state.archivedExperiments = [];
+      state.pinnedExperiments = new Set();
+      state.tags = [];
+      state.defaultTagNames = [];
+      state.tagAssignments = {};
+      state.openDirs = new Set();
+      state.archivedOpenDirs = new Set();
+      state.archiveQuery = '';
+      state.archivePaneOpen = false;
+      state.experimentSubdirectories = [];
+      state.describeCatalog = null;
+      state.describeLoaded = false;
+      state.plotBackend = null;
+      state.plotCatalog = null;
+      state.plotCatalogInitialized = false;
+      state.settingsLoaded = false;
+      const archiveSearch = document.getElementById('archive-search');
+      if (archiveSearch) archiveSearch.value = '';
+      clearSelectedExperiment();
+      renderArchivedExperiments();
+      renderTagManager();
+      renderExperimentSubdirectories();
+      renderWorkspaces();
+    }
+    async function reloadWorkspaceAfterSwitch(result) {
+      state.workspaces = result.workspaces || [];
+      state.workspacesLoaded = true;
+      if (result.config) state.config = result.config;
+      resetWorkspaceState();
+      await refreshConfig().catch(err => out(String(err)));
+      await loadUiSettings().catch(err => out(String(err)));
+      await refreshPresets().catch(err => out(String(err)));
+      await loadSettingsColumnVisibility().catch(err => out(String(err)));
+      await refreshExperiments({ force: true, selectMostRecent: true }).catch(err => out(String(err)));
+      await loadArchivedExperiments({ force: true }).catch(err => out(String(err)));
+      await refreshTags().catch(err => out(String(err)));
+      await loadExperimentSubdirectories().catch(err => out(String(err)));
+      renderWorkspaces();
+    }
+    async function switchWorkspace(path, button = null) {
+      if (!path || state.shared) return;
+      await withBusyButton(button, 'Switching...', async () => {
+        const result = await api('/api/workspaces/switch', {
+          method: 'POST',
+          body: JSON.stringify({ path })
+        });
+        await reloadWorkspaceAfterSwitch(result);
+        setWorkspaceOutput(`Switched to ${result.repo || path}.`);
+      });
+    }
+    async function createWorkspace() {
+      if (state.shared) return;
+      const input = document.getElementById('workspace-path');
+      const path = input?.value.trim() || '';
+      if (!path) {
+        setWorkspaceOutput('Enter a workspace directory.', true);
+        return;
+      }
+      await withBusyButton('workspace-create', 'Creating...', async () => {
+        const result = await api('/api/workspaces', {
+          method: 'POST',
+          body: JSON.stringify({ path, switch: true })
+        });
+        if (input) input.value = '';
+        await reloadWorkspaceAfterSwitch(result);
+        const init = result.initialized_git ? ' Initialized Git repository.' : '';
+        const action = result.created_directory ? 'Created workspace' : 'Added workspace';
+        setWorkspaceOutput(`${action} at ${result.path}.${init}`);
+      });
+    }
+    async function removeWorkspace(path, button = null) {
+      if (!path || state.shared) return;
+      if (!confirm('Remove this workspace from the list? This does not delete files.')) return;
+      await withBusyButton(button, 'Removing...', async () => {
+        const result = await api(`/api/workspaces?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+        state.workspaces = result.workspaces || [];
+        state.workspacesLoaded = true;
+        renderWorkspaces();
+        setWorkspaceOutput(`Removed ${result.path} from the workspace list.`);
+      });
     }
     async function archiveSubdirectoryExperiments() {
       const select = document.getElementById('archive-subdir-select');
@@ -11960,6 +12411,18 @@ HTML = r"""<!doctype html>
     document.getElementById('tag-save').onclick = () => saveTag().catch(err => out(String(err)));
     document.getElementById('settings-open').onclick = openSettingsDialog;
     document.getElementById('settings-close').onclick = closeSettingsDialog;
+    document.getElementById('workspace-create').onclick = () => createWorkspace().catch(err => {
+      setWorkspaceOutput(String(err), true);
+      out(String(err));
+    });
+    document.getElementById('workspace-path').addEventListener('keydown', event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      createWorkspace().catch(err => {
+        setWorkspaceOutput(String(err), true);
+        out(String(err));
+      });
+    });
     document.getElementById('theme-select').onchange = event => saveTheme(event.target.value);
     document.getElementById('archive-codex-experiments').onclick = () => archiveCodexExperiments().catch(err => out(String(err)));
     document.getElementById('archive-subdir-experiments').onclick = () => archiveSubdirectoryExperiments().catch(err => out(String(err)));
@@ -12237,6 +12700,9 @@ def make_handler(app):
                 if path == "/api/config":
                     json_response(self, 200, app.config())
                     return
+                if path == "/api/workspaces":
+                    json_response(self, 200, app.list_workspaces())
+                    return
                 if path == "/api/settings":
                     json_response(self, 200, app.read_settings())
                     return
@@ -12423,6 +12889,12 @@ def make_handler(app):
                     json_response(self, 401, {"error": "missing or invalid token"})
                     return
                 payload = read_json(self)
+                if path == "/api/workspaces":
+                    json_response(self, 201, app.create_workspace(payload))
+                    return
+                if path == "/api/workspaces/switch":
+                    json_response(self, 200, app.switch_workspace(payload))
+                    return
                 if path == "/api/experiments":
                     json_response(self, 201, app.create_experiment(payload))
                     return
@@ -12576,6 +13048,11 @@ def make_handler(app):
                     return
                 if path.startswith("/api/") and not self.require_token():
                     json_response(self, 401, {"error": "missing or invalid token"})
+                    return
+                if path == "/api/workspaces":
+                    query = urllib.parse.parse_qs(parsed.query)
+                    workspace_path = (query.get("path") or [""])[0]
+                    json_response(self, 200, app.remove_workspace(workspace_path))
                     return
                 match = re.match(r"^/api/tags/([^/]+)$", path)
                 if match:
