@@ -1277,7 +1277,8 @@ class Mkexp2WebApp:
         theme = str(payload.get("theme") or "light").strip().lower()
         if theme not in ("light", "dark", "system"):
             theme = "light"
-        return {"theme": theme}
+        benchmark_base_path = str(payload.get("benchmark_base_path") or "").strip()
+        return {"theme": theme, "benchmark_base_path": benchmark_base_path}
 
     def read_settings(self):
         path = self.settings_path()
@@ -1817,6 +1818,128 @@ class Mkexp2WebApp:
             parsed["_command"] = result
             return parsed
         return result
+
+    def guided_model(self, experiment_id):
+        probe = self.read_command(experiment_id, ["probe", "--all"], timeout=90)
+        if probe["returncode"] != 0:
+            message = probe["stderr"].strip() or probe["stdout"].strip() or "mkexp2 probe --all failed"
+            raise ValueError(message)
+        try:
+            probe_payload = json.loads(probe["stdout"] or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid probe JSON: {exc}") from exc
+        describe = self.describe_catalog()
+        return {
+            "probe": probe_payload,
+            "describe": describe,
+            "settings": self.read_settings(),
+            "_command": probe,
+        }
+
+    def render_guided_experiment(self, experiment_id, payload):
+        form = payload.get("form") if isinstance(payload, dict) else {}
+        path = self.readable_experiment_path(experiment_id)
+        rendered = experiment_from_form(Path(experiment_id).name, form if isinstance(form, dict) else {})
+        response = {
+            "id": experiment_id,
+            "path": str(path),
+            "experiment_file": str(path / "Experiment"),
+            "experiment": rendered,
+        }
+        response.update(self.experiment_time_metadata(path))
+        return response
+
+    def save_guided_experiment(self, experiment_id, payload):
+        path = self.active_experiment_path(experiment_id)
+        rendered = self.render_guided_experiment(experiment_id, payload)
+        experiment_file = path / "Experiment"
+        experiment_file.write_text(rendered["experiment"], encoding="utf-8")
+        return {
+            "id": experiment_id,
+            "path": str(path),
+            "experiment_file": str(experiment_file),
+            "experiment": rendered["experiment"],
+            "saved": True,
+        }
+
+    def fetch_repo_refs(self, payload):
+        repo_url = str((payload or {}).get("repo_url") or "").strip()
+        if not repo_url:
+            raise ValueError("repo_url is required")
+        result = run_command(["git", "ls-remote", "--heads", "--tags", repo_url], cwd=self.repo, timeout=45)
+        refs = []
+        seen = set()
+        if result["returncode"] == 0:
+            for line in result["stdout"].splitlines():
+                parts = line.split(None, 1)
+                if len(parts) != 2:
+                    continue
+                sha, ref = parts
+                if ref.endswith("^{}"):
+                    continue
+                kind = "ref"
+                names = []
+                if ref.startswith("refs/heads/"):
+                    short = ref.removeprefix("refs/heads/")
+                    kind = "branch"
+                    names = [f"origin/{short}", short]
+                elif ref.startswith("refs/tags/"):
+                    short = ref.removeprefix("refs/tags/")
+                    kind = "tag"
+                    names = [short]
+                else:
+                    names = [ref]
+                for name in names:
+                    if name in seen:
+                        continue
+                    seen.add(name)
+                    refs.append({"name": name, "ref": ref, "sha": sha, "kind": kind})
+        if result["returncode"] != 0:
+            message = result["stderr"].strip() or result["stdout"].strip() or "git ls-remote failed"
+            raise ValueError(message)
+        refs.sort(key=lambda item: (item["kind"] != "branch", item["name"]))
+        return {"repo_url": repo_url, "refs": refs, "command": result}
+
+    def benchmark_sets(self, query=""):
+        settings = self.read_settings()
+        base_text = settings.get("benchmark_base_path", "")
+        if not base_text:
+            return {"base_path": "", "sets": []}
+        base = Path(os.path.expanduser(base_text)).resolve()
+        if not base.exists() or not base.is_dir():
+            return {"base_path": str(base), "sets": [], "error": "benchmark base path does not exist"}
+        query_text = str(query or "").strip().lower()
+        results = []
+        max_results = 250
+        max_seen = 4000
+        seen = 0
+        graph_suffixes = {".graph", ".metis", ".parhip"}
+        for root, dirs, files in os.walk(base):
+            dirs[:] = [name for name in dirs if not name.startswith(".")]
+            root_path = Path(root)
+            rel_depth = len(root_path.relative_to(base).parts)
+            if not query_text and rel_depth > 2:
+                dirs[:] = []
+            candidates = [(root_path, "directory")]
+            candidates.extend((root_path / name, "file") for name in files if Path(name).suffix in graph_suffixes)
+            for candidate, kind in candidates:
+                seen += 1
+                if seen > max_seen:
+                    break
+                text = str(candidate)
+                if query_text and query_text not in text.lower():
+                    continue
+                results.append({
+                    "path": text,
+                    "name": candidate.name,
+                    "kind": kind,
+                    "relative": candidate.relative_to(base).as_posix() if candidate != base else ".",
+                })
+                if len(results) >= max_results:
+                    break
+            if seen > max_seen or len(results) >= max_results:
+                break
+        return {"base_path": str(base), "sets": results, "truncated": seen > max_seen or len(results) >= max_results}
 
     def plot_backend_status(self):
         now = time.time()
@@ -3456,34 +3579,125 @@ class Mkexp2WebApp:
         }
 
 
-def experiment_from_form(name, form):
-    function = "Experiment" + re.sub(r"[^A-Za-z0-9]+", "", name.title())
-    if function == "Experiment":
-        function = "ExperimentWeb"
-    system = form.get("system") or "slurm"
-    algorithms = form.get("algorithms") or ["Mock"]
-    graphs = form.get("graphs") or ["graphs"]
-    ks = form.get("ks") or ["2"]
-    seeds = form.get("seeds") or ["1"]
-    epsilons = form.get("epsilons") or ["0.03"]
-    threads = form.get("threads") or ["1x1x1"]
-    properties = form.get("properties") or []
+def experiment_function_name(name):
+    function = "Experiment" + re.sub(r"[^A-Za-z0-9]+", "", str(name or "").title())
+    return function if function != "Experiment" else "ExperimentWeb"
 
-    lines = [f"System {system}"]
-    for prop in properties:
+
+def zsh_words(values):
+    return " ".join(shlex.quote(str(value)) for value in values if str(value).strip())
+
+
+def normalize_form_list(value):
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [item.strip() for item in str(value or "").replace(",", " ").split() if item.strip()]
+
+
+def normalize_form_lines(value):
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [line.strip() for line in str(value or "").splitlines() if line.strip()]
+
+
+def sanitize_function_name(value, fallback):
+    raw = str(value or "").strip()
+    if not raw:
+        return fallback
+    cleaned = re.sub(r"[^A-Za-z0-9_]", "", raw)
+    if not cleaned.startswith("Experiment"):
+        cleaned = "Experiment" + cleaned
+    if not re.match(r"^Experiment[A-Za-z0-9_]*$", cleaned):
+        return fallback
+    return cleaned or fallback
+
+
+def form_properties(properties):
+    rows = []
+    for prop in properties or []:
         key = str(prop.get("key", "")).strip()
         value = str(prop.get("value", "")).strip()
-        if key:
-            lines.append(f"Property {key} {value}")
-    lines.extend(["", f"{function}() {{"])
-    lines.append("  Algorithms " + " ".join(map(str, algorithms)))
-    lines.append("  Graphs " + " ".join(map(str, graphs)))
-    lines.append("  Ks " + " ".join(map(str, ks)))
-    lines.append("  Seeds " + " ".join(map(str, seeds)))
-    lines.append("  Epsilons " + " ".join(map(str, epsilons)))
-    lines.append("  Threads " + " ".join(map(str, threads)))
-    lines.append("}")
-    return "\n".join(lines) + "\n"
+        if key and value:
+            rows.append((key, value))
+    return rows
+
+
+def experiment_from_form(name, form):
+    form = form if isinstance(form, dict) else {}
+    system = str(form.get("system") or "slurm").strip() or "slurm"
+    global_properties = form_properties(form.get("properties") or form.get("global_properties") or [])
+    algorithms = form.get("algorithm_definitions") or form.get("algorithms") or []
+    experiments = form.get("experiments") or []
+
+    if not experiments:
+        experiments = [{
+            "function": experiment_function_name(name),
+            "algorithms": normalize_form_list(form.get("algorithms") or ["Mock"]),
+            "graphs": normalize_form_lines(form.get("graphs") or ["graphs"]),
+            "ks": normalize_form_list(form.get("ks") or ["2"]),
+            "seeds": normalize_form_list(form.get("seeds") or ["1"]),
+            "epsilons": normalize_form_list(form.get("epsilons") or ["0.03"]),
+            "topologies": normalize_form_list(form.get("threads") or form.get("topologies") or ["1x1x1"]),
+        }]
+
+    lines = [f"System {shlex.quote(system)}"]
+    for key, value in global_properties:
+        lines.append(f"Property {shlex.quote(key)} {shlex.quote(value)}")
+
+    algorithm_rows = []
+    seen_algorithms = set()
+    for algorithm in algorithms:
+        if not isinstance(algorithm, dict):
+            continue
+        alg_name = str(algorithm.get("name") or "").strip()
+        base = str(algorithm.get("base") or "").strip()
+        if not alg_name or not base or alg_name in seen_algorithms:
+            continue
+        seen_algorithms.add(alg_name)
+        args = str(algorithm.get("args") or "").strip()
+        definition = f"DefineAlgorithm {shlex.quote(alg_name)} {shlex.quote(base)}"
+        if args:
+            definition += f" {args}"
+        algorithm_rows.append(definition)
+        for key, value in form_properties(algorithm.get("properties") or []):
+            algorithm_rows.append(f"AlgorithmProperty {shlex.quote(alg_name)} {shlex.quote(key)} {shlex.quote(value)}")
+    if algorithm_rows:
+        lines.extend(["", *algorithm_rows])
+
+    fallback_function = experiment_function_name(name)
+    for index, experiment in enumerate(experiments):
+        if not isinstance(experiment, dict):
+            continue
+        function = sanitize_function_name(experiment.get("function"), fallback_function if index == 0 else f"{fallback_function}{index + 1}")
+        selected_algorithms = normalize_form_list(experiment.get("algorithms"))
+        graphs = normalize_form_lines(experiment.get("graphs"))
+        ks = normalize_form_list(experiment.get("ks") or ["2"])
+        seeds = normalize_form_list(experiment.get("seeds") or ["1"])
+        epsilons = normalize_form_list(experiment.get("epsilons") or ["0.03"])
+        topologies = normalize_form_list(experiment.get("topologies") or experiment.get("threads") or ["1x1x1"])
+        lines.extend(["", f"{function}() {{"])
+        if selected_algorithms:
+            lines.append("  Algorithms " + zsh_words(selected_algorithms))
+        for graph in graphs:
+            graph_path = Path(os.path.expanduser(graph))
+            graph_command = "Graphs" if graph_path.is_dir() else "Graph"
+            lines.append(f"  {graph_command} " + shlex.quote(graph))
+        if ks:
+            lines.append("  Ks " + zsh_words(ks))
+        if seeds:
+            lines.append("  Seeds " + zsh_words(seeds))
+        if epsilons:
+            lines.append("  Epsilons " + zsh_words(epsilons))
+        if topologies:
+            lines.append("  Threads " + zsh_words(topologies))
+        timelimit = str(experiment.get("timelimit") or "").strip()
+        if timelimit:
+            lines.append("  Timelimit " + shlex.quote(timelimit))
+        timelimit_per_instance = str(experiment.get("timelimit_per_instance") or "").strip()
+        if timelimit_per_instance:
+            lines.append("  TimelimitPerInstance " + shlex.quote(timelimit_per_instance))
+        lines.append("}")
+    return "\n".join(lines).strip() + "\n"
 
 
 HTML = r"""<!doctype html>
@@ -4177,6 +4391,25 @@ HTML = r"""<!doctype html>
       font-size: 12px;
       text-align: right;
     }
+    .editor-mode-toggle {
+      display: inline-flex;
+      gap: 4px;
+      padding: 3px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--panel-2);
+    }
+    .editor-mode-toggle button {
+      height: 28px;
+      padding: 0 9px;
+      border-color: transparent;
+      background: transparent;
+    }
+    .editor-mode-toggle button.active {
+      background: var(--tab-active-bg);
+      border-color: var(--tab-active-border);
+      color: var(--tab-active-text);
+    }
     .panel-title {
       font-weight: 700;
     }
@@ -4236,6 +4469,102 @@ HTML = r"""<!doctype html>
     .tok-string { color: #0f5f86; }
     .tok-variable { color: #8a4b00; }
     .tok-number { color: #9f1239; }
+    .guided-editor {
+      display: grid;
+      gap: 14px;
+    }
+    .guided-editor.hidden {
+      display: none;
+    }
+    .guided-toolbar,
+    .guided-section-header,
+    .guided-card-header,
+    .guided-inline-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .guided-section {
+      display: grid;
+      gap: 10px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+    .guided-section:first-child {
+      padding-top: 0;
+      border-top: 0;
+    }
+    .guided-section-title {
+      font-weight: 800;
+    }
+    .guided-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+    }
+    .guided-field {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+    }
+    .guided-field-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      text-transform: uppercase;
+    }
+    .guided-card {
+      display: grid;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--surface);
+      min-width: 0;
+    }
+    .guided-card-title {
+      font-weight: 750;
+    }
+    .guided-row-list {
+      display: grid;
+      gap: 8px;
+    }
+    .guided-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+    }
+    .guided-graph-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .guided-check-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 6px;
+    }
+    .guided-check {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      padding: 7px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-2);
+    }
+    .guided-check span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .guided-hint {
+      color: var(--muted);
+      font-size: 12px;
+    }
     .grid {
       display: grid;
       grid-template-columns: minmax(520px, 1.1fr) minmax(360px, 0.9fr);
@@ -6602,6 +6931,14 @@ HTML = r"""<!doctype html>
             </label>
           </div>
           <div class="settings-section">
+            <div class="settings-tool-title">Guided editor</div>
+            <label class="create-field">
+              <span class="create-field-label">Benchmark set base path</span>
+              <input id="benchmark-base-path" type="text" placeholder="/nfs/work/graph_benchmark_sets">
+            </label>
+            <div class="csv-summary">Used to prefill and autocomplete Graph entries in guided editing. Leave empty to disable.</div>
+          </div>
+          <div class="settings-section">
             <div class="settings-tool-title">Results columns</div>
             <div id="settings-hidden-columns" class="settings-hidden-columns csv-empty">No globally hidden columns loaded.</div>
           </div>
@@ -6836,6 +7173,10 @@ HTML = r"""<!doctype html>
               </div>
               <div class="actions check-action">
                 <span id="check-indicator" class="check-indicator hidden" aria-live="polite"></span>
+                <div class="editor-mode-toggle" role="group" aria-label="Experiment editor mode">
+                  <button id="editor-mode-text" type="button" class="active">Text</button>
+                  <button id="editor-mode-guided" type="button">Guided</button>
+                </div>
                 <button id="check" title="Save and validate the Experiment file">Save</button>
               </div>
             </div>
@@ -6843,6 +7184,15 @@ HTML = r"""<!doctype html>
               <div class="editor-shell">
                 <pre id="experiment-highlight" class="editor-highlight" aria-hidden="true"></pre>
                 <textarea id="experiment-editor" spellcheck="false" wrap="off"></textarea>
+              </div>
+              <div id="guided-editor" class="guided-editor hidden">
+                <div class="guided-toolbar">
+                  <div class="guided-hint">Built from mkexp2 probe/describe metadata. Saving regenerates the Experiment file.</div>
+                  <button id="guided-reload" type="button">Reload model</button>
+                </div>
+                <div id="guided-output" class="csv-empty">Switch to Guided to load the form.</div>
+                <datalist id="guided-graph-suggestions"></datalist>
+                <datalist id="guided-repo-ref-suggestions"></datalist>
               </div>
               <div class="muted experiment-editor-meta" id="selected-path"></div>
             </div>
@@ -7074,6 +7424,13 @@ HTML = r"""<!doctype html>
       algorithmLoadSeq: 0,
       selectionSeq: 0,
       editorDirty: false,
+      editorMode: 'text',
+      guidedModel: null,
+      guidedFor: null,
+      guidedForm: null,
+      guidedDirty: false,
+      benchmarkSets: [],
+      benchmarkSetsFor: '',
       presets: [],
       describeCatalog: null,
       describeLoaded: false,
@@ -7139,7 +7496,7 @@ HTML = r"""<!doctype html>
       shared: false,
       shareId: '',
       shareCommandTemplate: '',
-      settings: { theme: 'light' },
+      settings: { theme: 'light', benchmark_base_path: '' },
       settingsLoaded: false,
       workspaces: [],
       workspacesLoaded: false
@@ -8023,6 +8380,10 @@ HTML = r"""<!doctype html>
       if (!select) return;
       select.value = normalizeTheme(state.settings?.theme);
     }
+    function renderGuidedSettings() {
+      const input = document.getElementById('benchmark-base-path');
+      if (input) input.value = state.settings?.benchmark_base_path || '';
+    }
     async function loadUiSettings() {
       if (state.shared) {
         applyTheme(localStorage.getItem(THEME_STORAGE_KEY) || 'light', false);
@@ -8030,22 +8391,38 @@ HTML = r"""<!doctype html>
       }
       const settings = await api('/api/settings');
       state.settingsLoaded = true;
+      state.settings = Object.assign({}, state.settings || {}, settings || {});
       applyTheme(settings.theme || 'light');
+      renderGuidedSettings();
       return settings;
+    }
+    async function saveUiSettingsPatch(patch) {
+      if (state.shared) return state.settings;
+      const next = Object.assign({}, state.settings || {}, patch || {});
+      const saved = await api('/api/settings', {
+        method: 'PUT',
+        body: JSON.stringify(next)
+      });
+      state.settingsLoaded = true;
+      state.settings = Object.assign({}, state.settings || {}, saved || {});
+      applyTheme(state.settings.theme || 'light');
+      renderGuidedSettings();
+      return state.settings;
     }
     async function saveTheme(theme) {
       const normalized = applyTheme(theme);
       if (state.shared) return;
       try {
-        const saved = await api('/api/settings', {
-          method: 'PUT',
-          body: JSON.stringify({ theme: normalized })
-        });
-        state.settingsLoaded = true;
-        applyTheme(saved.theme || normalized);
+        await saveUiSettingsPatch({ theme: normalized });
       } catch (err) {
         out(`Theme save failed: ${String(err)}`);
       }
+    }
+    async function saveBenchmarkBasePath() {
+      const input = document.getElementById('benchmark-base-path');
+      await saveUiSettingsPatch({ benchmark_base_path: input?.value.trim() || '' });
+      state.benchmarkSets = [];
+      state.benchmarkSetsFor = '';
     }
     function decodeColumnSignature(signature) {
       const text = String(signature || '');
@@ -8520,6 +8897,578 @@ HTML = r"""<!doctype html>
     });
     editor.addEventListener('scroll', syncEditorHighlight);
     updateEditorHighlight();
+    function guidedTextList(value) {
+      if (Array.isArray(value)) return value.map(item => String(item ?? '').trim()).filter(Boolean);
+      return String(value || '').split(/\s+/).map(item => item.trim()).filter(Boolean);
+    }
+    function guidedLineList(value) {
+      if (Array.isArray(value)) return value.map(item => String(item ?? '').trim()).filter(Boolean);
+      return String(value || '').split(/\r?\n/).map(item => item.trim()).filter(Boolean);
+    }
+    function guidedPropertyRows(properties) {
+      if (!properties) return [];
+      if (Array.isArray(properties)) {
+        return properties.map(prop => ({ key: String(prop.key || '').trim(), value: String(prop.value ?? '').trim() })).filter(prop => prop.key);
+      }
+      return Object.entries(properties).map(([key, value]) => ({ key, value: String(value ?? '') })).filter(prop => prop.key);
+    }
+    function describePartitionerMap(describe = state.guidedModel?.describe) {
+      const map = new Map();
+      for (const partitioner of describe?.partitioners || []) map.set(partitioner.name, partitioner);
+      return map;
+    }
+    function guidedBaseOptions(describe = state.guidedModel?.describe) {
+      const names = new Set();
+      for (const partitioner of describe?.partitioners || []) {
+        names.add(partitioner.name);
+        for (const alias of partitioner.aliases || []) names.add(alias.name);
+      }
+      return Array.from(names).sort((left, right) => left.localeCompare(right));
+    }
+    function pluginDefaultKeys(base, describe = state.guidedModel?.describe) {
+      const partitioners = describePartitionerMap(describe);
+      const direct = partitioners.get(base);
+      if (direct) return new Set((direct.defaults || []).map(prop => prop.key));
+      for (const partitioner of partitioners.values()) {
+        if ((partitioner.aliases || []).some(alias => alias.name === base)) {
+          return new Set((partitioner.defaults || []).map(prop => prop.key));
+        }
+      }
+      return new Set();
+    }
+    function guidedPropertiesForAlgorithm(algorithm, describe) {
+      const defaults = pluginDefaultKeys(algorithm.base, describe);
+      const properties = algorithm.declaredProperties || algorithm.properties || {};
+      const keys = new Set(['repo_url', 'repo_ref']);
+      for (const key of ['parser', 'cmake_flags', 'build_opts', 'build_options']) keys.add(key);
+      for (const [key, value] of Object.entries(properties)) {
+        if (value !== '' && value !== null && value !== undefined) keys.add(key);
+      }
+      for (const key of defaults) {
+        if (['repo_url', 'repo_ref', 'cmake_flags', 'build_opts', 'build_options', 'parser'].includes(key)) keys.add(key);
+      }
+      return Array.from(keys)
+        .filter(key => key in properties || defaults.has(key) || key === 'repo_url' || key === 'repo_ref')
+        .sort((left, right) => {
+          const priority = ['repo_url', 'repo_ref', 'parser', 'cmake_flags', 'build_opts', 'build_options'];
+          return (priority.indexOf(left) < 0 ? 99 : priority.indexOf(left))
+            - (priority.indexOf(right) < 0 ? 99 : priority.indexOf(right))
+            || left.localeCompare(right);
+        })
+        .map(key => ({ key, value: String(properties[key] ?? '') }));
+    }
+    function guidedFormFromModel(model) {
+      const experiments = model?.probe?.experiments || [];
+      const describe = model?.describe || {};
+      const first = experiments[0] || {};
+      const declaredDefinitions = new Map();
+      const declaredProperties = {};
+      for (const experiment of experiments) {
+        for (const definition of experiment.declared?.algorithm_definitions || []) {
+          if (definition.name && !declaredDefinitions.has(definition.name)) declaredDefinitions.set(definition.name, definition);
+        }
+        for (const [name, properties] of Object.entries(experiment.declared?.algorithm_properties || {})) {
+          declaredProperties[name] = { ...(declaredProperties[name] || {}), ...(properties || {}) };
+        }
+      }
+      const algorithmMap = new Map();
+      for (const experiment of experiments) {
+        for (const algorithm of experiment.resolved?.algorithms || []) {
+          if (!algorithmMap.has(algorithm.name)) {
+            const definition = declaredDefinitions.get(algorithm.name) || {};
+            algorithmMap.set(algorithm.name, {
+              name: algorithm.name,
+              base: definition.base || algorithm.base || '',
+              args: definition.args ?? algorithm.args ?? '',
+              properties: guidedPropertiesForAlgorithm({
+                ...algorithm,
+                base: definition.base || algorithm.base || '',
+                declaredProperties: declaredProperties[algorithm.name] || {},
+              }, describe),
+            });
+          }
+        }
+      }
+      const basePath = model?.settings?.benchmark_base_path || state.settings?.benchmark_base_path || '';
+      const formExperiments = experiments.map((experiment, index) => {
+        const declared = experiment.declared || {};
+        const graphValues = guidedLineList(declared.graphs?.length ? declared.graphs : (experiment.resolved?.graphs || []).map(graph => graph.spec));
+        return {
+          function: experiment.experiment?.function || `Experiment${index + 1}`,
+          algorithms: guidedTextList(declared.algorithms?.length ? declared.algorithms : (experiment.resolved?.algorithms || []).map(algorithm => algorithm.name)),
+          graphs: graphValues.length ? graphValues : (basePath ? [basePath] : []),
+          ks: guidedTextList(declared.ks || []),
+          seeds: guidedTextList(declared.seeds || []),
+          epsilons: guidedTextList(declared.epsilons || []),
+          topologies: guidedTextList(declared.topologies || []),
+          timelimit: declared.timelimit || '',
+          timelimit_per_instance: declared.timelimit_per_instance || '',
+        };
+      });
+      return {
+        system: first.experiment?.system || describe.systems?.[0]?.name || 'slurm',
+        properties: guidedPropertyRows(first.declared?.global_properties || {}),
+        algorithm_definitions: Array.from(algorithmMap.values()),
+        experiments: formExperiments.length ? formExperiments : [{
+          function: 'ExperimentWeb',
+          algorithms: Array.from(algorithmMap.keys()),
+          graphs: basePath ? [basePath] : [],
+          ks: ['2'],
+          seeds: ['1'],
+          epsilons: ['0.03'],
+          topologies: ['1x1x1'],
+          timelimit: '',
+          timelimit_per_instance: '',
+        }],
+      };
+    }
+    function guidedInput(className, value = '', placeholder = '') {
+      const input = document.createElement('input');
+      input.className = className;
+      input.value = value ?? '';
+      input.placeholder = placeholder;
+      return input;
+    }
+    function guidedSelect(className, options, value = '') {
+      const select = document.createElement('select');
+      select.className = className;
+      for (const optionValue of options) {
+        const option = document.createElement('option');
+        option.value = optionValue;
+        option.textContent = optionValue;
+        select.appendChild(option);
+      }
+      if (value && !options.includes(value)) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        select.prepend(option);
+      }
+      select.value = value || options[0] || '';
+      return select;
+    }
+    function guidedField(label, control) {
+      const wrapper = document.createElement('label');
+      wrapper.className = 'guided-field';
+      const title = document.createElement('span');
+      title.className = 'guided-field-label';
+      title.textContent = label;
+      wrapper.appendChild(title);
+      wrapper.appendChild(control);
+      return wrapper;
+    }
+    function markGuidedDirty() {
+      state.guidedDirty = true;
+      clearCheckIndicator();
+    }
+    function removeGuidedCard(button) {
+      button.closest('.guided-card, .guided-row')?.remove();
+      markGuidedDirty();
+    }
+    function renderGuidedPropertyRows(container, properties, ownerClass) {
+      container.innerHTML = '';
+      const rows = properties?.length ? properties : [{ key: '', value: '' }];
+      for (const prop of rows) {
+        const row = document.createElement('div');
+        row.className = `guided-row ${ownerClass}`;
+        row.appendChild(guidedInput('guided-property-key', prop.key || '', 'property'));
+        const value = guidedInput('guided-property-value', prop.value || '', 'value');
+        if (prop.key === 'repo_ref') value.setAttribute('list', 'guided-repo-ref-suggestions');
+        row.appendChild(value);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = 'x';
+        remove.title = 'Remove property';
+        remove.onclick = () => removeGuidedCard(remove);
+        row.appendChild(remove);
+        container.appendChild(row);
+      }
+    }
+    function collectGuidedPropertyRows(container) {
+      return Array.from(container.querySelectorAll('.guided-row')).map(row => ({
+        key: row.querySelector('.guided-property-key')?.value.trim() || '',
+        value: row.querySelector('.guided-property-value')?.value.trim() || '',
+      })).filter(prop => prop.key);
+    }
+    async function fetchGuidedRepoRefs(button) {
+      const card = button.closest('[data-guided-algorithm]');
+      const repoUrl = Array.from(card.querySelectorAll('.guided-algorithm-property')).find(row =>
+        row.querySelector('.guided-property-key')?.value.trim() === 'repo_url'
+      )?.querySelector('.guided-property-value')?.value.trim();
+      if (!repoUrl) {
+        alert('Set repo_url first.');
+        return;
+      }
+      await withBusyButton(button, 'Fetching...', async () => {
+        const data = await api('/api/repo-refs', {
+          method: 'POST',
+          body: JSON.stringify({ repo_url: repoUrl })
+        });
+        const datalist = document.getElementById('guided-repo-ref-suggestions');
+        datalist.innerHTML = '';
+        for (const ref of data.refs || []) {
+          const option = document.createElement('option');
+          option.value = ref.name;
+          option.label = `${ref.kind} ${ref.sha?.slice(0, 10) || ''}`;
+          datalist.appendChild(option);
+        }
+        const repoRef = Array.from(card.querySelectorAll('.guided-algorithm-property')).find(row =>
+          row.querySelector('.guided-property-key')?.value.trim() === 'repo_ref'
+        )?.querySelector('.guided-property-value');
+        if (repoRef) repoRef.focus();
+      });
+    }
+    function renderGuidedAlgorithm(container, algorithm) {
+      const card = document.createElement('article');
+      card.className = 'guided-card';
+      card.dataset.guidedAlgorithm = '1';
+      const header = document.createElement('div');
+      header.className = 'guided-card-header';
+      const title = document.createElement('div');
+      title.className = 'guided-card-title';
+      title.textContent = algorithm.name || 'Algorithm';
+      const actions = document.createElement('div');
+      actions.className = 'guided-inline-actions';
+      const fetch = document.createElement('button');
+      fetch.type = 'button';
+      fetch.textContent = 'Fetch refs';
+      fetch.onclick = () => fetchGuidedRepoRefs(fetch).catch(err => out(String(err)));
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Remove';
+      remove.onclick = () => removeGuidedCard(remove);
+      actions.appendChild(fetch);
+      actions.appendChild(remove);
+      header.appendChild(title);
+      header.appendChild(actions);
+      const grid = document.createElement('div');
+      grid.className = 'guided-grid';
+      grid.appendChild(guidedField('Name', guidedInput('guided-algorithm-name', algorithm.name || '', 'MyVariant')));
+      grid.appendChild(guidedField('Base / alias', guidedSelect('guided-algorithm-base', guidedBaseOptions(), algorithm.base || '')));
+      grid.appendChild(guidedField('CLI arguments', guidedInput('guided-algorithm-args', algorithm.args || '', '-P strong')));
+      const propList = document.createElement('div');
+      propList.className = 'guided-row-list guided-algorithm-properties';
+      renderGuidedPropertyRows(propList, algorithm.properties || [], 'guided-algorithm-property');
+      const addProp = document.createElement('button');
+      addProp.type = 'button';
+      addProp.textContent = 'Add property';
+      addProp.onclick = () => {
+        const rows = collectGuidedPropertyRows(propList);
+        rows.push({ key: '', value: '' });
+        renderGuidedPropertyRows(propList, rows, 'guided-algorithm-property');
+        markGuidedDirty();
+      };
+      card.appendChild(header);
+      card.appendChild(grid);
+      card.appendChild(propList);
+      card.appendChild(addProp);
+      container.appendChild(card);
+    }
+    function renderGuidedGraphRows(container, graphs) {
+      container.innerHTML = '';
+      const rows = graphs?.length ? graphs : [''];
+      for (const graph of rows) {
+        const row = document.createElement('div');
+        row.className = 'guided-row guided-graph-row';
+        const input = guidedInput('guided-graph', graph || '', 'graph file or benchmark set');
+        input.setAttribute('list', 'guided-graph-suggestions');
+        row.appendChild(input);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = 'x';
+        remove.title = 'Remove graph entry';
+        remove.onclick = () => removeGuidedCard(remove);
+        row.appendChild(remove);
+        container.appendChild(row);
+      }
+    }
+    function renderGuidedExperiment(container, experiment) {
+      const card = document.createElement('article');
+      card.className = 'guided-card';
+      card.dataset.guidedExperiment = '1';
+      const header = document.createElement('div');
+      header.className = 'guided-card-header';
+      const title = document.createElement('div');
+      title.className = 'guided-card-title';
+      title.textContent = experiment.function || 'Experiment';
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Remove';
+      remove.onclick = () => removeGuidedCard(remove);
+      header.appendChild(title);
+      header.appendChild(remove);
+      const grid = document.createElement('div');
+      grid.className = 'guided-grid';
+      grid.appendChild(guidedField('Function', guidedInput('guided-experiment-function', experiment.function || '', 'ExperimentName')));
+      grid.appendChild(guidedField('Ks', guidedInput('guided-experiment-ks', (experiment.ks || []).join(' '), '2 4 8')));
+      grid.appendChild(guidedField('Seeds', guidedInput('guided-experiment-seeds', (experiment.seeds || []).join(' '), '1 2 3')));
+      grid.appendChild(guidedField('Epsilons', guidedInput('guided-experiment-epsilons', (experiment.epsilons || []).join(' '), '0.03')));
+      grid.appendChild(guidedField('Threads', guidedInput('guided-experiment-topologies', (experiment.topologies || []).join(' '), '1x1x64')));
+      grid.appendChild(guidedField('Timelimit', guidedInput('guided-experiment-timelimit', experiment.timelimit || '', '01:00:00')));
+      const algorithmChecks = document.createElement('div');
+      algorithmChecks.className = 'guided-check-grid';
+      for (const algorithm of state.guidedForm.algorithm_definitions || []) {
+        const label = document.createElement('label');
+        label.className = 'guided-check';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = algorithm.name;
+        checkbox.checked = (experiment.algorithms || []).includes(algorithm.name);
+        const text = document.createElement('span');
+        text.textContent = algorithm.name;
+        text.title = algorithm.name;
+        label.appendChild(checkbox);
+        label.appendChild(text);
+        algorithmChecks.appendChild(label);
+      }
+      const graphList = document.createElement('div');
+      graphList.className = 'guided-row-list guided-graphs';
+      renderGuidedGraphRows(graphList, experiment.graphs || []);
+      const addGraph = document.createElement('button');
+      addGraph.type = 'button';
+      addGraph.textContent = 'Add graph';
+      addGraph.onclick = () => {
+        const rows = Array.from(graphList.querySelectorAll('.guided-graph')).map(input => input.value.trim()).filter(Boolean);
+        rows.push(state.settings?.benchmark_base_path || '');
+        renderGuidedGraphRows(graphList, rows);
+        markGuidedDirty();
+      };
+      card.appendChild(header);
+      card.appendChild(grid);
+      card.appendChild(guidedField('Algorithms', algorithmChecks));
+      card.appendChild(guidedField('Graphs', graphList));
+      card.appendChild(addGraph);
+      container.appendChild(card);
+    }
+    function renderGuidedEditor() {
+      const box = document.getElementById('guided-output');
+      if (!box) return;
+      const form = state.guidedForm;
+      if (!form) {
+        box.className = 'csv-empty';
+        box.textContent = 'Guided model not loaded.';
+        return;
+      }
+      box.className = 'guided-editor';
+      box.innerHTML = '';
+      const systems = (state.guidedModel?.describe?.systems || []).map(system => system.name).sort();
+      const basics = document.createElement('section');
+      basics.className = 'guided-section';
+      const basicsHeader = document.createElement('div');
+      basicsHeader.className = 'guided-section-header';
+      const basicsTitle = document.createElement('div');
+      basicsTitle.className = 'guided-section-title';
+      basicsTitle.textContent = 'System and properties';
+      const addGlobal = document.createElement('button');
+      addGlobal.type = 'button';
+      addGlobal.textContent = 'Add property';
+      basicsHeader.appendChild(basicsTitle);
+      basicsHeader.appendChild(addGlobal);
+      const basicsGrid = document.createElement('div');
+      basicsGrid.className = 'guided-grid';
+      basicsGrid.appendChild(guidedField('System', guidedSelect('guided-system', systems, form.system || '')));
+      const globalRows = document.createElement('div');
+      globalRows.className = 'guided-row-list guided-global-properties';
+      renderGuidedPropertyRows(globalRows, form.properties || [], 'guided-global-property');
+      addGlobal.onclick = () => {
+        const rows = collectGuidedPropertyRows(globalRows);
+        rows.push({ key: '', value: '' });
+        renderGuidedPropertyRows(globalRows, rows, 'guided-global-property');
+        markGuidedDirty();
+      };
+      basics.appendChild(basicsHeader);
+      basics.appendChild(basicsGrid);
+      basics.appendChild(globalRows);
+      const algorithms = document.createElement('section');
+      algorithms.className = 'guided-section';
+      const algorithmsHeader = document.createElement('div');
+      algorithmsHeader.className = 'guided-section-header';
+      const algorithmsTitle = document.createElement('div');
+      algorithmsTitle.className = 'guided-section-title';
+      algorithmsTitle.textContent = 'Algorithms';
+      const addAlgorithm = document.createElement('button');
+      addAlgorithm.type = 'button';
+      addAlgorithm.textContent = 'Add algorithm';
+      addAlgorithm.onclick = () => {
+        state.guidedForm = collectGuidedForm();
+        state.guidedForm.algorithm_definitions.push({ name: 'NewAlgorithm', base: guidedBaseOptions()[0] || '', args: '', properties: [] });
+        renderGuidedEditor();
+        markGuidedDirty();
+      };
+      algorithmsHeader.appendChild(algorithmsTitle);
+      algorithmsHeader.appendChild(addAlgorithm);
+      const algorithmList = document.createElement('div');
+      algorithmList.className = 'guided-row-list';
+      for (const algorithm of form.algorithm_definitions || []) renderGuidedAlgorithm(algorithmList, algorithm);
+      algorithms.appendChild(algorithmsHeader);
+      algorithms.appendChild(algorithmList);
+      const experiments = document.createElement('section');
+      experiments.className = 'guided-section';
+      const experimentsHeader = document.createElement('div');
+      experimentsHeader.className = 'guided-section-header';
+      const experimentsTitle = document.createElement('div');
+      experimentsTitle.className = 'guided-section-title';
+      experimentsTitle.textContent = 'Experiment functions';
+      const addExperiment = document.createElement('button');
+      addExperiment.type = 'button';
+      addExperiment.textContent = 'Add experiment';
+      addExperiment.onclick = () => {
+        state.guidedForm = collectGuidedForm();
+        state.guidedForm.experiments.push({
+          function: `Experiment${state.guidedForm.experiments.length + 1}`,
+          algorithms: (state.guidedForm.algorithm_definitions || []).map(algorithm => algorithm.name),
+          graphs: state.settings?.benchmark_base_path ? [state.settings.benchmark_base_path] : [],
+          ks: ['2'],
+          seeds: ['1'],
+          epsilons: ['0.03'],
+          topologies: ['1x1x1'],
+          timelimit: '',
+          timelimit_per_instance: '',
+        });
+        renderGuidedEditor();
+        markGuidedDirty();
+      };
+      experimentsHeader.appendChild(experimentsTitle);
+      experimentsHeader.appendChild(addExperiment);
+      const experimentList = document.createElement('div');
+      experimentList.className = 'guided-row-list';
+      for (const experiment of form.experiments || []) renderGuidedExperiment(experimentList, experiment);
+      experiments.appendChild(experimentsHeader);
+      experiments.appendChild(experimentList);
+      box.appendChild(basics);
+      box.appendChild(algorithms);
+      box.appendChild(experiments);
+    }
+    function collectGuidedForm() {
+      const box = document.getElementById('guided-output');
+      return {
+        system: box.querySelector('.guided-system')?.value || 'slurm',
+        properties: collectGuidedPropertyRows(box.querySelector('.guided-global-properties') || document.createElement('div')),
+        algorithm_definitions: Array.from(box.querySelectorAll('[data-guided-algorithm]')).map(card => ({
+          name: card.querySelector('.guided-algorithm-name')?.value.trim() || '',
+          base: card.querySelector('.guided-algorithm-base')?.value.trim() || '',
+          args: card.querySelector('.guided-algorithm-args')?.value.trim() || '',
+          properties: collectGuidedPropertyRows(card.querySelector('.guided-algorithm-properties') || document.createElement('div')),
+        })).filter(algorithm => algorithm.name && algorithm.base),
+        experiments: Array.from(box.querySelectorAll('[data-guided-experiment]')).map(card => ({
+          function: card.querySelector('.guided-experiment-function')?.value.trim() || '',
+          algorithms: Array.from(card.querySelectorAll('.guided-check input:checked')).map(input => input.value),
+          graphs: Array.from(card.querySelectorAll('.guided-graph')).map(input => input.value.trim()).filter(Boolean),
+          ks: guidedTextList(card.querySelector('.guided-experiment-ks')?.value || ''),
+          seeds: guidedTextList(card.querySelector('.guided-experiment-seeds')?.value || ''),
+          epsilons: guidedTextList(card.querySelector('.guided-experiment-epsilons')?.value || ''),
+          topologies: guidedTextList(card.querySelector('.guided-experiment-topologies')?.value || ''),
+          timelimit: card.querySelector('.guided-experiment-timelimit')?.value.trim() || '',
+          timelimit_per_instance: '',
+        })).filter(experiment => experiment.function),
+      };
+    }
+    async function loadBenchmarkSuggestions() {
+      const base = state.settings?.benchmark_base_path || '';
+      if (!base || state.benchmarkSetsFor === base) return;
+      const data = await api('/api/benchmark-sets');
+      state.benchmarkSets = data.sets || [];
+      state.benchmarkSetsFor = base;
+      const datalist = document.getElementById('guided-graph-suggestions');
+      datalist.innerHTML = '';
+      for (const item of state.benchmarkSets) {
+        const option = document.createElement('option');
+        option.value = item.path;
+        option.label = `${item.kind} ${item.relative}`;
+        datalist.appendChild(option);
+      }
+    }
+    async function loadGuidedEditor(force = false) {
+      if (!state.selected || state.selectedArchived || state.shared) return;
+      const selected = state.selected;
+      if (!force && state.guidedFor === selected && state.guidedForm) {
+        renderGuidedEditor();
+        return;
+      }
+      const box = document.getElementById('guided-output');
+      box.className = 'csv-empty';
+      box.textContent = 'Loading guided model from mkexp2 probe and describe...';
+      const [model] = await Promise.all([
+        api(`/api/experiments/${encodeURIComponent(selected)}/guided`),
+        loadUiSettings().catch(() => state.settings),
+      ]);
+      if (state.selected !== selected) return;
+      state.guidedModel = model;
+      state.guidedFor = selected;
+      state.guidedForm = guidedFormFromModel(model);
+      state.guidedDirty = false;
+      await loadBenchmarkSuggestions().catch(err => out(String(err)));
+      renderGuidedEditor();
+    }
+    function renderEditorMode() {
+      const textMode = state.editorMode !== 'guided';
+      document.querySelector('.editor-shell')?.classList.toggle('hidden', !textMode);
+      document.getElementById('guided-editor')?.classList.toggle('hidden', textMode);
+      document.getElementById('editor-mode-text')?.classList.toggle('active', textMode);
+      document.getElementById('editor-mode-guided')?.classList.toggle('active', !textMode);
+      const check = document.getElementById('check');
+      if (check) {
+        check.textContent = textMode ? 'Save' : 'Save';
+        check.title = textMode ? 'Save and validate the Experiment file' : 'Generate and save the Experiment file from the guided form';
+      }
+    }
+    function resetGuidedState() {
+      state.editorMode = 'text';
+      state.guidedModel = null;
+      state.guidedFor = null;
+      state.guidedForm = null;
+      state.guidedDirty = false;
+      renderEditorMode();
+    }
+    async function switchEditorMode(mode) {
+      if (mode === 'guided') {
+        if (state.editorDirty && !state.shared && !state.selectedArchived) {
+          await persistExperiment();
+        }
+        state.editorMode = 'guided';
+        renderEditorMode();
+        await loadGuidedEditor(true);
+        return;
+      }
+      if (state.editorMode === 'guided' && state.guidedForm && !state.shared && !state.selectedArchived) {
+        await renderGuidedExperimentPreview();
+      }
+      state.editorMode = 'text';
+      renderEditorMode();
+    }
+    async function renderGuidedExperimentPreview() {
+      if (!state.selected || state.selectedArchived || state.shared) return null;
+      const selected = state.selected;
+      state.guidedForm = collectGuidedForm();
+      const result = await api(`/api/experiments/${encodeURIComponent(selected)}/guided/render`, {
+        method: 'POST',
+        body: JSON.stringify({ form: state.guidedForm })
+      });
+      if (state.selected !== selected) return null;
+      setEditorValue(result.experiment || '');
+      state.editorDirty = true;
+      state.guidedDirty = false;
+      setSelectedExperimentMetadata(selected, result.experiment_file || result.path, result);
+      clearCheckIndicator();
+      return result;
+    }
+    async function saveGuidedExperiment() {
+      if (!state.selected || state.selectedArchived || state.shared) return;
+      state.guidedForm = collectGuidedForm();
+      const result = await api(`/api/experiments/${encodeURIComponent(state.selected)}/guided`, {
+        method: 'PUT',
+        body: JSON.stringify({ form: state.guidedForm })
+      });
+      setEditorValue(result.experiment || '');
+      state.editorDirty = false;
+      state.guidedDirty = false;
+      setSelectedExperimentMetadata(state.selected, result.experiment_file || result.path, result);
+      await loadAlgorithms(state.selected, { force: true }).catch(err => out(String(err)));
+      clearCheckIndicator();
+      return result;
+    }
+    document.getElementById('guided-editor').addEventListener('input', markGuidedDirty);
+    document.getElementById('guided-editor').addEventListener('change', markGuidedDirty);
     function parseCsv(text) {
       const rows = [];
       let row = [];
@@ -10908,8 +11857,14 @@ HTML = r"""<!doctype html>
         checkButton.disabled = !state.selected || state.selectedArchived || state.shared;
         checkButton.title = state.selectedArchived
           ? 'Unarchive before saving.'
-          : 'Save and validate the Experiment file';
+          : (state.editorMode === 'guided'
+            ? 'Generate and save the Experiment file from the guided form'
+            : 'Save and validate the Experiment file');
       }
+      const guidedButton = document.getElementById('editor-mode-guided');
+      if (guidedButton) guidedButton.disabled = !state.selected || state.selectedArchived || state.shared;
+      const textButton = document.getElementById('editor-mode-text');
+      if (textButton) textButton.disabled = !state.selected;
       const progressButton = document.getElementById('refresh-progress');
       if (progressButton && progressButton.dataset.busy !== '1') {
         progressButton.disabled = !state.selected || state.selectedArchived;
@@ -11098,6 +12053,7 @@ HTML = r"""<!doctype html>
       clearCheckIndicator();
       clearPlotIndicator();
       clearAlgorithmChoices();
+      resetGuidedState();
       state.results = [];
       state.resultsFor = null;
       state.stats = null;
@@ -11636,6 +12592,7 @@ HTML = r"""<!doctype html>
       state.editorDirty = false;
       clearCheckIndicator();
       clearPlotIndicator();
+      resetGuidedState();
       state.results = [];
       state.resultsFor = null;
       state.stats = null;
@@ -11705,6 +12662,7 @@ HTML = r"""<!doctype html>
       clearCheckIndicator();
       clearPlotIndicator();
       clearAlgorithmChoices();
+      resetGuidedState();
       state.results = [];
       state.resultsFor = null;
       state.stats = null;
@@ -11782,6 +12740,7 @@ HTML = r"""<!doctype html>
       state.selectionSeq += 1;
       state.algorithmLoadSeq += 1;
       clearAlgorithmChoices();
+      resetGuidedState();
       setView('experiment-view').catch(err => out(String(err)));
       setSelectedExperimentMetadata(id, data.experiment_file || data.path, data);
       setEditorValue(data.experiment);
@@ -11846,8 +12805,8 @@ HTML = r"""<!doctype html>
       clearCheckIndicator();
       try {
         await withBusyButton(button, 'Saving...', async () => {
-          out('Saving and checking...');
-          const saved = await persistExperiment();
+          out(state.editorMode === 'guided' ? 'Saving guided experiment and checking...' : 'Saving and checking...');
+          const saved = state.editorMode === 'guided' ? await saveGuidedExperiment() : await persistExperiment();
           state.editorDirty = false;
           if (state.selected !== experimentId) return;
           const result = await api(`/api/experiments/${encodeURIComponent(experimentId)}/check`, { method: 'POST' });
@@ -12834,9 +13793,13 @@ HTML = r"""<!doctype html>
       });
     });
     document.getElementById('theme-select').onchange = event => saveTheme(event.target.value);
+    document.getElementById('benchmark-base-path').addEventListener('change', () => saveBenchmarkBasePath().catch(err => out(String(err))));
     document.getElementById('archive-codex-experiments').onclick = () => archiveCodexExperiments().catch(err => out(String(err)));
     document.getElementById('archive-subdir-experiments').onclick = () => archiveSubdirectoryExperiments().catch(err => out(String(err)));
     document.getElementById('spack-cache-refresh').onclick = () => refreshSpackCache().catch(err => out(String(err)));
+    document.getElementById('editor-mode-text').onclick = () => switchEditorMode('text').catch(err => out(String(err)));
+    document.getElementById('editor-mode-guided').onclick = () => withBusyButton('editor-mode-guided', 'Loading...', () => switchEditorMode('guided')).catch(err => out(String(err)));
+    document.getElementById('guided-reload').onclick = () => withBusyButton('guided-reload', 'Reloading...', () => loadGuidedEditor(true)).catch(err => out(String(err)));
     document.getElementById('check').onclick = checkExperiment;
     document.getElementById('describe-toggle').onclick = () => toggleDescribePanel().catch(err => out(String(err)));
     document.getElementById('describe-search').oninput = event => {
@@ -13120,6 +14083,10 @@ def make_handler(app):
                 if path == "/api/settings":
                     json_response(self, 200, app.read_settings())
                     return
+                if path == "/api/benchmark-sets":
+                    query = urllib.parse.parse_qs(parsed.query)
+                    json_response(self, 200, app.benchmark_sets((query.get("query") or [""])[0]))
+                    return
                 if path == "/api/presets":
                     json_response(self, 200, {"presets": app.list_presets()})
                     return
@@ -13180,6 +14147,10 @@ def make_handler(app):
                         200,
                         payload,
                     )
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/guided$", path)
+                if match:
+                    json_response(self, 200, app.guided_model(urllib.parse.unquote(match.group(1))))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/results$", path)
                 if match:
@@ -13316,6 +14287,9 @@ def make_handler(app):
                 if path == "/api/git/push":
                     json_response(self, 200, app.git_commit_push(payload.get("message", "")))
                     return
+                if path == "/api/repo-refs":
+                    json_response(self, 200, app.fetch_repo_refs(payload))
+                    return
                 if path == "/api/status/squeue/cancel":
                     json_response(self, 200, app.slurm.cancel_job(payload))
                     return
@@ -13397,6 +14371,10 @@ def make_handler(app):
                     if action == "plot":
                         json_response(self, 202, app.plot_action(experiment_id, payload))
                         return
+                match = re.match(r"^/api/experiments/([^/]+)/guided/render$", path)
+                if match:
+                    json_response(self, 200, app.render_guided_experiment(urllib.parse.unquote(match.group(1)), payload))
+                    return
                 match = re.match(r"^/api/experiments/([^/]+)/plot-artifacts$", path)
                 if match:
                     json_response(self, 202, app.create_plot_artifacts_action(urllib.parse.unquote(match.group(1)), payload))
@@ -13434,6 +14412,11 @@ def make_handler(app):
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
                     json_response(self, 200, app.write_description(experiment_id, payload.get("description", "")))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/guided$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    json_response(self, 200, app.save_guided_experiment(experiment_id, payload))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/columns$", path)
                 if match:

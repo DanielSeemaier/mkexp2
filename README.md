@@ -450,7 +450,8 @@ The UI can:
 - open the header settings button to manage the session token, dark mode,
   experiment tags, bulk-archive active experiments in a selected subdirectory
   while skipping starred or submit-locked experiments, and the native plotting
-  Spack/R cache
+  Spack/R cache; settings also include an optional benchmark-set base path that
+  powers guided Graph autocomplete
 - show a disabled busy state with a spinner on controls that trigger backend
   work, including reloads, checks, probes, parsing, plotting, Git push, and
   destructive recovery actions
@@ -459,7 +460,14 @@ The UI can:
 - copy the selected experiment from the top navigation into a new directory,
   using the selected experiment's current `Experiment` file as the starting
   template
-- edit the raw `Experiment` file with lightweight syntax highlighting
+- edit the raw `Experiment` file with lightweight syntax highlighting, or switch
+  to Guided editing, which runs `mkexp2 probe --all` plus
+  `mkexp2 describe --all --json`, builds a generic form for systems,
+  algorithms, algorithm properties, experiment functions, graph inputs, and run
+  parameters, then regenerates the `Experiment` file from that form on Save.
+  Switching back to Text renders the current form as an unsaved text preview;
+  switching back to Guided reruns mkexp2 metadata instead of parsing the text in
+  the browser.
 - open the collapsed Reference panel on demand, which runs one
   `mkexp2 describe --all --json` command and renders searchable/filterable DSL
   commands, systems, partitioners, aliases, defaults, parsers, and presets for

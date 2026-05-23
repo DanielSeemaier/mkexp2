@@ -199,6 +199,116 @@ class WebBackendTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 app.copy_experiment("source", {"name": "Hidden", "name_template": "<name>.archived"})
 
+    def test_guided_form_renders_and_saves_experiment_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            graph_dir = repo / "graphs" / "small"
+            graph_dir.mkdir(parents=True)
+            exp = repo / "guided"
+            exp.mkdir()
+            (exp / "Experiment").write_text("ExperimentOld() { :; }\n", encoding="utf-8")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "%Y.%m.%d-<name>", "token")
+
+            payload = {
+                "form": {
+                    "system": "slurm",
+                    "properties": [
+                        {"key": "slurm.partition", "value": "diffie"},
+                        {"key": "slurm.use_array", "value": "true"},
+                    ],
+                    "algorithm_definitions": [
+                        {
+                            "name": "Baseline",
+                            "base": "KaMinPar",
+                            "args": "-P fast",
+                            "properties": [
+                                {"key": "repo_url", "value": "https://example.invalid/KaMinPar.git"},
+                                {"key": "repo_ref", "value": "origin/main"},
+                            ],
+                        }
+                    ],
+                    "experiments": [
+                        {
+                            "function": "Guided",
+                            "algorithms": ["Baseline"],
+                            "graphs": [str(graph_dir), "inputs/single.graph"],
+                            "ks": ["2", "16"],
+                            "seeds": ["1", "2"],
+                            "epsilons": ["0.03"],
+                            "topologies": ["1x1x64"],
+                            "timelimit": "01:00:00",
+                            "timelimit_per_instance": "00:05:00",
+                        }
+                    ],
+                }
+            }
+
+            rendered = app.render_guided_experiment("guided", payload)["experiment"]
+            saved = app.save_guided_experiment("guided", payload)
+
+            self.assertIn("System slurm", rendered)
+            self.assertIn("Property slurm.partition diffie", rendered)
+            self.assertIn("Property slurm.use_array true", rendered)
+            self.assertIn("DefineAlgorithm Baseline KaMinPar -P fast", rendered)
+            self.assertIn("AlgorithmProperty Baseline repo_url https://example.invalid/KaMinPar.git", rendered)
+            self.assertIn("AlgorithmProperty Baseline repo_ref origin/main", rendered)
+            self.assertIn("ExperimentGuided() {", rendered)
+            self.assertIn(f"  Graphs {graph_dir}", rendered)
+            self.assertIn("  Graph inputs/single.graph", rendered)
+            self.assertIn("  Ks 2 16", rendered)
+            self.assertIn("  Seeds 1 2", rendered)
+            self.assertIn("  Epsilons 0.03", rendered)
+            self.assertIn("  Threads 1x1x64", rendered)
+            self.assertIn("  Timelimit 01:00:00", rendered)
+            self.assertIn("  TimelimitPerInstance 00:05:00", rendered)
+            self.assertTrue(saved["saved"])
+            self.assertTrue(saved["experiment_file"].endswith("/Experiment"))
+            self.assertEqual((exp / "Experiment").read_text(encoding="utf-8"), rendered)
+
+    def test_guided_benchmark_sets_use_configured_base_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            base = repo / "benchmarks"
+            (base / "paper").mkdir(parents=True)
+            (base / "paper" / "small.graph").write_text("graph\n", encoding="utf-8")
+            (base / "paper" / "notes.txt").write_text("ignore\n", encoding="utf-8")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "%Y.%m.%d-<name>", "token")
+            app.write_settings({"benchmark_base_path": str(base)})
+
+            all_sets = app.benchmark_sets()
+            filtered = app.benchmark_sets("small")
+
+            self.assertEqual(all_sets["base_path"], str(base.resolve()))
+            self.assertTrue(any(item["path"].endswith("/paper") and item["kind"] == "directory" for item in all_sets["sets"]))
+            self.assertTrue(any(item["path"].endswith("/paper/small.graph") and item["kind"] == "file" for item in filtered["sets"]))
+            self.assertFalse(any(item["path"].endswith("notes.txt") for item in all_sets["sets"]))
+
+    def test_guided_repo_refs_fetches_branches_and_tags(self):
+        if mkexp2_web.shutil.which("git") is None:
+            self.skipTest("git not found")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "experiments"
+            source = root / "source"
+            repo.mkdir()
+            source.mkdir()
+            subprocess.run(["git", "init"], cwd=source, check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=source, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=source, check=True)
+            (source / "README.md").write_text("x\n", encoding="utf-8")
+            subprocess.run(["git", "add", "README.md"], cwd=source, check=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=source, check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(["git", "branch", "feature/demo"], cwd=source, check=True)
+            subprocess.run(["git", "tag", "v1"], cwd=source, check=True)
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "%Y.%m.%d-<name>", "token")
+
+            refs = app.fetch_repo_refs({"repo_url": str(source)})
+            names = {item["name"] for item in refs["refs"]}
+
+            self.assertIn("feature/demo", names)
+            self.assertIn("origin/feature/demo", names)
+            self.assertIn("v1", names)
+
     def test_experiment_archive_can_filter_top_level_directories(self):
         original_which = mkexp2_web.shutil.which
         with tempfile.TemporaryDirectory() as tmp:
@@ -321,6 +431,9 @@ class WebBackendTest(unittest.TestCase):
             self.assertEqual(app.write_settings({"theme": "system"})["theme"], "system")
             self.assertTrue((repo / ".mkexp2" / "web-settings.json").is_file())
             self.assertEqual(app.write_settings({"theme": "bad"})["theme"], "light")
+            saved = app.write_settings({"benchmark_base_path": str(repo / "graphs")})
+            self.assertEqual(saved["benchmark_base_path"], str(repo / "graphs"))
+            self.assertEqual(app.read_settings()["benchmark_base_path"], str(repo / "graphs"))
 
     def test_workspaces_create_switch_and_remove(self):
         if mkexp2_web.shutil.which("git") is None:
@@ -435,6 +548,18 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("function highlightExperiment", mkexp2_web.HTML)
         self.assertIn("tok-keyword", mkexp2_web.HTML)
         self.assertIn("editor.addEventListener('input'", mkexp2_web.HTML)
+        self.assertIn('id="editor-mode-text"', mkexp2_web.HTML)
+        self.assertIn('id="editor-mode-guided"', mkexp2_web.HTML)
+        self.assertIn('id="guided-editor"', mkexp2_web.HTML)
+        self.assertIn('id="guided-graph-suggestions"', mkexp2_web.HTML)
+        self.assertIn('id="guided-repo-ref-suggestions"', mkexp2_web.HTML)
+        self.assertIn('id="benchmark-base-path"', mkexp2_web.HTML)
+        self.assertIn("async function loadGuidedEditor", mkexp2_web.HTML)
+        self.assertIn("function guidedFormFromModel", mkexp2_web.HTML)
+        self.assertIn("async function fetchGuidedRepoRefs", mkexp2_web.HTML)
+        self.assertIn("/api/benchmark-sets", mkexp2_web.HTML)
+        self.assertIn("/api/repo-refs", mkexp2_web.HTML)
+        self.assertIn("/guided/render", mkexp2_web.HTML)
         self.assertNotIn("Manual override", mkexp2_web.HTML)
         self.assertNotIn('id="force"', mkexp2_web.HTML)
         self.assertNotIn('id="save"', mkexp2_web.HTML)
