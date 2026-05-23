@@ -877,8 +877,8 @@
     }
     .submit-cancel-nav {
       height: 34px;
-      min-width: 144px;
-      padding: 0 22px;
+      min-width: 200px;
+      padding: 0 32px;
       border-color: var(--danger);
       background: var(--danger);
       color: #ffffff;
@@ -901,8 +901,8 @@
     }
     .unarchive-nav {
       height: 34px;
-      min-width: 144px;
-      padding: 0 22px;
+      min-width: 200px;
+      padding: 0 32px;
       border-color: var(--border);
       background: var(--surface-2);
       color: var(--text);
