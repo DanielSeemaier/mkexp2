@@ -3238,6 +3238,9 @@ HTML = r"""<!doctype html>
     .app.archive-mode {
       grid-template-columns: var(--sidebar-width) minmax(260px, 340px) 8px minmax(0, 1fr);
     }
+    .app.archive-mode .main {
+      grid-column: 4;
+    }
     .app.share-mode {
       grid-template-columns: minmax(0, 1fr);
     }
@@ -3380,10 +3383,13 @@ HTML = r"""<!doctype html>
       border: 1px solid var(--border);
       border-radius: 6px;
       background: var(--surface);
+      cursor: pointer;
     }
-    .archive-item:hover {
+    .archive-item:hover,
+    .archive-item:focus-visible {
       border-color: var(--accent);
       background: var(--accent-soft);
+      outline: none;
     }
     .archive-open-button {
       height: auto;
@@ -3511,6 +3517,12 @@ HTML = r"""<!doctype html>
       overflow: hidden;
       display: grid;
       gap: 2px;
+    }
+    .experiment-row:hover,
+    .experiment-row:focus-visible {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      outline: none;
     }
     .experiment-row.active {
       border-color: var(--accent);
@@ -10373,6 +10385,7 @@ HTML = r"""<!doctype html>
       const selectionId = ++state.selectionSeq;
       state.selected = id;
       state.selectedArchived = false;
+      state.archivePaneOpen = false;
       state.algorithmLoadSeq += 1;
       state.editorDirty = false;
       clearCheckIndicator();
