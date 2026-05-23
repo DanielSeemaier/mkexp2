@@ -1,0 +1,860 @@
+    function appendInlineMarkdown(parent, text) {
+      const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+      let cursor = 0;
+      for (const match of text.matchAll(pattern)) {
+        if (match.index > cursor) parent.appendChild(document.createTextNode(text.slice(cursor, match.index)));
+        const value = match[0];
+        const node = value.startsWith('`') ? document.createElement('code') : document.createElement('strong');
+        node.textContent = value.startsWith('`') ? value.slice(1, -1) : value.slice(2, -2);
+        parent.appendChild(node);
+        cursor = match.index + value.length;
+      }
+      if (cursor < text.length) parent.appendChild(document.createTextNode(text.slice(cursor)));
+    }
+    function renderMarkdown(markdown, target) {
+      target.innerHTML = '';
+      target.className = 'markdown-doc';
+      const lines = String(markdown || '').split(/\r?\n/);
+      let paragraph = [];
+      let list = null;
+      let code = null;
+
+      const flushParagraph = () => {
+        if (!paragraph.length) return;
+        const p = document.createElement('p');
+        appendInlineMarkdown(p, paragraph.join(' '));
+        target.appendChild(p);
+        paragraph = [];
+      };
+      const flushList = () => {
+        if (!list) return;
+        target.appendChild(list);
+        list = null;
+      };
+      const flushCode = () => {
+        if (!code) return;
+        const pre = document.createElement('pre');
+        const codeNode = document.createElement('code');
+        codeNode.textContent = code.join('\n');
+        pre.appendChild(codeNode);
+        target.appendChild(pre);
+        code = null;
+      };
+
+      for (const line of lines) {
+        if (code) {
+          if (/^```/.test(line)) flushCode();
+          else code.push(line);
+          continue;
+        }
+        if (/^```/.test(line)) {
+          flushParagraph();
+          flushList();
+          code = [];
+          continue;
+        }
+        const heading = line.match(/^(#{1,4})\s+(.+)$/);
+        if (heading) {
+          flushParagraph();
+          flushList();
+          const level = Math.min(heading[1].length, 4);
+          const h = document.createElement(`h${level}`);
+          appendInlineMarkdown(h, heading[2]);
+          target.appendChild(h);
+          continue;
+        }
+        const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+        if (bullet) {
+          flushParagraph();
+          if (!list) list = document.createElement('ul');
+          const item = document.createElement('li');
+          appendInlineMarkdown(item, bullet[1]);
+          list.appendChild(item);
+          continue;
+        }
+        if (!line.trim()) {
+          flushParagraph();
+          flushList();
+          continue;
+        }
+        flushList();
+        paragraph.push(line.trim());
+      }
+      flushCode();
+      flushParagraph();
+      flushList();
+    }
+    function renderDescriptionWorkspace() {
+      const rendered = document.getElementById('description-rendered');
+      const editorNode = document.getElementById('description-editor');
+      const actions = document.getElementById('description-actions');
+      const editButton = document.getElementById('description-edit');
+      if (!state.selected) {
+        state.descriptionEditing = false;
+        rendered.className = 'csv-empty';
+        rendered.textContent = 'Select an experiment first.';
+        editorNode.classList.add('hidden');
+        actions.classList.add('hidden');
+        editButton.disabled = true;
+        return;
+      }
+      editButton.disabled = state.descriptionFor !== state.selected || state.shared || state.selectedArchived;
+      if (state.descriptionFor !== state.selected || !state.description) {
+        state.descriptionEditing = false;
+        rendered.className = 'csv-empty';
+        rendered.textContent = 'Loading description...';
+        editorNode.classList.add('hidden');
+        actions.classList.add('hidden');
+        return;
+      }
+      const content = state.description.content || '';
+      if (state.descriptionEditing && !state.shared && !state.selectedArchived) {
+        rendered.classList.add('hidden');
+        editorNode.classList.remove('hidden');
+        actions.classList.remove('hidden');
+        editButton.disabled = true;
+        return;
+      }
+      editorNode.classList.add('hidden');
+      actions.classList.add('hidden');
+      rendered.classList.remove('hidden');
+      if (content.trim()) {
+        renderMarkdown(content, rendered);
+      } else {
+        rendered.className = 'csv-empty';
+        rendered.textContent = 'No description yet.';
+      }
+    }
+    async function loadDescription() {
+      if (!state.selected) return;
+      const experimentId = state.selected;
+      state.descriptionEditing = false;
+      renderDescriptionWorkspace();
+      const data = await api(`/api/experiments/${encodeURIComponent(experimentId)}/description`);
+      if (state.selected !== experimentId) return;
+      state.description = data;
+      state.descriptionFor = experimentId;
+      renderDescriptionWorkspace();
+    }
+    function editDescription() {
+      if (!state.selected || state.shared || state.selectedArchived || state.descriptionFor !== state.selected) return;
+      const editorNode = document.getElementById('description-editor');
+      editorNode.value = state.description?.content || '';
+      state.descriptionEditing = true;
+      renderDescriptionWorkspace();
+      editorNode.focus();
+    }
+    function cancelDescriptionEdit() {
+      state.descriptionEditing = false;
+      renderDescriptionWorkspace();
+    }
+    async function saveDescription() {
+      if (!state.selected || state.shared || state.selectedArchived) return;
+      const experimentId = state.selected;
+      const description = document.getElementById('description-editor').value;
+      await withBusyButton('description-save', 'Saving...', async () => {
+        const result = await api(`/api/experiments/${encodeURIComponent(experimentId)}/description`, {
+          method: 'PUT',
+          body: JSON.stringify({ description })
+        });
+        if (state.selected !== experimentId) return;
+        state.description = result;
+        state.descriptionFor = experimentId;
+        state.descriptionEditing = false;
+        renderDescriptionWorkspace();
+      });
+    }
+    function span(className, value) {
+      return `<span class="${className}">${esc(value)}</span>`;
+    }
+    const experimentKeywords = new Set([
+      'System', 'Wrapper', 'Property', 'SystemProperty', 'AlgorithmProperty',
+      'DefineAlgorithm', 'Algorithms', 'Threads', 'Seeds', 'Ks', 'Epsilons',
+      'Timelimit', 'TimelimitPerInstance', 'Graphs', 'Graph'
+    ]);
+    const shellKeywords = new Set([
+      'if', 'then', 'elif', 'else', 'fi', 'for', 'while', 'do', 'done', 'case',
+      'esac', 'in', 'function', 'local', 'typeset', 'return', 'true', 'false'
+    ]);
+    function commentIndex(line) {
+      let quote = '';
+      for (let index = 0; index < line.length; index += 1) {
+        const char = line[index];
+        const previous = line[index - 1];
+        if (quote) {
+          if (char === quote && previous !== '\\') quote = '';
+          continue;
+        }
+        if (char === '"' || char === "'") {
+          quote = char;
+          continue;
+        }
+        if (char === '#') return index;
+      }
+      return -1;
+    }
+    function readVariable(code, start) {
+      if (code[start + 1] === '{') {
+        const end = code.indexOf('}', start + 2);
+        return end === -1 ? code.length : end + 1;
+      }
+      if (code[start + 1] === '(') {
+        let depth = 1;
+        for (let index = start + 2; index < code.length; index += 1) {
+          if (code[index] === '(') depth += 1;
+          if (code[index] === ')') depth -= 1;
+          if (depth === 0) return index + 1;
+        }
+        return code.length;
+      }
+      const match = code.slice(start).match(/^\$[A-Za-z_][A-Za-z0-9_]*/);
+      return match ? start + match[0].length : start + 1;
+    }
+    function highlightCode(code) {
+      let html = '';
+      for (let index = 0; index < code.length;) {
+        const char = code[index];
+        if (char === '"' || char === "'") {
+          let end = index + 1;
+          while (end < code.length) {
+            const current = code[end];
+            const previous = code[end - 1];
+            end += 1;
+            if (current === char && previous !== '\\') break;
+          }
+          html += span('tok-string', code.slice(index, end));
+          index = end;
+          continue;
+        }
+        if (char === '$') {
+          const end = readVariable(code, index);
+          html += span('tok-variable', code.slice(index, end));
+          index = end;
+          continue;
+        }
+        const number = code.slice(index).match(/^[0-9]+(?:\.[0-9]+)?(?:x[0-9]+)*/);
+        if (number) {
+          html += span('tok-number', number[0]);
+          index += number[0].length;
+          continue;
+        }
+        const word = code.slice(index).match(/^[A-Za-z_][A-Za-z0-9_.-]*/);
+        if (word) {
+          const value = word[0];
+          const rest = code.slice(index + value.length);
+          if (experimentKeywords.has(value)) {
+            html += span('tok-keyword', value);
+          } else if (shellKeywords.has(value)) {
+            html += span('tok-shell', value);
+          } else if (/^Experiment[A-Za-z0-9_]*$/.test(value) && /^\s*\(\)/.test(rest)) {
+            html += span('tok-function', value);
+          } else {
+            html += esc(value);
+          }
+          index += value.length;
+          continue;
+        }
+        html += esc(char);
+        index += 1;
+      }
+      return html;
+    }
+    function highlightExperiment(text) {
+      return text.split('\n').map(line => {
+        if (line.startsWith('#!')) return span('tok-comment', line);
+        const hash = commentIndex(line);
+        if (hash === -1) return highlightCode(line);
+        return highlightCode(line.slice(0, hash)) + span('tok-comment', line.slice(hash));
+      }).join('\n') + '\n';
+    }
+    function syncEditorHighlight() {
+      editorHighlight.scrollTop = editor.scrollTop;
+      editorHighlight.scrollLeft = editor.scrollLeft;
+    }
+    function updateEditorHighlight() {
+      editorHighlight.innerHTML = highlightExperiment(editor.value);
+      syncEditorHighlight();
+    }
+    function setEditorValue(value) {
+      editor.value = value;
+      updateEditorHighlight();
+    }
+    editor.addEventListener('input', () => {
+      state.editorDirty = true;
+      clearCheckIndicator();
+      updateEditorHighlight();
+    });
+    editor.addEventListener('scroll', syncEditorHighlight);
+    updateEditorHighlight();
+    function guidedTextList(value) {
+      if (Array.isArray(value)) return value.map(item => String(item ?? '').trim()).filter(Boolean);
+      return String(value || '').split(/\s+/).map(item => item.trim()).filter(Boolean);
+    }
+    function guidedLineList(value) {
+      if (Array.isArray(value)) return value.map(item => String(item ?? '').trim()).filter(Boolean);
+      return String(value || '').split(/\r?\n/).map(item => item.trim()).filter(Boolean);
+    }
+    function guidedPropertyRows(properties) {
+      if (!properties) return [];
+      if (Array.isArray(properties)) {
+        return properties.map(prop => ({ key: String(prop.key || '').trim(), value: String(prop.value ?? '').trim() })).filter(prop => prop.key);
+      }
+      return Object.entries(properties).map(([key, value]) => ({ key, value: String(value ?? '') })).filter(prop => prop.key);
+    }
+    function describePartitionerMap(describe = state.guidedModel?.describe) {
+      const map = new Map();
+      for (const partitioner of describe?.partitioners || []) map.set(partitioner.name, partitioner);
+      return map;
+    }
+    function guidedBaseOptions(describe = state.guidedModel?.describe) {
+      const names = new Set();
+      for (const partitioner of describe?.partitioners || []) {
+        names.add(partitioner.name);
+        for (const alias of partitioner.aliases || []) names.add(alias.name);
+      }
+      return Array.from(names).sort((left, right) => left.localeCompare(right));
+    }
+    function pluginDefaultKeys(base, describe = state.guidedModel?.describe) {
+      const partitioners = describePartitionerMap(describe);
+      const direct = partitioners.get(base);
+      if (direct) return new Set((direct.defaults || []).map(prop => prop.key));
+      for (const partitioner of partitioners.values()) {
+        if ((partitioner.aliases || []).some(alias => alias.name === base)) {
+          return new Set((partitioner.defaults || []).map(prop => prop.key));
+        }
+      }
+      return new Set();
+    }
+    function guidedPropertiesForAlgorithm(algorithm, describe) {
+      const defaults = pluginDefaultKeys(algorithm.base, describe);
+      const properties = algorithm.declaredProperties || algorithm.properties || {};
+      const keys = new Set(['repo_url', 'repo_ref']);
+      for (const key of ['parser', 'cmake_flags', 'build_opts', 'build_options']) keys.add(key);
+      for (const [key, value] of Object.entries(properties)) {
+        if (value !== '' && value !== null && value !== undefined) keys.add(key);
+      }
+      for (const key of defaults) {
+        if (['repo_url', 'repo_ref', 'cmake_flags', 'build_opts', 'build_options', 'parser'].includes(key)) keys.add(key);
+      }
+      return Array.from(keys)
+        .filter(key => key in properties || defaults.has(key) || key === 'repo_url' || key === 'repo_ref')
+        .sort((left, right) => {
+          const priority = ['repo_url', 'repo_ref', 'parser', 'cmake_flags', 'build_opts', 'build_options'];
+          return (priority.indexOf(left) < 0 ? 99 : priority.indexOf(left))
+            - (priority.indexOf(right) < 0 ? 99 : priority.indexOf(right))
+            || left.localeCompare(right);
+        })
+        .map(key => ({ key, value: String(properties[key] ?? '') }));
+    }
+    function guidedFormFromModel(model) {
+      const experiments = model?.probe?.experiments || [];
+      const describe = model?.describe || {};
+      const first = experiments[0] || {};
+      const declaredDefinitions = new Map();
+      const declaredProperties = {};
+      for (const experiment of experiments) {
+        for (const definition of experiment.declared?.algorithm_definitions || []) {
+          if (definition.name && !declaredDefinitions.has(definition.name)) declaredDefinitions.set(definition.name, definition);
+        }
+        for (const [name, properties] of Object.entries(experiment.declared?.algorithm_properties || {})) {
+          declaredProperties[name] = { ...(declaredProperties[name] || {}), ...(properties || {}) };
+        }
+      }
+      const algorithmMap = new Map();
+      for (const experiment of experiments) {
+        for (const algorithm of experiment.resolved?.algorithms || []) {
+          if (!algorithmMap.has(algorithm.name)) {
+            const definition = declaredDefinitions.get(algorithm.name) || {};
+            algorithmMap.set(algorithm.name, {
+              name: algorithm.name,
+              base: definition.base || algorithm.base || '',
+              args: definition.args ?? algorithm.args ?? '',
+              properties: guidedPropertiesForAlgorithm({
+                ...algorithm,
+                base: definition.base || algorithm.base || '',
+                declaredProperties: declaredProperties[algorithm.name] || {},
+              }, describe),
+            });
+          }
+        }
+      }
+      const basePath = model?.settings?.benchmark_base_path || state.settings?.benchmark_base_path || '';
+      const formExperiments = experiments.map((experiment, index) => {
+        const declared = experiment.declared || {};
+        const graphValues = guidedLineList(declared.graphs?.length ? declared.graphs : (experiment.resolved?.graphs || []).map(graph => graph.spec));
+        return {
+          function: experiment.experiment?.function || `Experiment${index + 1}`,
+          algorithms: guidedTextList(declared.algorithms?.length ? declared.algorithms : (experiment.resolved?.algorithms || []).map(algorithm => algorithm.name)),
+          graphs: graphValues.length ? graphValues : (basePath ? [basePath] : []),
+          ks: guidedTextList(declared.ks || []),
+          seeds: guidedTextList(declared.seeds || []),
+          epsilons: guidedTextList(declared.epsilons || []),
+          topologies: guidedTextList(declared.topologies || []),
+          timelimit: declared.timelimit || '',
+          timelimit_per_instance: declared.timelimit_per_instance || '',
+        };
+      });
+      return {
+        system: first.experiment?.system || describe.systems?.[0]?.name || 'slurm',
+        properties: guidedPropertyRows(first.declared?.global_properties || {}),
+        algorithm_definitions: Array.from(algorithmMap.values()),
+        experiments: formExperiments.length ? formExperiments : [{
+          function: 'ExperimentWeb',
+          algorithms: Array.from(algorithmMap.keys()),
+          graphs: basePath ? [basePath] : [],
+          ks: ['2'],
+          seeds: ['1'],
+          epsilons: ['0.03'],
+          topologies: ['1x1x1'],
+          timelimit: '',
+          timelimit_per_instance: '',
+        }],
+      };
+    }
+    function guidedInput(className, value = '', placeholder = '') {
+      const input = document.createElement('input');
+      input.className = className;
+      input.value = value ?? '';
+      input.placeholder = placeholder;
+      return input;
+    }
+    function guidedSelect(className, options, value = '') {
+      const select = document.createElement('select');
+      select.className = className;
+      for (const optionValue of options) {
+        const option = document.createElement('option');
+        option.value = optionValue;
+        option.textContent = optionValue;
+        select.appendChild(option);
+      }
+      if (value && !options.includes(value)) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        select.prepend(option);
+      }
+      select.value = value || options[0] || '';
+      return select;
+    }
+    function guidedField(label, control) {
+      const wrapper = document.createElement('label');
+      wrapper.className = 'guided-field';
+      const title = document.createElement('span');
+      title.className = 'guided-field-label';
+      title.textContent = label;
+      wrapper.appendChild(title);
+      wrapper.appendChild(control);
+      return wrapper;
+    }
+    function markGuidedDirty() {
+      state.guidedDirty = true;
+      clearCheckIndicator();
+    }
+    function removeGuidedCard(button) {
+      button.closest('.guided-card, .guided-row')?.remove();
+      markGuidedDirty();
+    }
+    function renderGuidedPropertyRows(container, properties, ownerClass) {
+      container.innerHTML = '';
+      const rows = properties?.length ? properties : [{ key: '', value: '' }];
+      for (const prop of rows) {
+        const row = document.createElement('div');
+        row.className = `guided-row ${ownerClass}`;
+        row.appendChild(guidedInput('guided-property-key', prop.key || '', 'property'));
+        const value = guidedInput('guided-property-value', prop.value || '', 'value');
+        if (prop.key === 'repo_ref') value.setAttribute('list', 'guided-repo-ref-suggestions');
+        row.appendChild(value);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = 'x';
+        remove.title = 'Remove property';
+        remove.onclick = () => removeGuidedCard(remove);
+        row.appendChild(remove);
+        container.appendChild(row);
+      }
+    }
+    function collectGuidedPropertyRows(container) {
+      return Array.from(container.querySelectorAll('.guided-row')).map(row => ({
+        key: row.querySelector('.guided-property-key')?.value.trim() || '',
+        value: row.querySelector('.guided-property-value')?.value.trim() || '',
+      })).filter(prop => prop.key);
+    }
+    async function fetchGuidedRepoRefs(button) {
+      const card = button.closest('[data-guided-algorithm]');
+      const repoUrl = Array.from(card.querySelectorAll('.guided-algorithm-property')).find(row =>
+        row.querySelector('.guided-property-key')?.value.trim() === 'repo_url'
+      )?.querySelector('.guided-property-value')?.value.trim();
+      if (!repoUrl) {
+        alert('Set repo_url first.');
+        return;
+      }
+      await withBusyButton(button, 'Fetching...', async () => {
+        const data = await api('/api/repo-refs', {
+          method: 'POST',
+          body: JSON.stringify({ repo_url: repoUrl })
+        });
+        const datalist = document.getElementById('guided-repo-ref-suggestions');
+        datalist.innerHTML = '';
+        for (const ref of data.refs || []) {
+          const option = document.createElement('option');
+          option.value = ref.name;
+          option.label = `${ref.kind} ${ref.sha?.slice(0, 10) || ''}`;
+          datalist.appendChild(option);
+        }
+        const repoRef = Array.from(card.querySelectorAll('.guided-algorithm-property')).find(row =>
+          row.querySelector('.guided-property-key')?.value.trim() === 'repo_ref'
+        )?.querySelector('.guided-property-value');
+        if (repoRef) repoRef.focus();
+      });
+    }
+    function renderGuidedAlgorithm(container, algorithm) {
+      const card = document.createElement('article');
+      card.className = 'guided-card';
+      card.dataset.guidedAlgorithm = '1';
+      const header = document.createElement('div');
+      header.className = 'guided-card-header';
+      const title = document.createElement('div');
+      title.className = 'guided-card-title';
+      title.textContent = algorithm.name || 'Algorithm';
+      const actions = document.createElement('div');
+      actions.className = 'guided-inline-actions';
+      const fetch = document.createElement('button');
+      fetch.type = 'button';
+      fetch.textContent = 'Fetch refs';
+      fetch.onclick = () => fetchGuidedRepoRefs(fetch).catch(err => out(String(err)));
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Remove';
+      remove.onclick = () => removeGuidedCard(remove);
+      actions.appendChild(fetch);
+      actions.appendChild(remove);
+      header.appendChild(title);
+      header.appendChild(actions);
+      const grid = document.createElement('div');
+      grid.className = 'guided-grid';
+      grid.appendChild(guidedField('Name', guidedInput('guided-algorithm-name', algorithm.name || '', 'MyVariant')));
+      grid.appendChild(guidedField('Base / alias', guidedSelect('guided-algorithm-base', guidedBaseOptions(), algorithm.base || '')));
+      grid.appendChild(guidedField('CLI arguments', guidedInput('guided-algorithm-args', algorithm.args || '', '-P strong')));
+      const propList = document.createElement('div');
+      propList.className = 'guided-row-list guided-algorithm-properties';
+      renderGuidedPropertyRows(propList, algorithm.properties || [], 'guided-algorithm-property');
+      const addProp = document.createElement('button');
+      addProp.type = 'button';
+      addProp.textContent = 'Add property';
+      addProp.onclick = () => {
+        const rows = collectGuidedPropertyRows(propList);
+        rows.push({ key: '', value: '' });
+        renderGuidedPropertyRows(propList, rows, 'guided-algorithm-property');
+        markGuidedDirty();
+      };
+      card.appendChild(header);
+      card.appendChild(grid);
+      card.appendChild(propList);
+      card.appendChild(addProp);
+      container.appendChild(card);
+    }
+    function renderGuidedGraphRows(container, graphs) {
+      container.innerHTML = '';
+      const rows = graphs?.length ? graphs : [''];
+      for (const graph of rows) {
+        const row = document.createElement('div');
+        row.className = 'guided-row guided-graph-row';
+        const input = guidedInput('guided-graph', graph || '', 'graph file or benchmark set');
+        input.setAttribute('list', 'guided-graph-suggestions');
+        row.appendChild(input);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = 'x';
+        remove.title = 'Remove graph entry';
+        remove.onclick = () => removeGuidedCard(remove);
+        row.appendChild(remove);
+        container.appendChild(row);
+      }
+    }
+    function renderGuidedExperiment(container, experiment) {
+      const card = document.createElement('article');
+      card.className = 'guided-card';
+      card.dataset.guidedExperiment = '1';
+      const header = document.createElement('div');
+      header.className = 'guided-card-header';
+      const title = document.createElement('div');
+      title.className = 'guided-card-title';
+      title.textContent = experiment.function || 'Experiment';
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Remove';
+      remove.onclick = () => removeGuidedCard(remove);
+      header.appendChild(title);
+      header.appendChild(remove);
+      const grid = document.createElement('div');
+      grid.className = 'guided-grid';
+      grid.appendChild(guidedField('Function', guidedInput('guided-experiment-function', experiment.function || '', 'ExperimentName')));
+      grid.appendChild(guidedField('Ks', guidedInput('guided-experiment-ks', (experiment.ks || []).join(' '), '2 4 8')));
+      grid.appendChild(guidedField('Seeds', guidedInput('guided-experiment-seeds', (experiment.seeds || []).join(' '), '1 2 3')));
+      grid.appendChild(guidedField('Epsilons', guidedInput('guided-experiment-epsilons', (experiment.epsilons || []).join(' '), '0.03')));
+      grid.appendChild(guidedField('Threads', guidedInput('guided-experiment-topologies', (experiment.topologies || []).join(' '), '1x1x64')));
+      grid.appendChild(guidedField('Timelimit', guidedInput('guided-experiment-timelimit', experiment.timelimit || '', '01:00:00')));
+      const algorithmChecks = document.createElement('div');
+      algorithmChecks.className = 'guided-check-grid';
+      for (const algorithm of state.guidedForm.algorithm_definitions || []) {
+        const label = document.createElement('label');
+        label.className = 'guided-check';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = algorithm.name;
+        checkbox.checked = (experiment.algorithms || []).includes(algorithm.name);
+        const text = document.createElement('span');
+        text.textContent = algorithm.name;
+        text.title = algorithm.name;
+        label.appendChild(checkbox);
+        label.appendChild(text);
+        algorithmChecks.appendChild(label);
+      }
+      const graphList = document.createElement('div');
+      graphList.className = 'guided-row-list guided-graphs';
+      renderGuidedGraphRows(graphList, experiment.graphs || []);
+      const addGraph = document.createElement('button');
+      addGraph.type = 'button';
+      addGraph.textContent = 'Add graph';
+      addGraph.onclick = () => {
+        const rows = Array.from(graphList.querySelectorAll('.guided-graph')).map(input => input.value.trim()).filter(Boolean);
+        rows.push(state.settings?.benchmark_base_path || '');
+        renderGuidedGraphRows(graphList, rows);
+        markGuidedDirty();
+      };
+      card.appendChild(header);
+      card.appendChild(grid);
+      card.appendChild(guidedField('Algorithms', algorithmChecks));
+      card.appendChild(guidedField('Graphs', graphList));
+      card.appendChild(addGraph);
+      container.appendChild(card);
+    }
+    function renderGuidedEditor() {
+      const box = document.getElementById('guided-output');
+      if (!box) return;
+      const form = state.guidedForm;
+      if (!form) {
+        box.className = 'csv-empty';
+        box.textContent = 'Guided model not loaded.';
+        return;
+      }
+      box.className = 'guided-editor';
+      box.innerHTML = '';
+      const systems = (state.guidedModel?.describe?.systems || []).map(system => system.name).sort();
+      const basics = document.createElement('section');
+      basics.className = 'guided-section';
+      const basicsHeader = document.createElement('div');
+      basicsHeader.className = 'guided-section-header';
+      const basicsTitle = document.createElement('div');
+      basicsTitle.className = 'guided-section-title';
+      basicsTitle.textContent = 'System and properties';
+      const addGlobal = document.createElement('button');
+      addGlobal.type = 'button';
+      addGlobal.textContent = 'Add property';
+      basicsHeader.appendChild(basicsTitle);
+      basicsHeader.appendChild(addGlobal);
+      const basicsGrid = document.createElement('div');
+      basicsGrid.className = 'guided-grid';
+      basicsGrid.appendChild(guidedField('System', guidedSelect('guided-system', systems, form.system || '')));
+      const globalRows = document.createElement('div');
+      globalRows.className = 'guided-row-list guided-global-properties';
+      renderGuidedPropertyRows(globalRows, form.properties || [], 'guided-global-property');
+      addGlobal.onclick = () => {
+        const rows = collectGuidedPropertyRows(globalRows);
+        rows.push({ key: '', value: '' });
+        renderGuidedPropertyRows(globalRows, rows, 'guided-global-property');
+        markGuidedDirty();
+      };
+      basics.appendChild(basicsHeader);
+      basics.appendChild(basicsGrid);
+      basics.appendChild(globalRows);
+      const algorithms = document.createElement('section');
+      algorithms.className = 'guided-section';
+      const algorithmsHeader = document.createElement('div');
+      algorithmsHeader.className = 'guided-section-header';
+      const algorithmsTitle = document.createElement('div');
+      algorithmsTitle.className = 'guided-section-title';
+      algorithmsTitle.textContent = 'Algorithms';
+      const addAlgorithm = document.createElement('button');
+      addAlgorithm.type = 'button';
+      addAlgorithm.textContent = 'Add algorithm';
+      addAlgorithm.onclick = () => {
+        state.guidedForm = collectGuidedForm();
+        state.guidedForm.algorithm_definitions.push({ name: 'NewAlgorithm', base: guidedBaseOptions()[0] || '', args: '', properties: [] });
+        renderGuidedEditor();
+        markGuidedDirty();
+      };
+      algorithmsHeader.appendChild(algorithmsTitle);
+      algorithmsHeader.appendChild(addAlgorithm);
+      const algorithmList = document.createElement('div');
+      algorithmList.className = 'guided-row-list';
+      for (const algorithm of form.algorithm_definitions || []) renderGuidedAlgorithm(algorithmList, algorithm);
+      algorithms.appendChild(algorithmsHeader);
+      algorithms.appendChild(algorithmList);
+      const experiments = document.createElement('section');
+      experiments.className = 'guided-section';
+      const experimentsHeader = document.createElement('div');
+      experimentsHeader.className = 'guided-section-header';
+      const experimentsTitle = document.createElement('div');
+      experimentsTitle.className = 'guided-section-title';
+      experimentsTitle.textContent = 'Experiment functions';
+      const addExperiment = document.createElement('button');
+      addExperiment.type = 'button';
+      addExperiment.textContent = 'Add experiment';
+      addExperiment.onclick = () => {
+        state.guidedForm = collectGuidedForm();
+        state.guidedForm.experiments.push({
+          function: `Experiment${state.guidedForm.experiments.length + 1}`,
+          algorithms: (state.guidedForm.algorithm_definitions || []).map(algorithm => algorithm.name),
+          graphs: state.settings?.benchmark_base_path ? [state.settings.benchmark_base_path] : [],
+          ks: ['2'],
+          seeds: ['1'],
+          epsilons: ['0.03'],
+          topologies: ['1x1x1'],
+          timelimit: '',
+          timelimit_per_instance: '',
+        });
+        renderGuidedEditor();
+        markGuidedDirty();
+      };
+      experimentsHeader.appendChild(experimentsTitle);
+      experimentsHeader.appendChild(addExperiment);
+      const experimentList = document.createElement('div');
+      experimentList.className = 'guided-row-list';
+      for (const experiment of form.experiments || []) renderGuidedExperiment(experimentList, experiment);
+      experiments.appendChild(experimentsHeader);
+      experiments.appendChild(experimentList);
+      box.appendChild(basics);
+      box.appendChild(algorithms);
+      box.appendChild(experiments);
+    }
+    function collectGuidedForm() {
+      const box = document.getElementById('guided-output');
+      return {
+        system: box.querySelector('.guided-system')?.value || 'slurm',
+        properties: collectGuidedPropertyRows(box.querySelector('.guided-global-properties') || document.createElement('div')),
+        algorithm_definitions: Array.from(box.querySelectorAll('[data-guided-algorithm]')).map(card => ({
+          name: card.querySelector('.guided-algorithm-name')?.value.trim() || '',
+          base: card.querySelector('.guided-algorithm-base')?.value.trim() || '',
+          args: card.querySelector('.guided-algorithm-args')?.value.trim() || '',
+          properties: collectGuidedPropertyRows(card.querySelector('.guided-algorithm-properties') || document.createElement('div')),
+        })).filter(algorithm => algorithm.name && algorithm.base),
+        experiments: Array.from(box.querySelectorAll('[data-guided-experiment]')).map(card => ({
+          function: card.querySelector('.guided-experiment-function')?.value.trim() || '',
+          algorithms: Array.from(card.querySelectorAll('.guided-check input:checked')).map(input => input.value),
+          graphs: Array.from(card.querySelectorAll('.guided-graph')).map(input => input.value.trim()).filter(Boolean),
+          ks: guidedTextList(card.querySelector('.guided-experiment-ks')?.value || ''),
+          seeds: guidedTextList(card.querySelector('.guided-experiment-seeds')?.value || ''),
+          epsilons: guidedTextList(card.querySelector('.guided-experiment-epsilons')?.value || ''),
+          topologies: guidedTextList(card.querySelector('.guided-experiment-topologies')?.value || ''),
+          timelimit: card.querySelector('.guided-experiment-timelimit')?.value.trim() || '',
+          timelimit_per_instance: '',
+        })).filter(experiment => experiment.function),
+      };
+    }
+    async function loadBenchmarkSuggestions() {
+      const base = state.settings?.benchmark_base_path || '';
+      if (!base || state.benchmarkSetsFor === base) return;
+      const data = await api('/api/benchmark-sets');
+      state.benchmarkSets = data.sets || [];
+      state.benchmarkSetsFor = base;
+      const datalist = document.getElementById('guided-graph-suggestions');
+      datalist.innerHTML = '';
+      for (const item of state.benchmarkSets) {
+        const option = document.createElement('option');
+        option.value = item.path;
+        option.label = `${item.kind} ${item.relative}`;
+        datalist.appendChild(option);
+      }
+    }
+    async function loadGuidedEditor(force = false) {
+      if (!state.selected || state.selectedArchived || state.shared) return;
+      const selected = state.selected;
+      if (!force && state.guidedFor === selected && state.guidedForm) {
+        renderGuidedEditor();
+        return;
+      }
+      const box = document.getElementById('guided-output');
+      box.className = 'csv-empty';
+      box.textContent = 'Loading guided model from mkexp2 probe and describe...';
+      const [model] = await Promise.all([
+        api(`/api/experiments/${encodeURIComponent(selected)}/guided`),
+        loadUiSettings().catch(() => state.settings),
+      ]);
+      if (state.selected !== selected) return;
+      state.guidedModel = model;
+      state.guidedFor = selected;
+      state.guidedForm = guidedFormFromModel(model);
+      state.guidedDirty = false;
+      await loadBenchmarkSuggestions().catch(err => out(String(err)));
+      renderGuidedEditor();
+    }
+    function renderEditorMode() {
+      const textMode = state.editorMode !== 'guided';
+      document.querySelector('.editor-shell')?.classList.toggle('hidden', !textMode);
+      document.getElementById('guided-editor')?.classList.toggle('hidden', textMode);
+      document.getElementById('editor-mode-text')?.classList.toggle('active', textMode);
+      document.getElementById('editor-mode-guided')?.classList.toggle('active', !textMode);
+      const check = document.getElementById('check');
+      if (check) {
+        check.textContent = textMode ? 'Save' : 'Save';
+        check.title = textMode ? 'Save and validate the Experiment file' : 'Generate and save the Experiment file from the guided form';
+      }
+    }
+    function resetGuidedState() {
+      state.editorMode = 'text';
+      state.guidedModel = null;
+      state.guidedFor = null;
+      state.guidedForm = null;
+      state.guidedDirty = false;
+      renderEditorMode();
+    }
+    async function switchEditorMode(mode) {
+      if (mode === 'guided') {
+        if (state.editorDirty && !state.shared && !state.selectedArchived) {
+          await persistExperiment();
+        }
+        state.editorMode = 'guided';
+        renderEditorMode();
+        await loadGuidedEditor(true);
+        return;
+      }
+      if (state.editorMode === 'guided' && state.guidedForm && !state.shared && !state.selectedArchived) {
+        await renderGuidedExperimentPreview();
+      }
+      state.editorMode = 'text';
+      renderEditorMode();
+    }
+    async function renderGuidedExperimentPreview() {
+      if (!state.selected || state.selectedArchived || state.shared) return null;
+      const selected = state.selected;
+      state.guidedForm = collectGuidedForm();
+      const result = await api(`/api/experiments/${encodeURIComponent(selected)}/guided/render`, {
+        method: 'POST',
+        body: JSON.stringify({ form: state.guidedForm })
+      });
+      if (state.selected !== selected) return null;
+      setEditorValue(result.experiment || '');
+      state.editorDirty = true;
+      state.guidedDirty = false;
+      setSelectedExperimentMetadata(selected, result.experiment_file || result.path, result);
+      clearCheckIndicator();
+      return result;
+    }
+    async function saveGuidedExperiment() {
+      if (!state.selected || state.selectedArchived || state.shared) return;
+      state.guidedForm = collectGuidedForm();
+      const result = await api(`/api/experiments/${encodeURIComponent(state.selected)}/guided`, {
+        method: 'PUT',
+        body: JSON.stringify({ form: state.guidedForm })
+      });
+      setEditorValue(result.experiment || '');
+      state.editorDirty = false;
+      state.guidedDirty = false;
+      setSelectedExperimentMetadata(state.selected, result.experiment_file || result.path, result);
+      await loadAlgorithms(state.selected, { force: true }).catch(err => out(String(err)));
+      clearCheckIndicator();
+      return result;
+    }
+    document.getElementById('guided-editor').addEventListener('input', markGuidedDirty);
+    document.getElementById('guided-editor').addEventListener('change', markGuidedDirty);

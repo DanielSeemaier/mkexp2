@@ -543,6 +543,24 @@ class WebBackendTest(unittest.TestCase):
 
         self.assertEqual(calls, [(["/fake/mkexp2", "init", "Default"], str(exp_path.resolve()))])
 
+    def test_web_frontend_assets_are_split_out_of_python_entrypoint(self):
+        asset_dir = ROOT / "bin" / "mkexp2_web_assets"
+        index = asset_dir / "index.html"
+        styles = asset_dir / "styles.css"
+
+        self.assertTrue(index.is_file())
+        self.assertTrue(styles.is_file())
+        for name in mkexp2_web.WEB_APP_JS_FILES:
+            self.assertTrue((asset_dir / name).is_file(), name)
+
+        self.assertIn("__MKEXP2_STYLES__", index.read_text(encoding="utf-8"))
+        self.assertIn("__MKEXP2_APP_JS__", index.read_text(encoding="utf-8"))
+        self.assertIn(".app", styles.read_text(encoding="utf-8"))
+        self.assertIn("const PLOT_RELOAD_DELAY_MS", mkexp2_web.load_app_js())
+        self.assertNotIn("__MKEXP2_STYLES__", mkexp2_web.HTML)
+        self.assertNotIn("__MKEXP2_APP_JS__", mkexp2_web.HTML)
+        self.assertLess(len((ROOT / "bin" / "mkexp2_web.py").read_text(encoding="utf-8").splitlines()), 5000)
+
     def test_html_contains_syntax_highlighting_editor(self):
         self.assertIn('id="experiment-highlight"', mkexp2_web.HTML)
         self.assertIn("function highlightExperiment", mkexp2_web.HTML)

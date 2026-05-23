@@ -1,0 +1,708 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mkexp2</title>
+  <script>
+    (() => {
+      const theme = localStorage.getItem('mkexp2-theme') || 'light';
+      const systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (theme === 'dark' || (theme === 'system' && systemDark)) document.documentElement.dataset.theme = 'dark';
+    })();
+  </script>
+  <style>
+__MKEXP2_STYLES__
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <h1>mkexp2</h1>
+        <div class="brand-actions">
+          <button id="create-open" class="icon-button" aria-label="Create experiment" title="Create experiment">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+          </button>
+          <button id="git-open" class="icon-button" aria-label="Git status" title="Git status">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M8.5 7.5 16 15"/></svg>
+          </button>
+          <button id="settings-open" class="icon-button" aria-label="Settings" title="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.35 1.05V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 8.6 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.05-.35H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 8.6a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .35-1.05V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15.4 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 .6 1 1.65 1.65 0 0 0 1.05.35H21a2 2 0 1 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div id="experiments" class="experiment-list"></div>
+      <div class="archive-nav">
+        <button id="archive-open" class="archive-nav-button" aria-label="Show archived experiments">Archive</button>
+      </div>
+      <section class="sidebar-nodes">
+        <div class="sidebar-section-header">
+          <div class="sidebar-section-title">Nodes</div>
+          <div class="sidebar-section-actions">
+            <button id="queue-open" class="icon-button" aria-label="Show Slurm queue" title="Show Slurm queue">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>
+            </button>
+            <button id="refresh-status" class="icon-button" aria-label="Reload node status" title="Reload node status">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="slurm-status" class="node-list muted">No status loaded.</div>
+      </section>
+    </aside>
+    <aside id="archive-pane" class="archive-pane" aria-label="Archived experiments">
+      <div class="archive-pane-header">
+        <div class="archive-pane-title">Archive</div>
+        <div id="archive-summary" class="csv-summary">No archived experiments loaded.</div>
+      </div>
+      <input id="archive-search" class="archive-search" type="search" placeholder="Search archived experiments">
+      <div id="archive-list" class="archive-list csv-empty">Open Archive to load archived experiments.</div>
+    </aside>
+    <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" tabindex="0"></div>
+    <div id="create-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="create-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="create-modal-title" class="modal-title">Create Experiment</div>
+            <div id="create-summary" class="csv-summary">Choose a name and preset.</div>
+          </div>
+          <button id="create-close" class="icon-button" aria-label="Close create dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="create-form">
+            <label class="create-field">
+              <span class="create-field-label">Experiment name</span>
+              <div class="template-name-row">
+                <span id="create-name-prefix" class="template-name-part"></span>
+                <input id="create-name" placeholder="new experiment">
+                <span id="create-name-suffix" class="template-name-part"></span>
+              </div>
+            </label>
+            <label class="create-field">
+              <span class="create-field-label">Preset</span>
+              <select id="create-preset">
+                <option value="">Loading presets...</option>
+              </select>
+            </label>
+            <label class="checkbox-line">
+              <input id="create-template-override" type="checkbox">
+              <span>Override name template</span>
+            </label>
+            <div id="create-template-controls" class="template-controls hidden">
+              <label class="create-field">
+                <span class="create-field-label">Name template</span>
+                <input id="create-template" spellcheck="false">
+              </label>
+            </div>
+            <div id="create-preview" class="csv-summary"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="create-cancel">Cancel</button>
+          <button id="create-submit" class="primary">Create</button>
+        </div>
+      </div>
+    </div>
+    <div id="git-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="git-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="git-modal-title" class="modal-title">Experiment Repo Git</div>
+            <div id="git-repo-summary" class="csv-summary">No status loaded.</div>
+          </div>
+          <button id="git-close" class="icon-button" aria-label="Close Git dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div id="git-status" class="git-status-grid"></div>
+          <label class="git-message">
+            <span class="csv-summary">Commit message</span>
+            <textarea id="git-message" placeholder="chore: update experiment results"></textarea>
+          </label>
+          <div id="git-output" class="csv-empty">Open the dialog to load repository status.</div>
+        </div>
+        <div class="modal-footer">
+          <button id="git-refresh" class="icon-button" aria-label="Reload Git status" title="Reload Git status">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+          </button>
+          <button id="git-push" class="primary">Push</button>
+        </div>
+      </div>
+    </div>
+    <div id="share-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="share-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="share-modal-title" class="modal-title">Share Experiment</div>
+            <div id="share-summary" class="csv-summary">Create a link for viewing this experiment without a token.</div>
+          </div>
+          <button id="share-close" class="icon-button" aria-label="Close share dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="share-fields">
+            <label class="share-field">
+              <span class="share-field-label">SSH tunnel</span>
+              <textarea id="share-ssh" readonly spellcheck="false"></textarea>
+            </label>
+            <label class="share-field">
+              <span class="share-field-label">Share link</span>
+              <input id="share-link" readonly spellcheck="false">
+            </label>
+            <label class="share-field">
+              <span class="share-field-label">Colleague username</span>
+              <input id="share-username" autocomplete="username" spellcheck="false" placeholder="username">
+            </label>
+            <label class="share-field">
+              <span class="share-field-label">One-line command</span>
+              <div class="share-command-row">
+                <textarea id="share-command" readonly spellcheck="false"></textarea>
+                <button id="share-copy-command">Copy</button>
+              </div>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="queue-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="queue-modal-title">
+      <div class="modal queue-modal">
+        <div class="modal-header">
+          <div>
+            <div id="queue-modal-title" class="modal-title">Slurm Queue</div>
+            <div id="queue-summary" class="csv-summary">No queue loaded.</div>
+          </div>
+          <button id="queue-close" class="icon-button" aria-label="Close Slurm queue" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div id="queue-output" class="csv-empty">Open the dialog to load squeue output.</div>
+        </div>
+        <div class="modal-footer">
+          <button id="queue-cancel-all" class="queue-cancel-all">Cancel all</button>
+          <button id="queue-refresh" class="icon-button" aria-label="Reload Slurm queue" title="Reload Slurm queue">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div id="settings-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+      <div class="modal settings-modal">
+        <div class="modal-header">
+          <div>
+            <div id="settings-modal-title" class="modal-title">Settings</div>
+          </div>
+          <button id="settings-close" class="icon-button" aria-label="Close settings" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="settings-token">
+            <label for="token">Session token</label>
+            <input id="token" type="password" placeholder="Session token">
+          </div>
+          <div class="settings-section">
+            <div class="settings-tool-title">Workspaces</div>
+            <div id="workspace-list" class="workspace-list csv-empty">No workspaces loaded.</div>
+            <div class="workspace-create-row">
+              <label>
+                <span class="csv-summary">Directory</span>
+                <input id="workspace-path" type="text" placeholder="/path/to/experiment-repo">
+              </label>
+              <button id="workspace-create" class="icon-text-button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                <span>Create</span>
+              </button>
+            </div>
+            <div id="workspace-output" class="csv-empty hidden"></div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-tool-title">Appearance</div>
+            <label class="theme-toggle" for="theme-select">
+              <span>
+                <span class="theme-toggle-title">Appearance</span>
+                <span class="theme-toggle-desc">Use a fixed theme or follow the system color scheme.</span>
+              </span>
+              <select id="theme-select">
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+                <option value="system">System</option>
+              </select>
+            </label>
+          </div>
+          <div class="settings-section">
+            <div class="settings-tool-title">Guided editor</div>
+            <label class="create-field">
+              <span class="create-field-label">Benchmark set base path</span>
+              <input id="benchmark-base-path" type="text" placeholder="/nfs/work/graph_benchmark_sets">
+            </label>
+            <div class="csv-summary">Used to prefill and autocomplete Graph entries in guided editing. Leave empty to disable.</div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-tool-title">Results columns</div>
+            <div id="settings-hidden-columns" class="settings-hidden-columns csv-empty">No globally hidden columns loaded.</div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-tool-title">Tags</div>
+            <div class="tag-manager-grid">
+              <label>
+                <span class="csv-summary">Tag name</span>
+                <input id="tag-name" type="text" placeholder="Codex">
+              </label>
+              <div class="tag-color-field">
+                <span class="csv-summary">Border color</span>
+                <input id="tag-color" type="hidden" value="#2563eb">
+                <div id="tag-color-palette" class="tag-color-palette" role="radiogroup" aria-label="Border color"></div>
+              </div>
+              <button id="tag-save">Save Tag</button>
+            </div>
+            <div id="tag-list" class="tag-list"></div>
+          </div>
+          <div class="settings-tool">
+            <div>
+              <div class="settings-tool-title">Codex cleanup</div>
+              <div class="csv-summary">Archive active Codex-tagged experiments unless they are starred or submit-locked.</div>
+            </div>
+            <button id="archive-codex-experiments" class="icon-text-button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+              <span>Archive Codex</span>
+            </button>
+          </div>
+          <div id="archive-codex-output" class="csv-empty hidden"></div>
+          <div class="settings-tool">
+            <div>
+              <div class="settings-tool-title">Archive subdirectory</div>
+              <div class="csv-summary">Archive active experiments in one subdirectory, skipping starred or submit-locked experiments.</div>
+            </div>
+            <div class="settings-inline-tool">
+              <select id="archive-subdir-select" title="Subdirectory"></select>
+              <button id="archive-subdir-experiments" class="icon-text-button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+                <span>Archive</span>
+              </button>
+            </div>
+          </div>
+          <div id="archive-subdir-output" class="csv-empty hidden"></div>
+          <div class="settings-tool">
+            <div>
+              <div class="settings-tool-title">Spack R library cache</div>
+              <div id="spack-cache-summary" class="csv-summary">Not loaded.</div>
+            </div>
+            <button id="spack-cache-refresh" class="icon-text-button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+              <span>Resolve Spack R cache</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="copy-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="copy-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="copy-modal-title" class="modal-title">Copy Experiment</div>
+            <div id="copy-summary" class="csv-summary">Create a new experiment from the current Experiment file.</div>
+          </div>
+          <button id="copy-close" class="icon-button" aria-label="Close copy dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="create-form">
+            <label class="create-field">
+              <span class="create-field-label">New experiment name</span>
+              <div class="template-name-row">
+                <span id="copy-name-prefix" class="template-name-part"></span>
+                <input id="copy-name" placeholder="new experiment">
+                <span id="copy-name-suffix" class="template-name-part"></span>
+              </div>
+            </label>
+            <label class="checkbox-line">
+              <input id="copy-template-override" type="checkbox">
+              <span>Override name template</span>
+            </label>
+            <div id="copy-template-controls" class="template-controls hidden">
+              <label class="create-field">
+                <span class="create-field-label">Name template</span>
+                <input id="copy-template" spellcheck="false">
+              </label>
+            </div>
+            <div id="copy-preview" class="csv-summary"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="copy-cancel">Cancel</button>
+          <button id="copy-submit" class="primary">Copy</button>
+        </div>
+      </div>
+    </div>
+    <div id="download-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="download-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="download-modal-title" class="modal-title">Download Experiment</div>
+            <div id="download-summary" class="csv-summary">Choose which top-level directories to include.</div>
+          </div>
+          <button id="download-close" class="icon-button" aria-label="Close download dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="create-form">
+            <div id="download-root-files" class="csv-summary"></div>
+            <div class="button-row">
+              <button id="download-select-all" type="button">All</button>
+              <button id="download-select-none" type="button">None</button>
+            </div>
+            <div id="download-directories" class="chips"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="download-cancel">Cancel</button>
+          <button id="download-submit" class="primary">Download</button>
+        </div>
+      </div>
+    </div>
+    <div id="submit-preview-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="submit-preview-modal-title">
+      <div class="modal submit-preview-modal">
+        <div class="modal-header">
+          <div>
+            <div id="submit-preview-modal-title" class="modal-title">Partitioner Invocations</div>
+            <div id="submit-preview-summary" class="csv-summary">No invocation preview loaded.</div>
+          </div>
+          <button id="submit-preview-close" class="icon-button" aria-label="Close invocation preview" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div id="submit-preview-output" class="csv-empty">Open the dialog to inspect generated partitioner invocations.</div>
+        </div>
+      </div>
+    </div>
+    <div id="plot-generate-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="plot-generate-modal-title">
+      <div class="modal plot-generate-modal">
+        <div class="modal-header">
+          <div>
+            <div id="plot-generate-modal-title" class="modal-title">Add Plot Artifacts</div>
+            <div class="csv-summary">Choose plot types, data sources, and an artifact label.</div>
+          </div>
+          <button id="plot-generate-close" class="icon-button" aria-label="Close plot generation dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="modal-body plot-manager">
+          <div class="plot-grid">
+            <section class="plot-box">
+              <div class="plot-box-title">Plot Types</div>
+              <div id="plot-catalog" class="csv-empty">Loading plot types...</div>
+            </section>
+            <section class="plot-box">
+              <div class="plot-source-actions">
+                <div class="plot-box-title">Sources</div>
+                <button id="add-plot-source" class="small-button">Add CSV</button>
+              </div>
+              <div id="plot-sources" class="csv-empty">Loading sources...</div>
+            </section>
+          </div>
+          <label>
+            <span class="csv-summary">Artifact label</span>
+            <input id="plot-label" type="text" placeholder="Auto-generated label">
+          </label>
+        </div>
+        <div class="modal-footer plot-generate-footer">
+          <label class="plot-option" id="plot-no-docker-label" title="Use host R instead of Docker">
+            <input id="plot-no-docker" type="checkbox">
+            <span>No docker</span>
+          </label>
+          <div class="modal-footer-actions">
+            <button id="plot-generate-cancel">Cancel</button>
+            <button id="plot-results" class="primary">Generate</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="plot-source-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="plot-source-modal-title">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div id="plot-source-modal-title" class="modal-title">Add CSV Source</div>
+            <div id="plot-source-modal-summary" class="csv-summary">Load CSV files from other experiments.</div>
+          </div>
+          <button id="plot-source-close" class="icon-button" aria-label="Close CSV source dialog" title="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div id="plot-source-modal-list" class="plot-source-modal-list csv-empty">No CSV files loaded.</div>
+        </div>
+        <div class="modal-footer">
+          <button id="plot-source-close-footer">Close</button>
+        </div>
+      </div>
+    </div>
+    <main class="main">
+      <div class="view-tabs">
+        <button class="view-tab active" data-view="experiment-view">Experiment</button>
+        <button class="view-tab" data-view="results-view">Results</button>
+        <button class="view-tab" data-view="logs-view">Logs</button>
+        <button class="view-tab" data-view="plots-view">Plots</button>
+        <span class="view-tabs-spacer">
+          <button id="cancel-submit-nav" class="submit-cancel-nav hidden" title="Cancel submitted jobs for this experiment">Cancel</button>
+          <button id="unarchive-nav" class="unarchive-nav hidden" title="Unarchive this experiment">Unarchive</button>
+        </span>
+        <div class="tag-controls" aria-label="Experiment tag controls">
+          <select id="experiment-tag-select" title="Experiment tag"></select>
+        </div>
+        <button id="copy-experiment" class="icon-button" aria-label="Copy experiment" title="Copy experiment">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+        </button>
+        <button id="share-experiment" class="icon-button" aria-label="Share experiment" title="Share experiment">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.6 6.8-4.2"/><path d="m8.6 13.4 6.8 4.2"/></svg>
+        </button>
+        <button id="download-experiment" class="icon-button" aria-label="Download experiment archive" title="Download experiment archive">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        </button>
+      </div>
+      <section id="experiment-view" class="view-panel active">
+        <section class="grid">
+          <div class="panel">
+            <div class="panel-header experiment-editor-header">
+              <div class="experiment-editor-heading">
+                <div class="panel-title" id="selected-title">Experiment</div>
+                <div class="muted experiment-editor-date" id="selected-date"></div>
+              </div>
+              <div class="actions check-action">
+                <span id="check-indicator" class="check-indicator hidden" aria-live="polite"></span>
+                <div class="editor-mode-toggle" role="group" aria-label="Experiment editor mode">
+                  <button id="editor-mode-text" type="button" class="active">Text</button>
+                  <button id="editor-mode-guided" type="button">Guided</button>
+                </div>
+                <button id="check" title="Save and validate the Experiment file">Save</button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="editor-shell">
+                <pre id="experiment-highlight" class="editor-highlight" aria-hidden="true"></pre>
+                <textarea id="experiment-editor" spellcheck="false" wrap="off"></textarea>
+              </div>
+              <div id="guided-editor" class="guided-editor hidden">
+                <div class="guided-toolbar">
+                  <div class="guided-hint">Built from mkexp2 probe/describe metadata. Saving regenerates the Experiment file.</div>
+                  <button id="guided-reload" type="button">Reload model</button>
+                </div>
+                <div id="guided-output" class="csv-empty">Switch to Guided to load the form.</div>
+                <datalist id="guided-graph-suggestions"></datalist>
+                <datalist id="guided-repo-ref-suggestions"></datalist>
+              </div>
+              <div class="muted experiment-editor-meta" id="selected-path"></div>
+            </div>
+          </div>
+          <div class="stack">
+            <section class="panel submit-panel">
+              <div class="panel-header">
+                <div class="panel-title">Algorithm Selection</div>
+                <div class="submit-header-actions">
+                  <button id="submit-preview-open" class="icon-button" aria-label="Show generated partitioner invocations" title="Show generated partitioner invocations">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                  </button>
+                  <button class="primary" id="submit" aria-label="Submit selected algorithms" title="Submit selected algorithms">Submit</button>
+                </div>
+              </div>
+              <div class="panel-body stack">
+                <div id="algorithm-list" class="chips"></div>
+              </div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <div class="panel-title">Progress</div>
+                </div>
+                <button id="refresh-progress" class="icon-button" aria-label="Reload progress" title="Reload progress">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+                </button>
+              </div>
+              <div class="panel-body">
+                <div id="progress-output" class="csv-empty">Run progress to count finished log files against expected runs.</div>
+              </div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <div class="panel-title">Description</div>
+                </div>
+                <div class="actions description-edit-actions">
+                  <button id="description-edit">Edit</button>
+                </div>
+              </div>
+              <div class="panel-body description-body">
+                <div id="description-rendered" class="csv-empty">No description yet.</div>
+                <textarea id="description-editor" class="description-editor hidden" spellcheck="true"></textarea>
+                <div id="description-actions" class="description-actions hidden">
+                  <button id="description-cancel">Cancel</button>
+                  <button id="description-save" class="primary">Save</button>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+        <section class="panel describe-panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Reference</div>
+            </div>
+            <button id="describe-toggle">Show Reference</button>
+          </div>
+          <div id="describe-body" class="panel-body hidden">
+            <div class="describe-toolbar">
+              <input id="describe-search" type="search" placeholder="Search algorithms, aliases, properties, systems">
+              <div class="describe-filter" role="group" aria-label="Reference category">
+                <button type="button" data-describe-filter="algorithms">Algorithms</button>
+                <button type="button" data-describe-filter="dsl">DSL</button>
+                <button type="button" data-describe-filter="systems">Systems</button>
+                <button type="button" data-describe-filter="presets">Presets</button>
+                <button type="button" data-describe-filter="all">All</button>
+              </div>
+            </div>
+            <div id="describe-output" class="describe-output">
+              <div class="probe-placeholder">Open the reference to load available systems, partitioners, aliases, presets, and DSL commands.</div>
+            </div>
+          </div>
+        </section>
+        <section class="panel probe-panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Probe</div>
+            </div>
+            <button id="probe-run">Run Probe</button>
+          </div>
+          <div class="panel-body">
+            <div id="probe-output" class="probe-output">
+              <div class="probe-placeholder">Run Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>
+            </div>
+          </div>
+        </section>
+        <section class="panel danger-zone">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Danger Zone</div>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div class="danger-actions">
+              <button id="clear-submit-lock">Unlock submit</button>
+              <button id="rename-experiment">Rename Experiment</button>
+              <button id="archive-experiment">Archive Experiment</button>
+              <button id="delete-experiment" class="danger">Delete Experiment</button>
+            </div>
+          </div>
+        </section>
+      </section>
+      <section id="results-view" class="view-panel">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Results</div>
+            </div>
+            <div class="actions">
+              <button id="parse-results">Parse Logs</button>
+              <button id="load-results" class="icon-button" aria-label="Reload CSVs" title="Reload CSVs">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <section class="results-stats">
+              <div class="stats-inline-header">
+                <div>
+                  <div class="panel-title">Stats</div>
+                  <div id="stats-summary" class="csv-summary">No stats loaded.</div>
+                </div>
+                <button id="load-stats" class="icon-text-button" aria-label="Generate stats" title="Generate stats">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+                  <span>Generate Stats</span>
+                </button>
+              </div>
+              <div id="stats-output" class="csv-empty">Generate stats to summarize parsed CSV results.</div>
+            </section>
+            <div class="csv-tools">
+              <div class="result-toolbar">
+                <div id="result-file-tabs" class="result-file-tabs"></div>
+                <div class="column-actions">
+                  <button id="columns-all">All columns</button>
+                  <button id="columns-none">No columns</button>
+                </div>
+              </div>
+              <div id="column-selector" class="column-selector"></div>
+            </div>
+            <div id="results" class="csv-empty">Select an experiment, then load CSV results.</div>
+          </div>
+        </section>
+      </section>
+      <section id="logs-view" class="view-panel">
+        <section class="panel logs-panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Logs</div>
+            </div>
+            <button id="reload-logs" class="icon-button" aria-label="Reload logs" title="Reload logs">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+            </button>
+          </div>
+          <div class="panel-body">
+            <div class="logs-browser">
+              <div class="logs-sidebar">
+                <div id="logs-path" class="logs-path"></div>
+                <div id="logs-list" class="logs-list">
+                  <div class="csv-empty">Open the Logs tab to load the log directory.</div>
+                </div>
+              </div>
+              <div id="log-content" class="log-content">
+                <div class="csv-empty">Select a log file to load its content.</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+      <section id="plots-view" class="view-panel">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Plots</div>
+            </div>
+            <div class="actions plot-actions check-action">
+              <span id="plot-indicator" class="check-indicator hidden" aria-live="polite"></span>
+              <button id="plot-add-open" class="icon-text-button" aria-label="Create plot artifacts" title="Create plot artifacts">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                <span>Create</span>
+              </button>
+            </div>
+          </div>
+          <div class="panel-body plot-manager">
+            <div class="plot-artifact-browser">
+              <section class="plot-box plot-artifact-sidebar">
+                <div class="plot-artifact-toolbar">
+                  <div class="plot-box-title">Artifacts</div>
+                  <div class="plot-artifact-view-toggle" role="group" aria-label="Plot artifact navigation">
+                    <button id="plot-view-sets" type="button" class="active">Sets</button>
+                    <button id="plot-view-types" type="button">Types</button>
+                  </div>
+                </div>
+                <div id="plot-artifacts" class="csv-empty">No plot artifacts loaded.</div>
+              </section>
+              <div id="plot-file" class="csv-empty">Select a plot artifact to preview it.</div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+  <script>
+__MKEXP2_APP_JS__
+  </script>
+</body>
+</html>

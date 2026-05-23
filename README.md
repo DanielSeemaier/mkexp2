@@ -416,6 +416,12 @@ Pass `--web-token TOKEN` to reuse a fixed session token across restarts.
 Set `MKEXP2_WEB_PUBLIC_HOST` when the machine's short hostname is not the SSH
 host colleagues should use in generated share commands.
 
+The web frontend is intentionally kept outside the Python backend: markup lives
+in `bin/mkexp2_web_assets/index.html`, styles in
+`bin/mkexp2_web_assets/styles.css`, and JavaScript in ordered chunks under
+`bin/mkexp2_web_assets/js/`. `bin/mkexp2_web.py` loads and inlines those assets
+at startup so the browser still receives one self-contained page.
+
 The UI can:
 
 - list repo-relative experiment directories containing an `Experiment` file,
