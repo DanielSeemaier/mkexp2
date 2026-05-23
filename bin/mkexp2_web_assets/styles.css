@@ -433,9 +433,9 @@
       min-width: 0;
     }
     .folder-summary {
-      display: flex;
+      display: grid;
+      grid-template-columns: 16px minmax(0, 1fr) auto;
       align-items: center;
-      justify-content: space-between;
       gap: 8px;
       min-height: 38px;
       padding: 8px 10px;
@@ -444,6 +444,27 @@
       background: var(--surface-2);
       cursor: pointer;
       list-style: none;
+      transition: background-color 120ms ease, border-color 120ms ease;
+    }
+    .folder-summary:hover,
+    .folder-summary:focus-visible {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      outline: none;
+    }
+    .folder-summary::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-right: 2px solid var(--muted);
+      border-bottom: 2px solid var(--muted);
+      transform: rotate(-45deg);
+      transform-origin: center;
+      transition: transform 120ms ease;
+      justify-self: center;
+    }
+    .experiment-folder[open] > .folder-summary::before {
+      transform: rotate(45deg);
     }
     .folder-summary::-webkit-details-marker {
       display: none;
@@ -455,16 +476,12 @@
       white-space: nowrap;
       font-weight: 650;
     }
-    .folder-name::before {
-      content: "> ";
-      color: var(--muted);
-      font-weight: 750;
-    }
-    .experiment-folder[open] > .folder-summary .folder-name::before {
-      content: "v ";
-    }
     .folder-count {
       color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 1px 7px;
       white-space: nowrap;
       font-size: 12px;
       font-variant-numeric: tabular-nums;
@@ -2660,6 +2677,10 @@
       text-overflow: ellipsis;
       white-space: nowrap;
       color: var(--muted);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 9px;
       font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     .logs-list {
@@ -2672,7 +2693,7 @@
     }
     .log-entry {
       display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
       align-items: center;
       gap: 8px;
       width: 100%;
@@ -2680,10 +2701,83 @@
       min-height: 34px;
       padding: 7px 9px;
       text-align: left;
+      background: var(--surface);
+      transition: background-color 120ms ease, border-color 120ms ease;
+    }
+    .log-entry:hover,
+    .log-entry:focus-visible {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      outline: none;
     }
     .log-entry.active {
       border-color: var(--accent);
       background: var(--accent-soft);
+    }
+    .log-entry:hover .log-entry-icon,
+    .log-entry:focus-visible .log-entry-icon,
+    .log-entry.active .log-entry-icon {
+      color: var(--accent);
+    }
+    .log-entry-icon {
+      position: relative;
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      color: var(--muted);
+    }
+    .log-entry.dir .log-entry-icon::before,
+    .log-entry.dir .log-entry-icon::after {
+      content: "";
+      position: absolute;
+      border: 1.6px solid currentColor;
+    }
+    .log-entry.dir .log-entry-icon::before {
+      left: 1px;
+      top: 6px;
+      width: 14px;
+      height: 8px;
+      border-radius: 2px;
+      background: inherit;
+    }
+    .log-entry.dir .log-entry-icon::after {
+      left: 2px;
+      top: 3px;
+      width: 7px;
+      height: 4px;
+      border-bottom: 0;
+      border-radius: 2px 2px 0 0;
+    }
+    .log-entry.file .log-entry-icon::before {
+      content: "";
+      position: absolute;
+      left: 3px;
+      top: 2px;
+      width: 10px;
+      height: 13px;
+      border: 1.6px solid currentColor;
+      border-radius: 2px;
+      background: inherit;
+    }
+    .log-entry.file .log-entry-icon::after {
+      content: "";
+      position: absolute;
+      right: 3px;
+      top: 2px;
+      width: 4px;
+      height: 4px;
+      border-left: 1.6px solid currentColor;
+      border-bottom: 1.6px solid currentColor;
+      background: inherit;
+    }
+    .log-entry.up .log-entry-icon::before {
+      content: "..";
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font: 700 13px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
     .log-entry-name {
       min-width: 0;

@@ -876,8 +876,9 @@
       list.innerHTML = '';
       if (dir) {
         const up = document.createElement('button');
-        up.className = 'log-entry';
-        up.innerHTML = '<span>..</span><span class="log-entry-name">Parent directory</span><span class="log-entry-meta"></span>';
+        up.className = 'log-entry up';
+        up.title = 'Open parent directory';
+        up.innerHTML = '<span class="log-entry-icon" aria-hidden="true"></span><span class="log-entry-name">Parent directory</span><span class="log-entry-meta"></span>';
         up.onclick = () => withBusyButton(up, 'Loading...', () => loadLogs(parentLogDir(dir))).catch(err => out(String(err)));
         list.appendChild(up);
       }
@@ -891,9 +892,13 @@
       }
       for (const entry of listing.entries) {
         const button = document.createElement('button');
-        button.className = 'log-entry' + (entry.type === 'file' && state.selectedLog === entry.path ? ' active' : '');
+        button.className = `log-entry ${entry.type === 'dir' ? 'dir' : 'file'}`
+          + (entry.type === 'file' && state.selectedLog === entry.path ? ' active' : '');
+        button.title = entry.path;
+        button.setAttribute('aria-label', `${entry.type === 'dir' ? 'Open directory' : 'Open file'} ${entry.path}`);
         const icon = document.createElement('span');
-        icon.textContent = entry.type === 'dir' ? '>' : '';
+        icon.className = 'log-entry-icon';
+        icon.setAttribute('aria-hidden', 'true');
         const name = document.createElement('span');
         name.className = 'log-entry-name';
         name.textContent = entry.name;
