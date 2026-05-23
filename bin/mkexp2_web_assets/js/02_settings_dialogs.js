@@ -378,32 +378,40 @@
     function zshSingleQuote(value) {
       return `'${String(value ?? '').replace(/'/g, `'\\''`)}'`;
     }
-    async function insertPostprocessDsl() {
-      if (!state.selected || state.shared || state.selectedArchived) return;
-      await savePostprocessDefaults();
-      const defaults = postprocessDefaultsFromFields();
+    function postprocessDslSnippet(defaults) {
+      const resolved = defaults || postprocessDefaults();
       const lines = [
-        '',
         '# Automatic cleanup-job postprocessing',
         'Property postprocess.auto true',
         'Property postprocess.parse true',
-        `Property postprocess.plots ${zshSingleQuote(defaults.plots || 'default')}`,
+        `Property postprocess.plots ${zshSingleQuote(resolved.plots || 'default')}`,
       ];
-      if (defaults.email_to) lines.push(`Property postprocess.email.to ${zshSingleQuote(defaults.email_to)}`);
-      if (defaults.email_subject) lines.push(`Property postprocess.email.subject ${zshSingleQuote(defaults.email_subject)}`);
-      if (defaults.email_body) {
-        const body = defaults.email_body.replace(/\r?\n/g, '\\n');
+      if (resolved.email_to) lines.push(`Property postprocess.email.to ${zshSingleQuote(resolved.email_to)}`);
+      if (resolved.email_subject) lines.push(`Property postprocess.email.subject ${zshSingleQuote(resolved.email_subject)}`);
+      if (resolved.email_body) {
+        const body = resolved.email_body.replace(/\r?\n/g, '\\n');
         lines.push(`Property postprocess.email.body ${zshSingleQuote(body)}`);
       }
-      const snippet = `${lines.join('\n')}\n`;
-      if (state.editorMode === 'guided') {
-        await switchEditorMode('text');
-      }
-      const next = editor.value.trimEnd() + snippet;
+      return `${lines.join('\n')}\n`;
+    }
+    function insertPostprocessDslAtCursor() {
+      if (!state.selected || state.shared || state.selectedArchived) return;
+      if (state.editorMode === 'guided') return;
+      const snippet = postprocessDslSnippet(postprocessDefaults());
+      const start = Number.isInteger(editor.selectionStart) ? editor.selectionStart : editor.value.length;
+      const end = Number.isInteger(editor.selectionEnd) ? editor.selectionEnd : start;
+      const prefix = editor.value.slice(0, start);
+      const suffix = editor.value.slice(end);
+      const leadingNewline = prefix && !prefix.endsWith('\n') ? '\n' : '';
+      const trailingNewline = suffix && !suffix.startsWith('\n') ? '\n' : '';
+      const inserted = `${leadingNewline}${snippet}${trailingNewline}`;
+      const next = `${prefix}${inserted}${suffix}`;
       setEditorValue(next);
+      const cursor = prefix.length + inserted.length;
+      editor.focus();
+      editor.setSelectionRange(cursor, cursor);
       state.editorDirty = true;
       renderEditorMode();
-      closeSettingsDialog();
     }
     function decodeColumnSignature(signature) {
       const text = String(signature || '');

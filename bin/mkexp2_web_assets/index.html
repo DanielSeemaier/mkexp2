@@ -264,13 +264,9 @@ __MKEXP2_STYLES__
               <textarea id="postprocess-email-body" spellcheck="true" placeholder="Experiment: {experiment_id}"></textarea>
             </label>
             <div class="settings-tool">
-              <div class="csv-summary">Saved here as authoring defaults; Insert DSL writes the corresponding `Property postprocess.*` lines into the current Experiment file.</div>
+              <div class="csv-summary">Saved here as authoring defaults for the Experiment editor insert button.</div>
               <div class="settings-inline-tool">
                 <button id="postprocess-save-defaults">Save defaults</button>
-                <button id="postprocess-insert-dsl" class="icon-text-button">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-                  <span>Insert DSL</span>
-                </button>
               </div>
             </div>
           </div>
@@ -520,6 +516,9 @@ __MKEXP2_STYLES__
               <div class="editor-shell">
                 <pre id="experiment-highlight" class="editor-highlight" aria-hidden="true"></pre>
                 <textarea id="experiment-editor" spellcheck="false" wrap="off"></textarea>
+              </div>
+              <div id="experiment-editor-tools" class="editor-tools">
+                <button id="insert-postprocess-dsl" type="button" class="small-button">Insert postprocess block</button>
               </div>
               <div id="guided-editor" class="guided-editor hidden">
                 <div id="guided-output" class="csv-empty">Switch to Guided to load the form.</div>

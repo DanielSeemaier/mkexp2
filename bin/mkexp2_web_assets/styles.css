@@ -759,6 +759,17 @@
       color: transparent;
       -webkit-text-fill-color: transparent;
     }
+    .editor-tools {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .editor-tools .small-button {
+      padding: 5px 8px;
+      font-size: 12px;
+      line-height: 1.2;
+    }
     .editor-highlight {
       pointer-events: none;
       color: var(--editor-text);

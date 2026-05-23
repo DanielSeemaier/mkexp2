@@ -1055,6 +1055,10 @@ class WebBackendTest(unittest.TestCase):
             mkexp2_web.HTML.index('id="experiment-editor"'),
             mkexp2_web.HTML.index('id="selected-path"'),
         )
+        self.assertIn('id="insert-postprocess-dsl"', mkexp2_web.HTML)
+        self.assertIn("function insertPostprocessDslAtCursor", mkexp2_web.HTML)
+        self.assertIn("editor.selectionStart", mkexp2_web.HTML)
+        self.assertNotIn('id="postprocess-insert-dsl"', mkexp2_web.HTML)
         self.assertIn(".experiment-editor-header .check-action", mkexp2_web.HTML)
         self.assertIn("overflow-wrap: anywhere;", mkexp2_web.HTML)
         self.assertIn('id="create-modal"', mkexp2_web.HTML)
