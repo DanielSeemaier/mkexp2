@@ -4876,8 +4876,9 @@ HTML = r"""<!doctype html>
       color: var(--muted);
     }
     .plot-artifact-view-toggle button.active {
-      background: var(--text);
-      color: white;
+      background: var(--tab-active-bg);
+      color: var(--tab-active-text);
+      border-color: var(--tab-active-border);
     }
     .plot-artifact-group {
       display: grid;
