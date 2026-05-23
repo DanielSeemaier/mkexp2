@@ -3311,6 +3311,11 @@ HTML = r"""<!doctype html>
       border: 1px solid var(--border);
       border-radius: 6px;
       background: var(--surface);
+      cursor: pointer;
+    }
+    .archive-item:hover {
+      border-color: var(--accent);
+      background: var(--accent-soft);
     }
     .archive-name {
       font-weight: 700;
@@ -3687,6 +3692,26 @@ HTML = r"""<!doctype html>
       color: #ffffff;
     }
     .submit-cancel-nav.hidden {
+      display: none;
+    }
+    .unarchive-nav {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      height: 34px;
+      padding: 0 16px;
+      border-color: var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      font-weight: 800;
+      z-index: 2;
+    }
+    .unarchive-nav:hover {
+      border-color: var(--muted);
+      background: var(--panel-2);
+      color: var(--text);
+    }
+    .unarchive-nav.hidden {
       display: none;
     }
     .tag-controls {
@@ -5979,6 +6004,7 @@ HTML = r"""<!doctype html>
         <button class="view-tab" data-view="logs-view">Logs</button>
         <button class="view-tab" data-view="plots-view">Plots</button>
         <button id="cancel-submit-nav" class="submit-cancel-nav hidden" title="Cancel submitted jobs for this experiment">Cancel</button>
+        <button id="unarchive-nav" class="unarchive-nav hidden" title="Unarchive this experiment">Unarchive</button>
         <span class="view-tabs-spacer"></span>
         <div class="tag-controls" aria-label="Experiment tag controls">
           <select id="experiment-tag-select" title="Experiment tag"></select>
@@ -8949,6 +8975,15 @@ HTML = r"""<!doctype html>
     function renderArchivedExperimentItem(container, exp) {
       const item = document.createElement('div');
       item.className = 'archive-item';
+      item.tabIndex = 0;
+      item.setAttribute('role', 'button');
+      item.setAttribute('aria-label', `Open archived experiment ${exp.id}`);
+      item.onclick = () => selectArchivedExperiment(exp.id).catch(err => out(String(err)));
+      item.onkeydown = event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        selectArchivedExperiment(exp.id).catch(err => out(String(err)));
+      };
       const text = document.createElement('div');
       const name = document.createElement('div');
       name.className = 'archive-name';
@@ -8960,16 +8995,14 @@ HTML = r"""<!doctype html>
       text.appendChild(path);
       const actions = document.createElement('div');
       actions.className = 'archive-actions';
-      const open = document.createElement('button');
-      open.textContent = 'Open';
-      open.title = `Open archived experiment ${exp.id}`;
-      open.onclick = () => selectArchivedExperiment(exp.id).catch(err => out(String(err)));
       const button = document.createElement('button');
       button.textContent = 'Unarchive';
       button.title = `Unarchive ${exp.id}`;
-      button.onclick = () => unarchiveExperiment(exp.id, button).catch(err => out(String(err)));
+      button.onclick = event => {
+        event.stopPropagation();
+        unarchiveExperiment(exp.id, button).catch(err => out(String(err)));
+      };
       item.appendChild(text);
-      actions.appendChild(open);
       actions.appendChild(button);
       item.appendChild(actions);
       container.appendChild(item);
@@ -9493,6 +9526,13 @@ HTML = r"""<!doctype html>
         cancelButton.classList.toggle('hidden', !showCancel);
         cancelButton.disabled = !showCancel || cancelButton.dataset.busy === '1';
         cancelButton.title = showCancel ? submitLockMessage() || 'Cancel submitted jobs for this experiment' : '';
+      }
+      const unarchiveButton = document.getElementById('unarchive-nav');
+      if (unarchiveButton) {
+        const showUnarchive = Boolean(state.selected) && state.selectedArchived && !state.shared;
+        unarchiveButton.classList.toggle('hidden', !showUnarchive);
+        unarchiveButton.disabled = !showUnarchive || unarchiveButton.dataset.busy === '1';
+        unarchiveButton.title = showUnarchive ? `Unarchive ${state.selected}` : '';
       }
       submitButton.disabled = state.submitBusy || loadingAlgorithms || locked || !state.selected || state.selectedArchived;
       submitButton.classList.toggle('is-busy', state.submitBusy || loadingAlgorithms);
@@ -10051,6 +10091,10 @@ HTML = r"""<!doctype html>
           await selectExperiment(result.active_id);
         }
       });
+    }
+    async function unarchiveSelectedExperiment() {
+      if (!state.selected || !state.selectedArchived || state.shared) return;
+      await unarchiveExperiment(state.selected, document.getElementById('unarchive-nav'));
     }
     function startProgressPolling() {
       if (state.progressTimer) return;
@@ -11386,6 +11430,7 @@ HTML = r"""<!doctype html>
     document.getElementById('submit-preview-close').onclick = closeSubmitPreviewDialog;
     document.getElementById('submit').onclick = submitExperiment;
     document.getElementById('cancel-submit-nav').onclick = () => cancelSubmittedExperiment().catch(err => alert(String(err)));
+    document.getElementById('unarchive-nav').onclick = () => unarchiveSelectedExperiment().catch(err => alert(String(err)));
     document.getElementById('clear-submit-lock').onclick = clearSubmitLock;
     document.getElementById('rename-experiment').onclick = renameExperiment;
     document.getElementById('archive-experiment').onclick = archiveExperiment;
