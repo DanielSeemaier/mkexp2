@@ -1014,6 +1014,11 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("renderMarkdown(state.logContent.content || '', markdown)", mkexp2_web.HTML)
         self.assertIn("markdown-doc", mkexp2_web.HTML)
         self.assertNotIn(".markdown-doc {\n      border:", mkexp2_web.HTML)
+        self.assertIn('<section class="panel logs-panel">', mkexp2_web.HTML)
+        self.assertIn(".logs-panel .panel-body", mkexp2_web.HTML)
+        self.assertIn(".log-content {\n      min-width: 0;\n      min-height: 0;\n      overflow: auto;", mkexp2_web.HTML)
+        self.assertIn(".markdown-doc {\n      color: var(--text);\n      max-height: none;\n      overflow: visible;", mkexp2_web.HTML)
+        self.assertIn(".log-content pre {\n      margin: 0;\n      max-height: none;\n      overflow: visible;", mkexp2_web.HTML)
         self.assertIn("cores", mkexp2_web.HTML)
 
     def test_html_contains_description_panel(self):

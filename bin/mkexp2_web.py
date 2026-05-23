@@ -6014,13 +6014,24 @@ HTML = r"""<!doctype html>
       display: grid;
       grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
       gap: 12px;
-      min-height: calc(100vh - 210px);
+      height: 100%;
+      min-height: 0;
+    }
+    .logs-panel {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      height: calc(100vh - 84px);
+    }
+    .logs-panel .panel-body {
+      min-height: 0;
+      overflow: hidden;
     }
     .logs-sidebar {
       display: grid;
       grid-template-rows: auto minmax(0, 1fr);
       gap: 8px;
       min-width: 0;
+      min-height: 0;
     }
     .logs-path {
       min-width: 0;
@@ -6067,6 +6078,8 @@ HTML = r"""<!doctype html>
     .log-content {
       min-width: 0;
       min-height: 0;
+      overflow: auto;
+      scrollbar-gutter: stable;
     }
     .log-file-toolbar {
       display: flex;
@@ -6131,8 +6144,8 @@ HTML = r"""<!doctype html>
     .parse-color-7 { --parse-fg: #0369a1; --parse-bg: #e0f2fe; }
     .log-content pre {
       margin: 0;
-      max-height: calc(100vh - 230px);
-      overflow: auto;
+      max-height: none;
+      overflow: visible;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
       border-radius: 6px;
@@ -6151,8 +6164,8 @@ HTML = r"""<!doctype html>
     :root[data-theme="dark"] .parse-color-7 { --parse-fg: #bae6fd; --parse-bg: #0c4a6e; }
     .markdown-doc {
       color: var(--text);
-      max-height: calc(100vh - 210px);
-      overflow: auto;
+      max-height: none;
+      overflow: visible;
     }
     .markdown-doc h1,
     .markdown-doc h2,
@@ -6310,7 +6323,21 @@ HTML = r"""<!doctype html>
       .main { grid-column: auto; }
       .grid { grid-template-columns: 1fr; }
       .compare-grid { grid-template-columns: 1fr; }
-      .logs-browser { grid-template-columns: 1fr; }
+      .logs-panel {
+        height: auto;
+        min-height: calc(100vh - 84px);
+      }
+      .logs-panel .panel-body {
+        overflow: visible;
+      }
+      .logs-browser {
+        grid-template-columns: 1fr;
+        height: auto;
+        min-height: calc(100vh - 210px);
+      }
+      .log-content {
+        max-height: calc(100vh - 240px);
+      }
       .chips { grid-template-columns: 1fr; }
       .plot-grid { grid-template-columns: 1fr; }
       .workspace-row,
@@ -6958,7 +6985,7 @@ HTML = r"""<!doctype html>
         </section>
       </section>
       <section id="logs-view" class="view-panel">
-        <section class="panel">
+        <section class="panel logs-panel">
           <div class="panel-header">
             <div>
               <div class="panel-title">Logs</div>
