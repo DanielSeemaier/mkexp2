@@ -3625,6 +3625,10 @@ HTML = r"""<!doctype html>
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
+    .icon-button.is-spinning svg {
+      animation: spin 0.75s linear infinite;
+      transform-origin: center;
+    }
     button.danger {
       color: var(--danger);
       border-color: #f1b7b1;
@@ -4507,16 +4511,6 @@ HTML = r"""<!doctype html>
       align-items: center;
       gap: 8px;
       color: var(--muted);
-    }
-    .panel-title-with-status {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .progress-title-spinner {
-      width: 14px;
-      height: 14px;
-      border-width: 2px;
     }
     .progress-experiment-header,
     .progress-row {
@@ -6857,10 +6851,7 @@ HTML = r"""<!doctype html>
             <section class="panel">
               <div class="panel-header">
                 <div>
-                  <div class="panel-title panel-title-with-status">
-                    <span>Progress</span>
-                    <span id="progress-loading-indicator" class="loading-spinner progress-title-spinner hidden" aria-label="Progress loading"></span>
-                  </div>
+                  <div class="panel-title">Progress</div>
                 </div>
                 <button id="refresh-progress" class="icon-button" aria-label="Reload progress" title="Reload progress">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
@@ -7121,7 +7112,10 @@ HTML = r"""<!doctype html>
       plotGenerationRunning: false,
       spackCache: null,
       progressTimer: null,
+      progressBusyRestore: null,
       progressLoadSeq: 0,
+      nodeStatusTimer: null,
+      nodeStatusBusyRestore: null,
       description: null,
       descriptionFor: null,
       descriptionEditing: false,
@@ -7138,6 +7132,7 @@ HTML = r"""<!doctype html>
       workspacesLoaded: false
     };
     const PLOT_RELOAD_DELAY_MS = 5000;
+    const AUTO_RELOAD_INTERVAL_MS = 15000;
     const THEME_STORAGE_KEY = 'mkexp2-theme';
     const SIDEBAR_WIDTH_KEY = 'mkexp2-sidebar-width';
     const DEFAULT_SIDEBAR_WIDTH = 320;
@@ -7257,6 +7252,26 @@ HTML = r"""<!doctype html>
         button.innerHTML = previous.html;
         button.title = previous.title;
         button.classList.remove('is-busy');
+        button.removeAttribute('aria-busy');
+        delete button.dataset.busy;
+      };
+    }
+    function setIconButtonSpinning(buttonOrId) {
+      const button = typeof buttonOrId === 'string' ? document.getElementById(buttonOrId) : buttonOrId;
+      if (!button) return () => {};
+      if (button.dataset.busy === '1') return () => {};
+      const previous = {
+        disabled: button.disabled,
+        title: button.title || '',
+      };
+      button.dataset.busy = '1';
+      button.disabled = true;
+      button.classList.add('is-spinning');
+      button.setAttribute('aria-busy', 'true');
+      return () => {
+        button.disabled = previous.disabled;
+        button.title = previous.title;
+        button.classList.remove('is-spinning');
         button.removeAttribute('aria-busy');
         delete button.dataset.busy;
       };
@@ -11429,16 +11444,21 @@ HTML = r"""<!doctype html>
       await unarchiveExperiment(state.selected, document.getElementById('unarchive-nav'), { keepArchivePane: true });
     }
     function setProgressLoading(active) {
-      const spinner = document.getElementById('progress-loading-indicator');
-      if (!spinner) return;
-      spinner.classList.toggle('hidden', !active);
+      if (active) {
+        if (!state.progressBusyRestore) state.progressBusyRestore = setIconButtonSpinning('refresh-progress');
+        return;
+      }
+      if (state.progressBusyRestore) {
+        state.progressBusyRestore();
+        state.progressBusyRestore = null;
+      }
     }
     function startProgressPolling() {
       if (state.progressTimer) return;
       state.progressTimer = setTimeout(() => {
         state.progressTimer = null;
         if (state.selected) loadProgress({ quiet: true, auto: true }).catch(err => out(String(err)));
-      }, 15000);
+      }, AUTO_RELOAD_INTERVAL_MS);
     }
     function stopProgressPolling() {
       if (state.progressTimer) {
@@ -12682,30 +12702,60 @@ HTML = r"""<!doctype html>
       if (normalized.startsWith('allocated') || normalized.includes('alloc')) return 'node-state-allocated';
       return '';
     }
-    async function refreshStatus() {
-      const data = await api('/api/status/slurm');
-      clearTransientOutput();
-      const box = document.getElementById('slurm-status');
-      if (!data.nodes.length) {
-        box.className = 'node-list muted';
-        box.textContent = 'No Slurm nodes found.';
+    function setNodeStatusLoading(active) {
+      if (active) {
+        if (!state.nodeStatusBusyRestore) state.nodeStatusBusyRestore = setIconButtonSpinning('refresh-status');
         return;
       }
-      box.className = 'node-list';
-      const nodes = Array.from(data.nodes).sort((left, right) => {
-        const rightCpus = cpuCount(right.cpus || right.cpu_info);
-        const leftCpus = cpuCount(left.cpus || left.cpu_info);
-        return (Number.isFinite(rightCpus) ? rightCpus : -1) - (Number.isFinite(leftCpus) ? leftCpus : -1)
-          || String(left.name ?? '').localeCompare(String(right.name ?? ''));
-      });
-      const rows = nodes.map(node => {
-        const state = node.state || node.availability || '';
-        const stateClass = nodeStateClass(state);
-        return `<div class="node-row ${esc(stateClass)}" title="${esc(state)}"><span class="node-name">${esc(node.name)}</span><span class="node-spec">${esc(formatCpuCount(node.cpus || node.cpu_info))}</span></div>`;
-      }).join('');
-      box.innerHTML = rows;
+      if (state.nodeStatusBusyRestore) {
+        state.nodeStatusBusyRestore();
+        state.nodeStatusBusyRestore = null;
+      }
     }
-    document.getElementById('refresh-status').onclick = () => withBusyButton('refresh-status', '', refreshStatus).catch(err => out(String(err)));
+    function startNodeStatusPolling() {
+      if (state.nodeStatusTimer || state.shared || !(token() || allowEmptyToken)) return;
+      state.nodeStatusTimer = setTimeout(() => {
+        state.nodeStatusTimer = null;
+        refreshStatus({ auto: true, quiet: true }).catch(() => {});
+      }, AUTO_RELOAD_INTERVAL_MS);
+    }
+    function stopNodeStatusPolling() {
+      if (state.nodeStatusTimer) {
+        clearTimeout(state.nodeStatusTimer);
+        state.nodeStatusTimer = null;
+      }
+    }
+    async function refreshStatus(_options = {}) {
+      stopNodeStatusPolling();
+      setNodeStatusLoading(true);
+      try {
+        const data = await api('/api/status/slurm');
+        clearTransientOutput();
+        const box = document.getElementById('slurm-status');
+        if (!data.nodes.length) {
+          box.className = 'node-list muted';
+          box.textContent = 'No Slurm nodes found.';
+          return;
+        }
+        box.className = 'node-list';
+        const nodes = Array.from(data.nodes).sort((left, right) => {
+          const rightCpus = cpuCount(right.cpus || right.cpu_info);
+          const leftCpus = cpuCount(left.cpus || left.cpu_info);
+          return (Number.isFinite(rightCpus) ? rightCpus : -1) - (Number.isFinite(leftCpus) ? leftCpus : -1)
+            || String(left.name ?? '').localeCompare(String(right.name ?? ''));
+        });
+        const rows = nodes.map(node => {
+          const state = node.state || node.availability || '';
+          const stateClass = nodeStateClass(state);
+          return `<div class="node-row ${esc(stateClass)}" title="${esc(state)}"><span class="node-name">${esc(node.name)}</span><span class="node-spec">${esc(formatCpuCount(node.cpus || node.cpu_info))}</span></div>`;
+        }).join('');
+        box.innerHTML = rows;
+      } finally {
+        setNodeStatusLoading(false);
+        startNodeStatusPolling();
+      }
+    }
+    document.getElementById('refresh-status').onclick = () => refreshStatus().catch(err => out(String(err)));
     document.getElementById('queue-open').onclick = () => withBusyButton('queue-open', '', openQueueDialog).catch(err => out(String(err)));
     document.getElementById('queue-close').onclick = closeQueueDialog;
     document.getElementById('queue-refresh').onclick = () => withBusyButton('queue-refresh', '', loadQueue).catch(err => out(String(err)));
@@ -12788,7 +12838,7 @@ HTML = r"""<!doctype html>
     document.getElementById('rename-experiment').onclick = renameExperiment;
     document.getElementById('archive-experiment').onclick = archiveExperiment;
     document.getElementById('delete-experiment').onclick = deleteExperiment;
-    document.getElementById('refresh-progress').onclick = () => withBusyButton('refresh-progress', '', () => loadProgress()).catch(err => out(String(err)));
+    document.getElementById('refresh-progress').onclick = () => loadProgress().catch(err => out(String(err)));
     document.getElementById('parse-results').onclick = parseExperiment;
     document.getElementById('plot-add-open').onclick = () => withBusyButton('plot-add-open', 'Loading...', openPlotGenerateDialog).catch(err => out(String(err)));
     document.getElementById('plot-generate-close').onclick = closePlotGenerateDialog;
