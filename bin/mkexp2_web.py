@@ -2239,18 +2239,33 @@ class Mkexp2WebApp:
         if not expected_logs:
             return None
 
-        existing_logs = set()
+        existing_logs = {}
         logs_dir = experiment_path / "logs"
+        logs_root = logs_dir.resolve() if logs_dir.is_dir() else None
         if logs_dir.is_dir():
             for dirpath, _, filenames in os.walk(logs_dir):
                 for filename in filenames:
-                    path = os.path.join(dirpath, filename)
-                    existing_logs.add(os.path.abspath(path))
-                    existing_logs.add(os.path.realpath(path))
+                    path = Path(dirpath) / filename
+                    try:
+                        stat = path.stat()
+                        rel_path = path.resolve().relative_to(logs_root).as_posix()
+                    except (OSError, ValueError):
+                        continue
+                    info = {
+                        "mtime": stat.st_mtime,
+                        "path": rel_path,
+                    }
+                    existing_logs[os.path.abspath(str(path))] = info
+                    existing_logs[os.path.realpath(str(path))] = info
 
         for function_name, algorithm, log_paths in expected_logs:
-            if any(log_path in existing_logs for log_path in log_paths):
+            info = next((existing_logs[log_path] for log_path in log_paths if log_path in existing_logs), None)
+            if info:
                 counts[function_name][algorithm]["done"] += 1
+                current_latest = counts[function_name][algorithm].get("latest_log_mtime") or 0
+                if info["mtime"] >= current_latest:
+                    counts[function_name][algorithm]["latest_log_mtime"] = info["mtime"]
+                    counts[function_name][algorithm]["latest_log"] = info["path"]
 
         experiments = []
         all_done = 0
@@ -2259,18 +2274,25 @@ class Mkexp2WebApp:
             algorithms = []
             exp_done = 0
             exp_total = 0
+            latest_exp_log = ""
+            latest_exp_log_mtime = 0
             for algorithm in algorithm_order.get(function_name, []):
                 item = counts[function_name][algorithm]
                 done = item["done"]
                 total = item["total"]
                 exp_done += done
                 exp_total += total
+                latest_log_mtime = item.get("latest_log_mtime") or 0
+                if latest_log_mtime >= latest_exp_log_mtime:
+                    latest_exp_log_mtime = latest_log_mtime
+                    latest_exp_log = item.get("latest_log", "")
                 algorithms.append({
                     "name": algorithm,
                     "done": done,
                     "total": total,
                     "percent": percent(done, total),
                     "complete": total > 0 and done >= total,
+                    "latest_log": item.get("latest_log", ""),
                 })
             all_done += exp_done
             all_total += exp_total
@@ -2281,6 +2303,7 @@ class Mkexp2WebApp:
                 "total": exp_total,
                 "percent": percent(exp_done, exp_total),
                 "complete": exp_total > 0 and exp_done >= exp_total,
+                "latest_log": latest_exp_log,
                 "algorithms": algorithms,
             })
 
@@ -3226,6 +3249,100 @@ class Mkexp2WebApp:
             "truncated": len(content) > MAX_TEXT_RESPONSE,
         }
 
+    @staticmethod
+    def parse_result_log_filename(filename):
+        match = re.match(
+            r"^(?P<graph>.+)___k(?P<k>[^_]+)_seed(?P<seed>[^_]+)_eps(?P<epsilon>[^_]+)_P(?P<topology>[^.]+)\.log$",
+            str(filename or ""),
+        )
+        if not match:
+            return None
+        topology = match.group("topology")
+        parts = topology.split("x")
+        return {
+            "graph": match.group("graph"),
+            "k": match.group("k"),
+            "seed": match.group("seed"),
+            "epsilon": match.group("epsilon"),
+            "topology": topology,
+            "num_nodes": parts[0] if len(parts) > 0 else "",
+            "num_mpis": parts[1] if len(parts) > 1 else "",
+            "num_threads": parts[2] if len(parts) > 2 else "",
+        }
+
+    @staticmethod
+    def values_match(expected, actual):
+        expected_text = str(expected or "").strip()
+        actual_text = str(actual or "").strip()
+        if not expected_text:
+            return True
+        if expected_text == actual_text:
+            return True
+        try:
+            expected_number = float(expected_text)
+            actual_number = float(actual_text)
+        except ValueError:
+            return False
+        return abs(expected_number - actual_number) <= 1e-9 * max(1.0, abs(expected_number), abs(actual_number))
+
+    def resolve_result_log(self, experiment_id, payload):
+        algorithm = str((payload or {}).get("algorithm") or "").strip("/")
+        if not algorithm:
+            raise ValueError("missing algorithm")
+        if any(part in ("", ".", "..") for part in algorithm.split("/")):
+            raise ValueError("invalid algorithm")
+        algorithm_dir = self.log_path(experiment_id, algorithm)
+        if not algorithm_dir.is_dir():
+            return {"path": "", "candidates": [], "ambiguous": False}
+
+        expected_filename = str((payload or {}).get("filename") or "").strip()
+        if expected_filename and ("/" in expected_filename or expected_filename in (".", "..")):
+            raise ValueError("invalid log filename")
+
+        criteria = {
+            "graph": (payload or {}).get("graph"),
+            "k": (payload or {}).get("k"),
+            "seed": (payload or {}).get("seed"),
+            "epsilon": (payload or {}).get("epsilon"),
+            "num_nodes": (payload or {}).get("num_nodes"),
+            "num_mpis": (payload or {}).get("num_mpis"),
+            "num_threads": (payload or {}).get("num_threads"),
+        }
+        experiment_label = str((payload or {}).get("experiment_label") or "").strip()
+        logs_root = self.logs_root(experiment_id).resolve()
+        candidates = []
+
+        for root, dirs, files in os.walk(algorithm_dir):
+            dirs[:] = [name for name in dirs if not name.startswith(".")]
+            for filename in files:
+                if not filename.endswith(".log"):
+                    continue
+                if expected_filename and filename != expected_filename:
+                    parsed = self.parse_result_log_filename(filename)
+                    if not parsed:
+                        continue
+                else:
+                    parsed = self.parse_result_log_filename(filename)
+                    if not parsed:
+                        continue
+                if not all(self.values_match(criteria[key], parsed[key]) for key in criteria):
+                    continue
+                path = Path(root) / filename
+                if experiment_label and path.parent.name != experiment_label:
+                    continue
+                candidates.append(path.resolve().relative_to(logs_root).as_posix())
+                if len(candidates) >= 50:
+                    break
+            if len(candidates) >= 50:
+                break
+
+        candidates.sort()
+        return {
+            "path": candidates[0] if candidates else "",
+            "candidates": candidates,
+            "ambiguous": len(candidates) > 1,
+        }
+
     def resolve_parser_script_path(self, experiment_path, parser_spec):
         parser_spec = str(parser_spec or "").strip()
         if not parser_spec:
@@ -3410,6 +3527,9 @@ HTML = r"""<!doctype html>
       --compare-bad-bg: #fee2e2;
       --compare-equal-bg: #dbeafe;
       --compare-mid-bg: #ffedd5;
+      --csv-row-failed-bg: #fff1f2;
+      --csv-row-imbalanced-bg: #fff7ed;
+      --csv-row-timeout-bg: #f1f5ff;
       --shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
       --sidebar-width: 320px;
       --tab-active-bg: var(--text);
@@ -3443,6 +3563,9 @@ HTML = r"""<!doctype html>
       --compare-bad-bg: #4a1919;
       --compare-equal-bg: #172f5f;
       --compare-mid-bg: #4d2d0c;
+      --csv-row-failed-bg: #361a20;
+      --csv-row-imbalanced-bg: #33210f;
+      --csv-row-timeout-bg: #172238;
       --shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
       --tab-active-bg: #0f766e;
       --tab-active-border: #2dd4bf;
@@ -4427,6 +4550,15 @@ HTML = r"""<!doctype html>
       align-items: center;
       gap: 10px;
     }
+    .progress-experiment-header.progress-clickable,
+    .progress-row.progress-clickable {
+      cursor: pointer;
+      border-radius: 5px;
+    }
+    .progress-experiment-header.progress-clickable:hover,
+    .progress-row.progress-clickable:hover {
+      background: var(--accent-soft);
+    }
     .progress-experiment-name {
       min-width: 0;
       overflow: hidden;
@@ -5097,6 +5229,22 @@ HTML = r"""<!doctype html>
       overflow: hidden;
       text-overflow: ellipsis;
       font-variant-numeric: tabular-nums;
+    }
+    .csv-table tbody tr.csv-row-clickable {
+      cursor: pointer;
+    }
+    .csv-table tbody tr.csv-row-clickable:hover {
+      outline: 1px solid var(--accent);
+      outline-offset: -1px;
+    }
+    .csv-table tbody tr.csv-row-failed {
+      background: var(--csv-row-failed-bg);
+    }
+    .csv-table tbody tr.csv-row-imbalanced {
+      background: var(--csv-row-imbalanced-bg);
+    }
+    .csv-table tbody tr.csv-row-timeout {
+      background: var(--csv-row-timeout-bg);
     }
     .csv-table td.compare-good {
       background: var(--compare-good-bg);
@@ -8564,6 +8712,92 @@ HTML = r"""<!doctype html>
       const parsed = Number(text);
       return Number.isFinite(parsed) ? parsed : null;
     }
+    function csvHeaderIndex(file) {
+      const headerIndex = new Map();
+      (file?.headers || []).forEach((header, index) => {
+        if (!headerIndex.has(header)) headerIndex.set(header, index);
+      });
+      return headerIndex;
+    }
+    function csvRowValue(row, headerIndex, names) {
+      for (const name of names) {
+        if (!headerIndex.has(name)) continue;
+        const value = row[headerIndex.get(name)];
+        if (value !== undefined && value !== null && String(value).trim() !== '') return String(value).trim();
+      }
+      return '';
+    }
+    function csvFlagValue(value) {
+      const text = String(value ?? '').trim().toLowerCase();
+      return text === '1' || text === 'true' || text === 'yes';
+    }
+    function csvRowStateClass(row, headerIndex) {
+      if (csvFlagValue(csvRowValue(row, headerIndex, ['Timeout', 'TimedOut']))) return 'csv-row-timeout';
+      if (csvFlagValue(csvRowValue(row, headerIndex, ['Failed', 'Failure']))) return 'csv-row-failed';
+      const imbalance = numericCsvValue(csvRowValue(row, headerIndex, ['Imbalance']));
+      const epsilon = numericCsvValue(csvRowValue(row, headerIndex, ['Epsilon', 'epsilon']));
+      if (imbalance !== null && epsilon !== null && imbalance > epsilon) return 'csv-row-imbalanced';
+      return '';
+    }
+    function csvRowStateTitle(row, headerIndex) {
+      if (csvFlagValue(csvRowValue(row, headerIndex, ['Timeout', 'TimedOut']))) return 'Timeout';
+      if (csvFlagValue(csvRowValue(row, headerIndex, ['Failed', 'Failure']))) return 'Failed';
+      const imbalance = numericCsvValue(csvRowValue(row, headerIndex, ['Imbalance']));
+      const epsilon = numericCsvValue(csvRowValue(row, headerIndex, ['Epsilon', 'epsilon']));
+      if (imbalance !== null && epsilon !== null && imbalance > epsilon) return `Imbalanced: ${imbalance} > ${epsilon}`;
+      return '';
+    }
+    function csvRowLogPayload(file, row, headerIndex) {
+      const algorithm = csvLabel(file?.name || '');
+      const graph = csvRowValue(row, headerIndex, ['Graph', 'graph']);
+      const k = csvRowValue(row, headerIndex, ['K', 'k']);
+      const seed = csvRowValue(row, headerIndex, ['Seed', 'seed']);
+      const epsilon = csvRowValue(row, headerIndex, ['Epsilon', 'epsilon']);
+      if (!algorithm || !graph || !k || !seed || !epsilon) return null;
+      const numNodes = csvRowValue(row, headerIndex, ['NumNodes', 'Nodes']);
+      const numMpis = csvRowValue(row, headerIndex, ['NumMPIsPerNode', 'MPIsPerNode']);
+      const numThreads = csvRowValue(row, headerIndex, ['NumThreadsPerMPI', 'Threads', 'ThreadsPerMPI']);
+      const payload = {
+        algorithm,
+        graph,
+        k,
+        seed,
+        epsilon,
+        num_nodes: numNodes,
+        num_mpis: numMpis,
+        num_threads: numThreads,
+        experiment_label: csvRowValue(row, headerIndex, ['Experiment', 'ExperimentLabel', 'ExperimentFunction', 'Function']),
+      };
+      if (numNodes && numMpis && numThreads) {
+        payload.filename = `${graph}___k${k}_seed${seed}_eps${epsilon}_P${numNodes}x${numMpis}x${numThreads}.log`;
+      }
+      return payload;
+    }
+    async function openCsvRowLog(file, row, headerIndex) {
+      if (!state.selected) return;
+      const payload = csvRowLogPayload(file, row, headerIndex);
+      if (!payload) {
+        out('Cannot open log: CSV row does not contain Graph, K, Seed, and Epsilon columns.');
+        return;
+      }
+      const experimentId = state.selected;
+      const resolved = await api(`/api/experiments/${encodeURIComponent(experimentId)}/log-resolve`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      if (state.selected !== experimentId) return;
+      if (!resolved.path) {
+        out(`No matching log found for ${payload.algorithm}/${payload.graph}.`);
+        return;
+      }
+      await setView('logs-view');
+      const directory = String(resolved.path).split('/').slice(0, -1).join('/');
+      await loadLogs(directory);
+      await loadLogFile(resolved.path);
+      if (resolved.ambiguous) {
+        out(`Opened the first of ${resolved.candidates.length} matching logs.`);
+      }
+    }
     function compareCellClass(value, peerValues, mode) {
       if (!mode) return '';
       const current = numericCsvValue(value);
@@ -8665,10 +8899,7 @@ HTML = r"""<!doctype html>
         return;
       }
       container.className = 'csv-table-wrap';
-      const headerIndex = new Map();
-      file.headers.forEach((header, index) => {
-        if (!headerIndex.has(header)) headerIndex.set(header, index);
-      });
+      const headerIndex = csvHeaderIndex(file);
       const peers = options.peers || (options.peer ? [options.peer] : []);
       const peerHeaderIndexes = peers.map(peer => {
         const indexMap = new Map();
@@ -8711,6 +8942,26 @@ HTML = r"""<!doctype html>
       const tbody = document.createElement('tbody');
       file.rows.forEach((row, rowIndex) => {
         const tr = document.createElement('tr');
+        const rowState = csvRowStateClass(row, headerIndex);
+        const rowStateTitle = csvRowStateTitle(row, headerIndex);
+        const logPayload = csvRowLogPayload(file, row, headerIndex);
+        if (rowState) tr.classList.add(rowState);
+        if (logPayload) {
+          tr.classList.add('csv-row-clickable');
+          tr.tabIndex = 0;
+          tr.title = [rowStateTitle, `Open log for ${logPayload.algorithm}/${logPayload.graph}`].filter(Boolean).join(' - ');
+          tr.onclick = () => {
+            openCsvRowLog(file, row, headerIndex).catch(err => out(String(err)));
+          };
+          tr.onkeydown = event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              openCsvRowLog(file, row, headerIndex).catch(err => out(String(err)));
+            }
+          };
+        } else if (rowStateTitle) {
+          tr.title = rowStateTitle;
+        }
         for (const header of shown) {
           const td = document.createElement('td');
           const index = headerIndex.has(header) ? headerIndex.get(header) : -1;
@@ -11285,6 +11536,29 @@ HTML = r"""<!doctype html>
       row.appendChild(text);
       box.appendChild(row);
     }
+    async function openProgressLog(path) {
+      const logPath = String(path || '');
+      if (!state.selected || !logPath) return;
+      const experimentId = state.selected;
+      await setView('logs-view');
+      if (state.selected !== experimentId) return;
+      const directory = logPath.split('/').slice(0, -1).join('/');
+      await loadLogs(directory);
+      await loadLogFile(logPath);
+    }
+    function makeProgressLogClickable(element, path, label) {
+      if (!path) return;
+      element.classList.add('progress-clickable');
+      element.tabIndex = 0;
+      element.title = `Open newest log for ${label}`;
+      element.onclick = () => openProgressLog(path).catch(err => out(String(err)));
+      element.onkeydown = event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          openProgressLog(path).catch(err => out(String(err)));
+        }
+      };
+    }
     function renderProgress(result) {
       const box = document.getElementById('progress-output');
       const command = result?.progress || result;
@@ -11311,6 +11585,9 @@ HTML = r"""<!doctype html>
           card.className = 'progress-experiment';
           const header = document.createElement('div');
           header.className = 'progress-experiment-header';
+          if (!experiment.complete) {
+            makeProgressLogClickable(header, experiment.latest_log, experiment.name || experiment.function || 'experiment');
+          }
           const name = document.createElement('div');
           name.className = 'progress-experiment-name';
           name.textContent = experiment.name || experiment.function || 'Experiment';
@@ -11331,6 +11608,9 @@ HTML = r"""<!doctype html>
           for (const algorithm of experiment.algorithms || []) {
             const row = document.createElement('div');
             row.className = 'progress-row';
+            if (!algorithm.complete) {
+              makeProgressLogClickable(row, algorithm.latest_log, algorithm.name || 'algorithm');
+            }
             const rowName = document.createElement('div');
             rowName.className = 'progress-row-name';
             rowName.textContent = algorithm.name || '';
@@ -12808,7 +13088,7 @@ def make_handler(app):
 
         def handle_share_post(self, parsed):
             path = parsed.path
-            match = re.match(r"^/api/share/([^/]+)/(parse|plot-artifacts|probe|log-parse)$", path)
+            match = re.match(r"^/api/share/([^/]+)/(parse|plot-artifacts|probe|log-parse|log-resolve)$", path)
             if not match:
                 json_response(self, 404, {"error": "not found"})
                 return
@@ -12824,6 +13104,9 @@ def make_handler(app):
                 return
             if action == "log-parse":
                 json_response(self, 200, app.parse_log_file(experiment_id, payload.get("path") or ""))
+                return
+            if action == "log-resolve":
+                json_response(self, 200, app.resolve_result_log(experiment_id, payload))
                 return
             json_response(self, 202, app.create_shared_plot_artifacts_action(experiment_id, payload))
 
@@ -13109,7 +13392,7 @@ def make_handler(app):
                     else:
                         json_response(self, 200, app.unarchive_experiment(experiment_id))
                     return
-                match = re.match(r"^/api/experiments/([^/]+)/(check|probe|submit|submit-preview|parse|log-parse|plot)$", path)
+                match = re.match(r"^/api/experiments/([^/]+)/(check|probe|submit|submit-preview|parse|log-parse|log-resolve|plot)$", path)
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
                     action = match.group(2)
@@ -13130,6 +13413,9 @@ def make_handler(app):
                         return
                     if action == "log-parse":
                         json_response(self, 200, app.parse_log_file(experiment_id, payload.get("path") or ""))
+                        return
+                    if action == "log-resolve":
+                        json_response(self, 200, app.resolve_result_log(experiment_id, payload))
                         return
                     if action == "plot":
                         json_response(self, 202, app.plot_action(experiment_id, payload))

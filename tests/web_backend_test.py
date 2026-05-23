@@ -781,6 +781,9 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("progress_json", mkexp2_web.HTML)
         self.assertIn("progress-experiment", mkexp2_web.HTML)
         self.assertIn(".progress-experiment + .progress-experiment", mkexp2_web.HTML)
+        self.assertIn("function openProgressLog", mkexp2_web.HTML)
+        self.assertIn("function makeProgressLogClickable", mkexp2_web.HTML)
+        self.assertIn("progress-clickable", mkexp2_web.HTML)
         self.assertIn("}, 15000)", mkexp2_web.HTML)
         self.assertIn("async function clearSubmitLock", mkexp2_web.HTML)
         self.assertIn("function renderPlotPanel", mkexp2_web.HTML)
@@ -990,6 +993,12 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("Column visibility save failed", mkexp2_web.HTML)
         self.assertNotIn("mkexp2-columns:", mkexp2_web.HTML)
         self.assertIn("renderCsvTable", mkexp2_web.HTML)
+        self.assertIn("function openCsvRowLog", mkexp2_web.HTML)
+        self.assertIn("function csvRowStateClass", mkexp2_web.HTML)
+        self.assertIn("/log-resolve", mkexp2_web.HTML)
+        self.assertIn("csv-row-failed", mkexp2_web.HTML)
+        self.assertIn("csv-row-imbalanced", mkexp2_web.HTML)
+        self.assertIn("csv-row-timeout", mkexp2_web.HTML)
         self.assertIn("selectedResults", mkexp2_web.HTML)
         self.assertIn("previousSelection", mkexp2_web.HTML)
         self.assertIn("preservedSelection", mkexp2_web.HTML)
@@ -1133,6 +1142,40 @@ class WebBackendTest(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 app.log_file("exp", "../Experiment")
+
+    def test_result_log_resolver_matches_csv_row_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            log_dir = exp / "logs" / "Algo" / "Run"
+            log_dir.mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            (log_dir / "graph___k2_seed1_eps0.030000_P1x1x4.log").write_text("ok\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            resolved = app.resolve_result_log(
+                "exp",
+                {
+                    "algorithm": "Algo",
+                    "graph": "graph",
+                    "k": "2",
+                    "seed": "1",
+                    "epsilon": "0.03",
+                    "num_nodes": "1",
+                    "num_mpis": "1",
+                    "num_threads": "4",
+                    "filename": "graph___k2_seed1_eps0.03_P1x1x4.log",
+                },
+            )
+
+            self.assertEqual(resolved["path"], "Algo/Run/graph___k2_seed1_eps0.030000_P1x1x4.log")
+            self.assertFalse(resolved["ambiguous"])
+            self.assertEqual(resolved["candidates"], [resolved["path"]])
+
+            missing = app.resolve_result_log("exp", {"algorithm": "Algo", "graph": "other", "k": "2", "seed": "1", "epsilon": "0.03"})
+            self.assertEqual(missing["path"], "")
+            with self.assertRaises(ValueError):
+                app.resolve_result_log("exp", {"algorithm": "../Algo"})
 
     def test_single_log_parse_uses_configured_parser(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1624,12 +1667,16 @@ class WebBackendTest(unittest.TestCase):
             (exp / "Experiment").write_text("ExperimentMeta() { :; }\n")
             (exp / "jobs").mkdir()
             (exp / "logs" / "Fast" / "ExperimentMeta").mkdir(parents=True)
+            (exp / "logs" / "Slow" / "ExperimentMeta").mkdir(parents=True)
             existing = exp / "logs" / "Fast" / "ExperimentMeta" / "a.log"
             existing.write_text("done\n")
+            running = exp / "logs" / "Slow" / "ExperimentMeta" / "running.log"
+            running.write_text("partial\n")
             missing = exp / "logs" / "Slow" / "ExperimentMeta" / "b.log"
             (exp / "jobs" / "ExperimentMeta__1x1x1.cmds.meta.tsv").write_text(
                 f"0\tFast\tMock\tExperimentMeta\t1x1x1\t{existing}\n"
-                f"1\tSlow\tMock\tExperimentMeta\t1x1x1\t{missing}\n"
+                f"1\tSlow\tMock\tExperimentMeta\t1x1x1\t{running}\n"
+                f"2\tSlow\tMock\tExperimentMeta\t1x1x1\t{missing}\n"
             )
             app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
             mkexp2_web.run_command = fake_run_command
@@ -1640,13 +1687,16 @@ class WebBackendTest(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["progress"]["argv"], ["metadata-progress"])
-        self.assertEqual(result["progress_json"]["done"], 1)
-        self.assertEqual(result["progress_json"]["total"], 2)
+        self.assertEqual(result["progress_json"]["done"], 2)
+        self.assertEqual(result["progress_json"]["total"], 3)
         self.assertEqual(result["progress_json"]["experiments"][0]["function"], "ExperimentMeta")
+        self.assertEqual(result["progress_json"]["experiments"][0]["latest_log"], "Slow/ExperimentMeta/running.log")
         self.assertEqual(result["progress_json"]["experiments"][0]["algorithms"][0]["name"], "Fast")
         self.assertEqual(result["progress_json"]["experiments"][0]["algorithms"][0]["done"], 1)
         self.assertEqual(result["progress_json"]["experiments"][0]["algorithms"][1]["name"], "Slow")
-        self.assertEqual(result["progress_json"]["experiments"][0]["algorithms"][1]["done"], 0)
+        self.assertEqual(result["progress_json"]["experiments"][0]["algorithms"][1]["done"], 1)
+        self.assertEqual(result["progress_json"]["experiments"][0]["algorithms"][1]["total"], 2)
+        self.assertEqual(result["progress_json"]["experiments"][0]["algorithms"][1]["latest_log"], "Slow/ExperimentMeta/running.log")
 
     def test_probe_payload_uses_json_argv_array_and_parses_payload(self):
         calls = []
