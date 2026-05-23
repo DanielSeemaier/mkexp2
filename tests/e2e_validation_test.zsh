@@ -128,6 +128,10 @@ EOF
     assert_eq "$(jq -r '.summary.timeouts' stats.json)" "1" "stats --json counts timeouts"
     assert_eq "$(jq -r '.summary.imbalanced' stats.json)" "1" "stats --json counts imbalanced runs"
     assert_eq "$(jq -r '.common.balanced_cut_keys' stats.json)" "1" "stats --json reports common balanced subset"
+    assert_eq "$(jq -r '.comparisons[] | select(.id == "time_all") | .cells[] | select(.row_algorithm == "Known" and .column_algorithm == "Other") | .count' stats.json)" "2" "stats --json reports pairwise all-time subset size"
+    assert_eq "$(jq -r '.comparisons[] | select(.id == "time_balanced") | .cells[] | select(.row_algorithm == "Known" and .column_algorithm == "Other") | .count' stats.json)" "1" "stats --json reports pairwise balanced-time subset size"
+    assert_eq "$(jq -r '.comparisons[] | select(.id == "cut_all") | .cells[] | select(.row_algorithm == "Known" and .column_algorithm == "Other") | .ratio' stats.json)" "0.5" "stats --json reports pairwise all-cut ratio"
+    assert_eq "$(jq -r '.comparisons[] | select(.id == "cut_balanced") | .cells[] | select(.row_algorithm == "Known" and .column_algorithm == "Other") | .ratio' stats.json)" "0.5" "stats --json reports pairwise balanced-cut ratio"
     assert_eq "$(jq -r '.algorithms[] | select(.algorithm == "Known") | .cuts.balanced.gmean' stats.json)" "10" "stats --json reports balanced-cut gmean"
     assert_eq "$(jq -r '.algorithms[] | select(.algorithm == "Other") | .timeouts' stats.json)" "1" "stats --json reports per-algorithm timeouts"
     "$MKEXP2" stats > stats.out

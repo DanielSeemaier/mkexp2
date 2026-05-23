@@ -636,6 +636,10 @@
       if (field === 'count') return formatStatCount(statMetric(metric).count);
       return formatStatNumber(statMetric(metric)[field]);
     }
+    function formatStatRatio(value) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? `${formatStatNumber(parsed)}x` : 'n/a';
+    }
     function appendStatsCards(box, cards) {
       const wrap = document.createElement('div');
       wrap.className = 'stats-cards';
@@ -698,6 +702,78 @@
       section.appendChild(tableWrap);
       box.appendChild(section);
     }
+    function statsComparisonCell(matrix, rowAlgorithm, columnAlgorithm) {
+      const cells = Array.isArray(matrix?.cells) ? matrix.cells : [];
+      return cells.find(cell => cell.row_algorithm === rowAlgorithm && cell.column_algorithm === columnAlgorithm) || null;
+    }
+    function ratioCellClass(ratio) {
+      const parsed = Number(ratio);
+      if (!Number.isFinite(parsed)) return 'stats-matrix-empty';
+      if (Math.abs(parsed - 1) < 1e-9) return 'stats-matrix-equal';
+      return parsed < 1 ? 'stats-matrix-better' : 'stats-matrix-worse';
+    }
+    function appendStatsComparisonMatrices(box, matrices) {
+      if (!Array.isArray(matrices) || !matrices.length) return;
+      const section = document.createElement('section');
+      section.className = 'stats-section stats-comparison-section';
+      const heading = document.createElement('div');
+      heading.className = 'stats-section-title';
+      heading.textContent = 'Comparison Matrices';
+      section.appendChild(heading);
+
+      const row = document.createElement('div');
+      row.className = 'stats-matrix-row';
+      for (const matrix of matrices) {
+        const algorithms = Array.isArray(matrix.algorithms) ? matrix.algorithms : [];
+        const panel = document.createElement('div');
+        panel.className = 'stats-matrix-panel';
+        const title = document.createElement('div');
+        title.className = 'stats-matrix-title';
+        title.textContent = matrix.title || matrix.id || 'Comparison';
+        panel.appendChild(title);
+
+        const tableWrap = document.createElement('div');
+        tableWrap.className = 'stats-matrix-wrap';
+        const table = document.createElement('table');
+        table.className = 'stats-table stats-matrix';
+        const thead = document.createElement('thead');
+        const head = document.createElement('tr');
+        head.appendChild(document.createElement('th'));
+        for (const algorithm of algorithms) {
+          const th = document.createElement('th');
+          th.textContent = algorithm;
+          th.title = algorithm;
+          head.appendChild(th);
+        }
+        thead.appendChild(head);
+        table.appendChild(thead);
+
+        const tbody = document.createElement('tbody');
+        for (const rowAlgorithm of algorithms) {
+          const tr = document.createElement('tr');
+          const label = document.createElement('th');
+          label.textContent = rowAlgorithm;
+          label.title = rowAlgorithm;
+          tr.appendChild(label);
+          for (const columnAlgorithm of algorithms) {
+            const cell = statsComparisonCell(matrix, rowAlgorithm, columnAlgorithm);
+            const td = document.createElement('td');
+            td.textContent = formatStatRatio(cell?.ratio);
+            td.className = ratioCellClass(cell?.ratio);
+            const count = formatStatCount(cell?.count);
+            td.title = `${rowAlgorithm} / ${columnAlgorithm}; ${count} shared row(s)`;
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        tableWrap.appendChild(table);
+        panel.appendChild(tableWrap);
+        row.appendChild(panel);
+      }
+      section.appendChild(row);
+      box.appendChild(section);
+    }
     function renderStatsWorkspace() {
       const summary = document.getElementById('stats-summary');
       const box = document.getElementById('stats-output');
@@ -743,8 +819,9 @@
       ]);
       appendStatsNote(
         box,
-        `Fair-set values are computed only on common rows with valid data for every algorithm, matched by ${keyColumns}. Balanced cuts exclude failed, timed-out, and imbalanced runs; the Imbalanced column keeps the balance information as a count.`
+        `Matrix cells show row algorithm / column algorithm geometric means on each pair's working subset, matched by ${keyColumns}. Balanced matrices exclude failed, timed-out, and imbalanced runs.`
       );
+      appendStatsComparisonMatrices(box, stats.comparisons || []);
 
       appendStatsTable(
         box,

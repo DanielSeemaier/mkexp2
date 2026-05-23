@@ -1232,6 +1232,64 @@
       font-size: 12px;
       overflow-wrap: anywhere;
     }
+    .stats-comparison-section {
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+    .stats-matrix-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(220px, 1fr));
+      gap: 10px;
+      min-width: 920px;
+    }
+    .stats-matrix-panel {
+      min-width: 0;
+      display: grid;
+      gap: 5px;
+    }
+    .stats-matrix-title {
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .stats-matrix-wrap {
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .stats-matrix {
+      width: 100%;
+      min-width: 210px;
+    }
+    .stats-matrix th,
+    .stats-matrix td {
+      max-width: 84px;
+      padding: 5px 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .stats-matrix th:first-child {
+      text-align: left;
+    }
+    .stats-matrix td {
+      font-weight: 750;
+    }
+    .stats-matrix-better {
+      color: var(--ok);
+      background: var(--compare-good-bg);
+    }
+    .stats-matrix-worse {
+      color: var(--danger);
+      background: var(--compare-bad-bg);
+    }
+    .stats-matrix-equal {
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .stats-matrix-empty {
+      color: var(--muted);
+    }
     .stats-workspace {
       display: grid;
       gap: 12px;
