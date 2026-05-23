@@ -4471,7 +4471,7 @@ HTML = r"""<!doctype html>
     }
     .submit-preview-list {
       display: grid;
-      gap: 12px;
+      gap: 10px;
       min-width: 0;
     }
     .submit-preview-step {
@@ -4487,7 +4487,7 @@ HTML = r"""<!doctype html>
       white-space: pre;
       border-radius: 6px;
       background: var(--code-bg);
-      color: var(--code-fg);
+      color: var(--code-text);
       padding: 9px 10px;
       font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
@@ -5040,6 +5040,12 @@ HTML = r"""<!doctype html>
       border: 1px solid var(--border);
       border-radius: 8px;
       box-shadow: 0 20px 50px rgba(15, 23, 42, 0.24);
+    }
+    .modal.submit-preview-modal {
+      width: min(1180px, 100%);
+    }
+    .modal.queue-modal {
+      width: min(1120px, 100%);
     }
     .modal-header,
     .modal-footer {
@@ -5779,7 +5785,7 @@ HTML = r"""<!doctype html>
       </div>
     </div>
     <div id="queue-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="queue-modal-title">
-      <div class="modal">
+      <div class="modal queue-modal">
         <div class="modal-header">
           <div>
             <div id="queue-modal-title" class="modal-title">Slurm Queue</div>
@@ -5951,7 +5957,7 @@ HTML = r"""<!doctype html>
       </div>
     </div>
     <div id="submit-preview-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="submit-preview-modal-title">
-      <div class="modal">
+      <div class="modal submit-preview-modal">
         <div class="modal-header">
           <div>
             <div id="submit-preview-modal-title" class="modal-title">Partitioner Invocations</div>
@@ -10030,12 +10036,30 @@ HTML = r"""<!doctype html>
       item.appendChild(block);
       container.appendChild(item);
     }
+    function groupedSubmitInvocations(invocations) {
+      const groups = [];
+      const byKey = new Map();
+      for (const invocation of invocations) {
+        const experiment = invocation.experiment || 'Experiment';
+        const algorithm = invocation.algorithm || 'Algorithm';
+        const key = `${experiment}\u0000${algorithm}`;
+        let group = byKey.get(key);
+        if (!group) {
+          group = { experiment, algorithm, commands: [] };
+          byKey.set(key, group);
+          groups.push(group);
+        }
+        if (invocation.command) group.commands.push(invocation.command);
+      }
+      return groups;
+    }
     function renderSubmitPreview(data) {
       const summary = document.getElementById('submit-preview-summary');
       const output = document.getElementById('submit-preview-output');
       const invocations = Array.isArray(data?.invocations) ? data.invocations : [];
       const generate = data?.generate || {};
-      summary.textContent = `${invocations.length} generated partitioner invocation(s) in ${data?.cwd || 'the experiment directory'}.`;
+      const groups = groupedSubmitInvocations(invocations);
+      summary.textContent = `${invocations.length} generated partitioner invocation(s) across ${groups.length} experiment/partitioner group(s) in ${data?.cwd || 'the experiment directory'}.`;
       output.className = 'submit-preview-list';
       output.innerHTML = '';
       if (generate.returncode && generate.returncode !== 0) {
@@ -10052,16 +10076,12 @@ HTML = r"""<!doctype html>
         output.textContent = 'No generated invocations matched the selected algorithms.';
         return;
       }
-      for (const invocation of invocations) {
-        const title = [
-          invocation.experiment || 'Experiment',
-          invocation.algorithm || 'Algorithm',
-          invocation.topology || '',
-        ].filter(Boolean).join(' · ');
+      for (const group of groups) {
+        const title = `${group.experiment} / ${group.algorithm} (${group.commands.length} command${group.commands.length === 1 ? '' : 's'})`;
         appendSubmitPreviewCode(
           output,
           title,
-          invocation.command || ''
+          group.commands.join('\n')
         );
       }
     }
