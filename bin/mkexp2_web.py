@@ -3695,23 +3695,26 @@ HTML = r"""<!doctype html>
       flex-wrap: wrap;
     }
     .view-tabs-spacer {
-      flex: 1 1 auto;
-      min-width: 20px;
+      flex: 1 1 140px;
+      min-width: 140px;
+      min-height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
     }
     .view-tabs .icon-button {
       flex: 0 0 auto;
     }
     .submit-cancel-nav {
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
       height: 34px;
-      padding: 0 16px;
+      min-width: 144px;
+      padding: 0 22px;
       border-color: var(--danger);
       background: var(--danger);
       color: #ffffff;
       font-weight: 800;
-      z-index: 2;
+      flex: 0 0 auto;
     }
     .submit-cancel-nav:hover {
       border-color: var(--danger);
@@ -3722,16 +3725,14 @@ HTML = r"""<!doctype html>
       display: none;
     }
     .unarchive-nav {
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
       height: 34px;
-      padding: 0 16px;
+      min-width: 144px;
+      padding: 0 22px;
       border-color: var(--border);
       background: var(--surface-2);
       color: var(--text);
       font-weight: 800;
-      z-index: 2;
+      flex: 0 0 auto;
     }
     .unarchive-nav:hover {
       border-color: var(--muted);
@@ -6030,9 +6031,10 @@ HTML = r"""<!doctype html>
         <button class="view-tab" data-view="results-view">Results</button>
         <button class="view-tab" data-view="logs-view">Logs</button>
         <button class="view-tab" data-view="plots-view">Plots</button>
-        <button id="cancel-submit-nav" class="submit-cancel-nav hidden" title="Cancel submitted jobs for this experiment">Cancel</button>
-        <button id="unarchive-nav" class="unarchive-nav hidden" title="Unarchive this experiment">Unarchive</button>
-        <span class="view-tabs-spacer"></span>
+        <span class="view-tabs-spacer">
+          <button id="cancel-submit-nav" class="submit-cancel-nav hidden" title="Cancel submitted jobs for this experiment">Cancel</button>
+          <button id="unarchive-nav" class="unarchive-nav hidden" title="Unarchive this experiment">Unarchive</button>
+        </span>
         <div class="tag-controls" aria-label="Experiment tag controls">
           <select id="experiment-tag-select" title="Experiment tag"></select>
         </div>
