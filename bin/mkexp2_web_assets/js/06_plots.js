@@ -65,7 +65,11 @@
       box.innerHTML = '';
       for (const plot of plots) {
         const label = document.createElement('label');
-        label.className = 'plot-choice' + (plot.expensive ? ' expensive' : '');
+        label.className = [
+          'plot-choice',
+          state.selectedPlotTypes.has(plot.id) ? 'selected' : '',
+          plot.expensive ? 'expensive' : ''
+        ].filter(Boolean).join(' ');
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.checked = state.selectedPlotTypes.has(plot.id);
@@ -110,7 +114,11 @@
       for (const source of sources) {
         const key = sourceKey(source);
         const row = document.createElement('div');
-        row.className = 'plot-source-row' + (source.kind === 'csv' ? ' external' : '');
+        row.className = [
+          'plot-source-row',
+          state.selectedPlotSources.has(key) ? 'selected' : '',
+          source.kind === 'csv' ? 'external' : ''
+        ].filter(Boolean).join(' ');
         const checkLabel = document.createElement('label');
         checkLabel.className = 'plot-source-check';
         const checkbox = document.createElement('input');
@@ -156,7 +164,7 @@
           const remove = document.createElement('button');
           remove.type = 'button';
           remove.className = 'icon-button plot-source-remove';
-          remove.textContent = 'x';
+          remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
           remove.title = 'Remove external CSV source';
           remove.setAttribute('aria-label', `Remove ${source.alias || source.file}`);
           remove.onclick = event => {
@@ -179,6 +187,33 @@
     function plotArtifactTypeId(artifact) {
       return artifact.plot_id || 'unknown';
     }
+    function plotArtifactSourceLabels(artifact) {
+      return (artifact.sources || []).map(source => source.alias || source.name || source.file).filter(Boolean);
+    }
+    function plotArtifactSourcesText(artifact) {
+      return plotArtifactSourceLabels(artifact).join(', ');
+    }
+    function plotArtifactDateText(value) {
+      if (!value) return '';
+      const date = new Date(value);
+      if (!Number.isFinite(date.getTime())) return String(value);
+      return date.toLocaleString([], {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+    function plotArtifactPreviewDetails(artifact) {
+      const details = [];
+      const sources = plotArtifactSourcesText(artifact);
+      if (artifact.plot_set_label) details.push(artifact.plot_set_label);
+      if (sources) details.push(sources);
+      if (artifact.created_at) details.push(plotArtifactDateText(artifact.created_at));
+      details.push(formatBytes(artifact.size));
+      return details.filter(Boolean).join(' - ');
+    }
     function groupPlotArtifacts(artifacts, mode) {
       const groups = new Map();
       for (const artifact of artifacts) {
@@ -198,7 +233,7 @@
       for (const group of items) {
         group.artifacts.sort((left, right) => String(right.created_at || '').localeCompare(String(left.created_at || '')));
         group.sources = Array.from(new Set(group.artifacts.flatMap(artifact =>
-          (artifact.sources || []).map(source => source.alias || source.name || source.file).filter(Boolean)
+          plotArtifactSourceLabels(artifact)
         )));
         group.size = group.artifacts.reduce((total, artifact) => total + Number(artifact.size || 0), 0);
       }
@@ -221,7 +256,7 @@
       title.textContent = artifact.plot_name || artifact.label || artifact.id;
       const meta = document.createElement('div');
       meta.className = 'plot-artifact-meta';
-      const sources = (artifact.sources || []).map(source => source.alias || source.name || source.file).join(', ');
+      const sources = plotArtifactSourcesText(artifact);
       meta.textContent = `${sources || 'no sources'}; ${formatBytes(artifact.size)}`;
       body.appendChild(title);
       body.appendChild(meta);
@@ -320,9 +355,16 @@
       const version = encodeURIComponent(`${artifact.modified_at || ''}-${artifact.size || ''}`);
       if (state.plotPdfUrlFor === artifact.id && state.plotPdfVersion === version && state.plotPdfUrl) {
         file.className = 'plot-preview';
+        const title = artifact.label || artifact.plot_name || artifact.id;
         file.innerHTML = `
-          <iframe class="plot-pdf" src="${esc(state.plotPdfUrl)}" title="${esc(artifact.label || artifact.id)}"></iframe>
-          <div class="csv-summary"><a href="${esc(state.plotPdfUrl)}" target="_blank" rel="noreferrer">Open ${esc(artifact.label || artifact.id)}</a></div>
+          <div class="plot-preview-header">
+            <div class="plot-preview-heading">
+              <div class="plot-preview-title">${esc(title)}</div>
+              <div class="plot-preview-meta">${esc(plotArtifactPreviewDetails(artifact))}</div>
+            </div>
+            <a class="small-button plot-preview-open" href="${esc(state.plotPdfUrl)}" target="_blank" rel="noreferrer">Open PDF</a>
+          </div>
+          <iframe class="plot-pdf" src="${esc(state.plotPdfUrl)}" title="${esc(title)}"></iframe>
         `;
       } else {
         file.className = 'csv-empty';
@@ -342,8 +384,14 @@
       if (state.plotPdfUrlFor === 'legacy' && state.plotPdfVersion === version && state.plotPdfUrl) {
         file.className = 'plot-preview';
         file.innerHTML = `
+          <div class="plot-preview-header">
+            <div class="plot-preview-heading">
+              <div class="plot-preview-title">Legacy plots.pdf</div>
+              <div class="plot-preview-meta">${esc([plotArtifactDateText(legacy.modified_at), formatBytes(legacy.size)].filter(Boolean).join(' - '))}</div>
+            </div>
+            <a class="small-button plot-preview-open" href="${esc(state.plotPdfUrl)}" target="_blank" rel="noreferrer">Open PDF</a>
+          </div>
           <iframe class="plot-pdf" src="${esc(state.plotPdfUrl)}" title="plots.pdf"></iframe>
-          <div class="csv-summary"><a href="${esc(state.plotPdfUrl)}" target="_blank" rel="noreferrer">Open legacy plots.pdf</a></div>
         `;
       } else {
         file.className = 'csv-empty';
