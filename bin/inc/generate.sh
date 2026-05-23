@@ -78,6 +78,23 @@ clear_submit_lock() {
   fi
 }
 
+append_submit_lock_line() {
+  local key="$1"
+  local value="$2"
+  if (( SUBMIT_LOCK_ACQUIRED )) && [[ -n "$SUBMIT_LOCK_FILE" ]]; then
+    printf '%s=%s\n' "$key" "$value" >> "$SUBMIT_LOCK_FILE"
+  fi
+}
+
+record_submit_job() {
+  local kind="$1"
+  local job_id="$2"
+  if [[ -n "$job_id" ]]; then
+    append_submit_lock_line "slurm_job_id" "$job_id"
+    append_submit_lock_line "slurm_job" "$kind:$job_id"
+  fi
+}
+
 submit_lock_exit_cleanup() {
   if (( SUBMIT_LOCK_ACQUIRED && ! SUBMIT_LOCK_KEEP )); then
     clear_submit_lock
@@ -476,6 +493,7 @@ submit_install_slurm() {
   out=$(sbatch "$script")
   echo "$out"
   INSTALL_JOB_ID=$(echo "$out" | awk '{print $NF}')
+  record_submit_job "install" "$INSTALL_JOB_ID"
 }
 
 submit_slurm() {
@@ -556,6 +574,7 @@ submit_slurm() {
   local id=""
   id=$(echo "$out" | awk '{print $NF}')
   JOB_IDS["$key"]="$id"
+  record_submit_job "$key" "$id"
 }
 
 submit_local() {
@@ -614,6 +633,7 @@ submit_parse_slurm() {
 
   echo "$out"
   PARSE_JOB_ID=$(echo "$out" | awk '{print $NF}')
+  record_submit_job "parse" "$PARSE_JOB_ID"
 }
 
 submit_cleanup_slurm() {
@@ -652,6 +672,7 @@ CLEANUP
   dep_arg="--dependency=afterany:${(j/:/)dep_ids}"
   out=$(sbatch "$dep_arg" "$cleanup_script")
   echo "$out"
+  record_submit_job "cleanup" "$(echo "$out" | awk '{print $NF}')"
   SUBMIT_LOCK_KEEP=1
 }
 
@@ -1151,6 +1172,15 @@ FinalizeGenerateOutputs() {
 
   echo "validate_selected_algorithms" >> "$PWD/submit.sh"
   echo "acquire_submit_lock" >> "$PWD/submit.sh"
+  if (( MKEXP2_LOCAL_HAS_RUN_JOBS && MKEXP2_SLURM_HAS_RUN_JOBS )); then
+    echo "append_submit_lock_line system mixed" >> "$PWD/submit.sh"
+  elif (( MKEXP2_SLURM_HAS_RUN_JOBS )); then
+    echo "append_submit_lock_line system slurm" >> "$PWD/submit.sh"
+  elif (( MKEXP2_LOCAL_HAS_RUN_JOBS )); then
+    echo "append_submit_lock_line system local" >> "$PWD/submit.sh"
+  else
+    echo "append_submit_lock_line system unknown" >> "$PWD/submit.sh"
+  fi
 
   if (( MKEXP2_LOCAL_HAS_RUN_JOBS )); then
     {

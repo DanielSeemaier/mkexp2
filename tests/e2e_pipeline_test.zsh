@@ -206,6 +206,8 @@ EOF
     PATH="$PWD/fakebin:$PATH" SBATCH_ARGS_FILE="$PWD/sbatch.args" zsh ./submit.sh MockB > submit.out
     assert_file_not_contains sbatch.args "jobs/install__" "slurm submit without --install does not submit install job"
     assert_path_exists .mkexp2/submit.lock "slurm submit creates a submit lock"
+    assert_file_contains .mkexp2/submit.lock "system=slurm" "slurm submit records system in lock"
+    assert_file_contains .mkexp2/submit.lock "slurm_job_id=123" "slurm submit records submitted job id in lock"
     assert_file_contains sbatch.args "submit-lock-cleanup" "slurm submit schedules lock cleanup"
     rm -f .mkexp2/submit.lock
 

@@ -587,6 +587,9 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="delete-experiment"', mkexp2_web.HTML)
         self.assertIn('class="view-tabs"', mkexp2_web.HTML)
         self.assertIn('class="view-tabs-spacer"', mkexp2_web.HTML)
+        self.assertIn('id="cancel-submit-nav"', mkexp2_web.HTML)
+        self.assertIn("cancelSubmittedExperiment", mkexp2_web.HTML)
+        self.assertIn("/cancel-submit", mkexp2_web.HTML)
         self.assertIn('id="share-experiment" class="icon-button" aria-label="Share experiment"', mkexp2_web.HTML)
         self.assertIn('id="download-experiment" class="icon-button" aria-label="Download experiment archive"', mkexp2_web.HTML)
         self.assertIn("async function downloadExperiment", mkexp2_web.HTML)
@@ -1113,6 +1116,75 @@ class WebBackendTest(unittest.TestCase):
             cleared = app.clear_submit_lock("exp")
             self.assertTrue(cleared["cleared"])
             self.assertFalse(cleared["submit_lock"]["locked"])
+
+    def test_cancel_submit_cancels_slurm_jobs_and_unlocks(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+        original_getuser = mkexp2_web.getpass.getuser
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            calls.append((list(argv), timeout))
+            if argv == ["squeue", "-h", "-o", mkexp2_web.SQUEUE_TABLE_FORMAT]:
+                return {
+                    "returncode": 0,
+                    "stdout": "123_[0-4%2]|all|exp|owner|RUNNING|0:10|1|node01\n456|all|cleanup|owner|PENDING|0:00|1|(Dependency)\n",
+                    "stderr": "",
+                }
+            if argv in (["scancel", "123"], ["scancel", "456"]):
+                return {"returncode": 0, "stdout": "", "stderr": ""}
+            return {"returncode": 99, "stdout": "", "stderr": "unexpected"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            (exp / ".mkexp2").mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            (exp / ".mkexp2" / "submit.lock").write_text(
+                f"started_at=now\npid=999999\ncwd={exp}\nsystem=slurm\nslurm_job_id=123\nslurm_job=cleanup:456\n",
+                encoding="utf-8",
+            )
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+            mkexp2_web.run_command = fake_run_command
+            mkexp2_web.getpass.getuser = lambda: "owner"
+            try:
+                result = app.cancel_submit("exp", {"confirm_id": "exp"})
+            finally:
+                mkexp2_web.run_command = original_run_command
+                mkexp2_web.getpass.getuser = original_getuser
+
+            self.assertTrue(result["cancelled"])
+            self.assertFalse((exp / ".mkexp2" / "submit.lock").exists())
+
+        self.assertIn((["scancel", "123"], 30), calls)
+        self.assertIn((["scancel", "456"], 30), calls)
+
+    def test_cancel_submit_terminates_local_pid_and_unlocks(self):
+        original_terminate = mkexp2_web.terminate_process_tree
+        terminated = []
+
+        def fake_terminate(pid):
+            terminated.append(pid)
+            return {"root_pid": pid, "descendants": [], "signaled": [pid], "killed": []}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            (exp / ".mkexp2").mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            (exp / ".mkexp2" / "submit.lock").write_text(
+                f"started_at=now\npid=4242\ncwd={exp}\nsystem=local\n",
+                encoding="utf-8",
+            )
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+            mkexp2_web.terminate_process_tree = fake_terminate
+            try:
+                result = app.cancel_submit("exp", {"confirm_id": "exp"})
+            finally:
+                mkexp2_web.terminate_process_tree = original_terminate
+
+            self.assertTrue(result["cancelled"])
+            self.assertEqual(terminated, [4242])
+            self.assertFalse((exp / ".mkexp2" / "submit.lock").exists())
 
     def test_share_experiment_persists_tokenless_read_only_link(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -10,6 +10,7 @@ import re
 import secrets
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import tempfile
@@ -241,6 +242,104 @@ def parse_git_status(text):
         groups[category].append(item)
         files.append(item)
     return {"files": files, "groups": groups, "dirty": bool(files)}
+
+
+def lock_values(lock, key):
+    values = []
+    for line in str(lock.get("content") or "").splitlines():
+        if line.startswith(f"{key}="):
+            values.append(line.split("=", 1)[1])
+    fields = lock.get("fields") or {}
+    if key in fields and fields[key] not in values:
+        values.append(fields[key])
+    return values
+
+
+def unique_ordered(values):
+    seen = set()
+    out = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
+def process_exists(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def process_children():
+    result = run_command(["ps", "-axo", "pid=,ppid="], timeout=8)
+    children = {}
+    if result["returncode"] != 0:
+        return children
+    for line in result["stdout"].splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+        except ValueError:
+            continue
+        children.setdefault(ppid, []).append(pid)
+    return children
+
+
+def process_command(pid):
+    result = run_command(["ps", "-p", str(pid), "-o", "command="], timeout=8)
+    if result["returncode"] != 0:
+        return ""
+    return result["stdout"].strip()
+
+
+def descendant_pids(root_pid):
+    children = process_children()
+    out = []
+    stack = list(children.get(root_pid, []))
+    while stack:
+        pid = stack.pop()
+        if pid in out:
+            continue
+        out.append(pid)
+        stack.extend(children.get(pid, []))
+    return out
+
+
+def terminate_process_tree(root_pid):
+    if root_pid <= 1 or root_pid == os.getpid():
+        raise ValueError("refusing to terminate an unsafe process id")
+    pids = descendant_pids(root_pid)
+    targets = [pid for pid in reversed(pids) if pid != os.getpid()]
+    if process_exists(root_pid):
+        targets.append(root_pid)
+    signaled = []
+    for pid in targets:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            signaled.append(pid)
+        except ProcessLookupError:
+            pass
+    time.sleep(0.25)
+    killed = []
+    for pid in targets:
+        if not process_exists(pid):
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+            killed.append(pid)
+        except ProcessLookupError:
+            pass
+    return {"root_pid": root_pid, "descendants": pids, "signaled": signaled, "killed": killed}
 
 
 def parse_scontrol_nodes(text):
@@ -602,6 +701,47 @@ class SlurmStatus:
             "ok": scancel["returncode"] == 0,
             "server_user": owner,
             "scancel": scancel,
+        }
+
+    def cancel_job_ids(self, job_ids):
+        owner = getpass.getuser()
+        normalized = unique_ordered(job_ids)
+        if not normalized:
+            return {"ok": True, "server_user": owner, "jobs": [], "missing": [], "scancel": []}
+        for job_id in normalized:
+            if not re.fullmatch(r"[A-Za-z0-9_.+\-\[\]%,]+", job_id):
+                raise ValueError(f"invalid Slurm job id: {job_id}")
+
+        squeue = run_command(["squeue", "-h", "-o", SQUEUE_TABLE_FORMAT], timeout=8)
+        if squeue["returncode"] != 0:
+            raise ValueError("cannot verify Slurm job ownership before scancel")
+        rows = parse_squeue_table(squeue["stdout"])
+        rows_by_id = {row["job_id"]: row for row in rows}
+        jobs = []
+        missing = []
+        scancels = []
+        for job_id in normalized:
+            job = rows_by_id.get(job_id)
+            if not job:
+                job = next((row for row in rows if str(row.get("job_id") or "").startswith(f"{job_id}_")), None)
+            if not job:
+                missing.append(job_id)
+                continue
+            if job.get("user") != owner:
+                raise ValueError(f"refusing to cancel job {job_id}: owner is {job.get('user')}, server user is {owner}")
+            scancel = run_command(["scancel", job_id], timeout=30)
+            scancels.append(scancel)
+            if scancel["returncode"] != 0:
+                raise ValueError(scancel["stderr"] or scancel["stdout"] or f"scancel failed for job {job_id}")
+            jobs.append(job)
+        self._cache_until = 0
+        return {
+            "ok": True,
+            "server_user": owner,
+            "jobs": jobs,
+            "missing": missing,
+            "verify": squeue,
+            "scancel": scancels,
         }
 
 
@@ -1525,6 +1665,59 @@ class Mkexp2WebApp:
         existed = path.exists()
         path.unlink(missing_ok=True)
         return {"cleared": existed, "submit_lock": self.submit_lock(experiment_id)}
+
+    def cancel_submit(self, experiment_id, payload):
+        confirm_id = str((payload or {}).get("confirm_id") or "").strip()
+        if confirm_id != experiment_id:
+            raise ValueError("confirmation did not match experiment id")
+        lock = self.submit_lock(experiment_id)
+        if not lock.get("locked"):
+            return {"cancelled": False, "message": "submit is not locked", "submit_lock": lock}
+        exp_path = self.active_experiment_path(experiment_id)
+        lock_cwd = (lock.get("fields") or {}).get("cwd")
+        if lock_cwd and Path(lock_cwd).resolve() != exp_path.resolve():
+            raise ValueError("submit lock cwd does not match experiment directory")
+
+        systems = set(value.lower() for value in lock_values(lock, "system"))
+        slurm_job_ids = []
+        slurm_job_ids.extend(lock_values(lock, "slurm_job_id"))
+        for value in lock_values(lock, "slurm_job"):
+            if ":" in value:
+                slurm_job_ids.append(value.rsplit(":", 1)[1])
+            else:
+                slurm_job_ids.append(value)
+        slurm_job_ids = unique_ordered(slurm_job_ids)
+
+        slurm_result = None
+        local_result = None
+        if slurm_job_ids:
+            slurm_result = self.slurm.cancel_job_ids(slurm_job_ids)
+
+        pid_text = (lock.get("fields") or {}).get("pid", "")
+        if not slurm_job_ids and pid_text:
+            if re.fullmatch(r"\d+", pid_text):
+                pid = int(pid_text)
+                command = process_command(pid) if process_exists(pid) else ""
+                if command and "submit.sh" not in command and str(exp_path) not in command:
+                    raise ValueError(f"refusing to terminate pid {pid}: it does not look like this experiment's submit process")
+                local_result = terminate_process_tree(pid)
+            else:
+                raise ValueError("submit lock contains an invalid pid")
+
+        if not slurm_job_ids and local_result is None:
+            raise ValueError("submit lock does not contain cancellable Slurm job ids or a local pid")
+
+        cleared = self.clear_submit_lock(experiment_id)
+        self.invalidate_experiments_cache()
+        return {
+            "cancelled": True,
+            "system": sorted(systems),
+            "slurm_job_ids": slurm_job_ids,
+            "slurm": slurm_result,
+            "local": local_result,
+            "cleared": cleared.get("cleared", False),
+            "submit_lock": cleared["submit_lock"],
+        }
 
     def require_submit_unlocked(self, experiment_id, action):
         if self.submit_lock(experiment_id).get("locked"):
@@ -3475,6 +3668,26 @@ HTML = r"""<!doctype html>
     }
     .view-tabs .icon-button {
       flex: 0 0 auto;
+    }
+    .submit-cancel-nav {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      height: 34px;
+      padding: 0 16px;
+      border-color: var(--danger);
+      background: var(--danger);
+      color: #ffffff;
+      font-weight: 800;
+      z-index: 2;
+    }
+    .submit-cancel-nav:hover {
+      border-color: var(--danger);
+      background: var(--danger);
+      color: #ffffff;
+    }
+    .submit-cancel-nav.hidden {
+      display: none;
     }
     .tag-controls {
       display: inline-flex;
@@ -5765,6 +5978,7 @@ HTML = r"""<!doctype html>
         <button class="view-tab" data-view="results-view">Results</button>
         <button class="view-tab" data-view="logs-view">Logs</button>
         <button class="view-tab" data-view="plots-view">Plots</button>
+        <button id="cancel-submit-nav" class="submit-cancel-nav hidden" title="Cancel submitted jobs for this experiment">Cancel</button>
         <span class="view-tabs-spacer"></span>
         <div class="tag-controls" aria-label="Experiment tag controls">
           <select id="experiment-tag-select" title="Experiment tag"></select>
@@ -9273,6 +9487,13 @@ HTML = r"""<!doctype html>
       if (!submitButton) return;
       const locked = Boolean(state.submitLock?.locked);
       const loadingAlgorithms = Boolean(state.algorithmLoading && state.algorithmLoadingFor === state.selected);
+      const cancelButton = document.getElementById('cancel-submit-nav');
+      if (cancelButton) {
+        const showCancel = locked && Boolean(state.selected) && !state.selectedArchived && !state.shared;
+        cancelButton.classList.toggle('hidden', !showCancel);
+        cancelButton.disabled = !showCancel || cancelButton.dataset.busy === '1';
+        cancelButton.title = showCancel ? submitLockMessage() || 'Cancel submitted jobs for this experiment' : '';
+      }
       submitButton.disabled = state.submitBusy || loadingAlgorithms || locked || !state.selected || state.selectedArchived;
       submitButton.classList.toggle('is-busy', state.submitBusy || loadingAlgorithms);
       if (state.submitBusy) {
@@ -9481,10 +9702,28 @@ HTML = r"""<!doctype html>
         renderSubmitLock(result.submit_lock);
       });
     }
+    async function cancelSubmittedExperiment() {
+      if (!state.selected || state.selectedArchived || !state.submitLock?.locked) return;
+      const id = state.selected;
+      const message = `Cancel submitted jobs for "${id}"?\n\nThis cancels associated Slurm jobs or the local submit process and then removes the submit lock.`;
+      if (!confirm(message)) return;
+      await withBusyButton('cancel-submit-nav', 'Cancelling...', async () => {
+        const result = await api(`/api/experiments/${encodeURIComponent(id)}/cancel-submit`, {
+          method: 'POST',
+          body: JSON.stringify({ confirm_id: id })
+        });
+        renderSubmitLock(result.submit_lock);
+        await Promise.all([
+          refreshExperiments({ force: true }),
+          loadProgress({ quiet: true }).catch(() => {})
+        ]);
+      });
+    }
     function clearSelectedExperiment() {
       state.selected = null;
       state.selectedArchived = false;
       state.editorDirty = false;
+      state.submitLock = null;
       clearCheckIndicator();
       clearPlotIndicator();
       clearAlgorithmChoices();
@@ -9506,7 +9745,6 @@ HTML = r"""<!doctype html>
       state.logsFor = null;
       state.selectedLog = '';
       state.logContent = null;
-      state.submitLock = null;
       state.plotSources = null;
       state.plotSourcesFor = null;
       state.plotSourcesInitializedFor = null;
@@ -11147,6 +11385,7 @@ HTML = r"""<!doctype html>
     document.getElementById('submit-preview-open').onclick = () => withBusyButton('submit-preview-open', '', openSubmitPreviewDialog).catch(err => out(String(err)));
     document.getElementById('submit-preview-close').onclick = closeSubmitPreviewDialog;
     document.getElementById('submit').onclick = submitExperiment;
+    document.getElementById('cancel-submit-nav').onclick = () => cancelSubmittedExperiment().catch(err => alert(String(err)));
     document.getElementById('clear-submit-lock').onclick = clearSubmitLock;
     document.getElementById('rename-experiment').onclick = renameExperiment;
     document.getElementById('archive-experiment').onclick = archiveExperiment;
@@ -11626,6 +11865,11 @@ def make_handler(app):
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
                     json_response(self, 200, app.share_experiment(experiment_id))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/cancel-submit$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    json_response(self, 200, app.cancel_submit(experiment_id, payload))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/(archive|unarchive)$", path)
                 if match:
