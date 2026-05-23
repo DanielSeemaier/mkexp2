@@ -2136,23 +2136,50 @@ class Mkexp2WebApp:
     def submit_preview(self, experiment_id, payload):
         algorithms, selections = self.normalize_submit_selections(payload)
         exp_path = self.active_experiment_path(experiment_id)
-        submit_argv = ["zsh", "./submit.sh", "--install", *algorithms]
-        selection_file = None
-        if selections:
-            selection_file = f"{WEB_STATE_DIR}/web-submit-selection-<temporary>.tsv"
-            submit_argv.extend(["--selection-file", selection_file])
+        generate = self.command(experiment_id, ["generate"], timeout=120)
+        invocations = []
+        jobs_dir = exp_path / "jobs"
+        selected_algorithms = set(algorithms)
+        selected_pairs = {(item["experiment"], item["algorithm"]) for item in selections}
+        if jobs_dir.is_dir():
+            for meta_file in sorted(jobs_dir.glob("*.cmds.meta.tsv")):
+                command_file = meta_file.with_name(meta_file.name.replace(".cmds.meta.tsv", ".cmds"))
+                if not command_file.is_file():
+                    continue
+                commands = command_file.read_text(encoding="utf-8").splitlines()
+                with meta_file.open("r", encoding="utf-8") as handle:
+                    for row in handle:
+                        parts = row.rstrip("\n").split("\t")
+                        if len(parts) < 6:
+                            continue
+                        try:
+                            index = int(parts[0])
+                        except ValueError:
+                            continue
+                        if index < 0 or index >= len(commands):
+                            continue
+                        algorithm = parts[1]
+                        function_name = parts[3] or "Experiment"
+                        if selected_algorithms and algorithm not in selected_algorithms:
+                            continue
+                        if selected_pairs and (function_name, algorithm) not in selected_pairs:
+                            continue
+                        invocations.append({
+                            "index": index,
+                            "algorithm": algorithm,
+                            "base": parts[2],
+                            "experiment": function_name,
+                            "topology": parts[4],
+                            "log_file": parts[5],
+                            "command": commands[index],
+                            "job": command_file.name,
+                        })
         return {
             "cwd": str(exp_path),
             "algorithms": algorithms,
             "selections": selections,
-            "selection_file": selection_file,
-            "selection_tsv": "".join(f"{item['experiment']}\t{item['algorithm']}\n" for item in selections),
-            "steps": [
-                {"name": "Check", "argv": [str(self.mkexp2), "check", "--json"], "cwd": str(exp_path)},
-                {"name": "Probe", "argv": [str(self.mkexp2), "probe"], "cwd": str(exp_path)},
-                {"name": "Generate", "argv": [str(self.mkexp2), "generate"], "cwd": str(exp_path)},
-                {"name": "Submit", "argv": submit_argv, "cwd": str(exp_path)},
-            ],
+            "generate": generate,
+            "invocations": invocations,
         }
 
     def submit_action(self, experiment_id, payload):
@@ -5926,15 +5953,15 @@ HTML = r"""<!doctype html>
       <div class="modal">
         <div class="modal-header">
           <div>
-            <div id="submit-preview-modal-title" class="modal-title">Submit Commands</div>
-            <div id="submit-preview-summary" class="csv-summary">No submit command preview loaded.</div>
+            <div id="submit-preview-modal-title" class="modal-title">Partitioner Invocations</div>
+            <div id="submit-preview-summary" class="csv-summary">No invocation preview loaded.</div>
           </div>
-          <button id="submit-preview-close" class="icon-button" aria-label="Close submit command preview" title="Close">
+          <button id="submit-preview-close" class="icon-button" aria-label="Close invocation preview" title="Close">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
         </div>
         <div class="modal-body">
-          <div id="submit-preview-output" class="csv-empty">Open the dialog to inspect submit commands.</div>
+          <div id="submit-preview-output" class="csv-empty">Open the dialog to inspect generated partitioner invocations.</div>
         </div>
       </div>
     </div>
@@ -6044,7 +6071,7 @@ HTML = r"""<!doctype html>
               <div class="panel-header">
                 <div class="panel-title">Algorithm Selection</div>
                 <div class="submit-header-actions">
-                  <button id="submit-preview-open" class="icon-button" aria-label="Show submit commands" title="Show submit commands">
+                  <button id="submit-preview-open" class="icon-button" aria-label="Show generated partitioner invocations" title="Show generated partitioner invocations">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                   </button>
                   <button class="primary" id="submit" aria-label="Submit selected algorithms" title="Submit selected algorithms">Submit</button>
@@ -6887,14 +6914,6 @@ HTML = r"""<!doctype html>
       return String(value ?? '').replace(/[&<>"']/g, char => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
       }[char]));
-    }
-    function shellQuote(value) {
-      const text = String(value ?? '');
-      if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(text)) return text || "''";
-      return `'${text.replace(/'/g, `'\"'\"'`)}'`;
-    }
-    function shellCommand(argv) {
-      return Array.from(argv || []).map(shellQuote).join(' ');
     }
     function slugifyName(value) {
       return String(value || 'experiment')
@@ -9553,7 +9572,7 @@ HTML = r"""<!doctype html>
       const previewButton = document.getElementById('submit-preview-open');
       if (previewButton && previewButton.dataset.busy !== '1') {
         previewButton.disabled = loadingAlgorithms || !state.selected || state.selectedArchived;
-        previewButton.title = loadingAlgorithms ? 'Loading submit choices...' : 'Show submit commands';
+        previewButton.title = loadingAlgorithms ? 'Loading submit choices...' : 'Show generated partitioner invocations';
       }
       const clearButton = document.getElementById('clear-submit-lock');
       if (clearButton) clearButton.disabled = !locked || !state.selected || state.selectedArchived;
@@ -10009,32 +10028,44 @@ HTML = r"""<!doctype html>
       item.appendChild(block);
       container.appendChild(item);
     }
-    function renderSubmitPreview(data, editorWillSave) {
+    function renderSubmitPreview(data) {
       const summary = document.getElementById('submit-preview-summary');
       const output = document.getElementById('submit-preview-output');
-      const steps = Array.isArray(data?.steps) ? data.steps : [];
-      summary.textContent = `${steps.length} command(s) will run in ${data?.cwd || 'the experiment directory'}.`;
+      const invocations = Array.isArray(data?.invocations) ? data.invocations : [];
+      const generate = data?.generate || {};
+      summary.textContent = `${invocations.length} generated partitioner invocation(s) in ${data?.cwd || 'the experiment directory'}.`;
       output.className = 'submit-preview-list';
       output.innerHTML = '';
-      if (editorWillSave) {
+      if (generate.returncode && generate.returncode !== 0) {
         const note = document.createElement('div');
-        note.className = 'csv-empty';
-        note.textContent = 'The current editor contents will be saved before these commands run.';
+        note.className = 'status-message error';
+        note.textContent = `mkexp2 generate failed with return code ${generate.returncode}.`;
         output.appendChild(note);
+        const details = [generate.stdout, generate.stderr].filter(Boolean).join('\n').trim();
+        if (details) appendSubmitPreviewCode(output, 'Generate output', details);
+        return;
       }
-      for (const step of steps) {
-        appendSubmitPreviewCode(output, step.name || 'Command', shellCommand(step.argv || []));
+      if (!invocations.length) {
+        output.className = 'csv-empty';
+        output.textContent = 'No generated invocations matched the selected algorithms.';
+        return;
       }
-      if (data?.selection_file) {
+      for (const invocation of invocations) {
+        const title = [
+          invocation.experiment || 'Experiment',
+          invocation.algorithm || 'Algorithm',
+          invocation.topology || '',
+        ].filter(Boolean).join(' · ');
         appendSubmitPreviewCode(
           output,
-          `Temporary selection file: ${data.selection_file}`,
-          data.selection_tsv || '(empty)'
+          title,
+          invocation.command || ''
         );
       }
     }
     async function openSubmitPreviewDialog() {
       if (!state.selected || state.selectedArchived) return;
+      const experimentId = state.selected;
       const modal = document.getElementById('submit-preview-modal');
       const summary = document.getElementById('submit-preview-summary');
       const output = document.getElementById('submit-preview-output');
@@ -10042,25 +10073,40 @@ HTML = r"""<!doctype html>
       if (state.algorithmLoading) {
         summary.textContent = 'Submit choices are still loading.';
         output.className = 'csv-empty';
-        output.textContent = 'Wait for algorithm loading to finish before previewing submit commands.';
+        output.textContent = 'Wait for algorithm loading to finish before previewing generated invocations.';
         return;
+      }
+      if (state.editorDirty && !state.shared) {
+        summary.textContent = 'Saving experiment before generating invocation preview...';
+        output.className = 'csv-empty';
+        output.textContent = 'Saving...';
+        const priorSelection = collectSubmitSelections();
+        const allSelectedBeforeSave = priorSelection.allSelected;
+        await persistExperiment();
+        state.editorDirty = false;
+        if (state.selected !== experimentId) return;
+        await loadAlgorithms(experimentId, {
+          selectedSelections: allSelectedBeforeSave ? null : priorSelection.selections,
+        });
+        if (state.selected !== experimentId) return;
       }
       const submitSelection = collectSubmitSelections();
       if (submitSelection.total > 0 && submitSelection.selected === 0) {
         summary.textContent = 'No algorithms selected.';
         output.className = 'csv-empty';
-        output.textContent = 'Select at least one algorithm before previewing submit commands.';
+        output.textContent = 'Select at least one algorithm before previewing generated invocations.';
         return;
       }
-      summary.textContent = 'Loading submit command preview...';
+      summary.textContent = 'Generating invocation preview...';
       output.className = 'csv-empty';
       output.textContent = 'Loading...';
       const selections = submitSelection.allSelected ? [] : submitSelection.selections;
-      const data = await api(`/api/experiments/${encodeURIComponent(state.selected)}/submit-preview`, {
+      const data = await api(`/api/experiments/${encodeURIComponent(experimentId)}/submit-preview`, {
         method: 'POST',
         body: JSON.stringify({ selections })
       });
-      renderSubmitPreview(data, state.editorDirty && !state.shared);
+      if (state.selected !== experimentId) return;
+      renderSubmitPreview(data);
     }
     async function deleteExperiment() {
       if (!state.selected || state.selectedArchived) return;

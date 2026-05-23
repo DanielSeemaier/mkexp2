@@ -843,7 +843,10 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('>Submit</button>', mkexp2_web.HTML)
         self.assertIn("async function openSubmitPreviewDialog", mkexp2_web.HTML)
         self.assertIn("/submit-preview", mkexp2_web.HTML)
-        self.assertIn("function shellCommand", mkexp2_web.HTML)
+        self.assertIn("Partitioner Invocations", mkexp2_web.HTML)
+        self.assertIn("generated partitioner invocation", mkexp2_web.HTML)
+        self.assertIn("invocation.command", mkexp2_web.HTML)
+        self.assertNotIn("function shellCommand", mkexp2_web.HTML)
         self.assertNotIn("function submitPlayIconHtml", mkexp2_web.HTML)
         self.assertNotIn("Submit Selected", mkexp2_web.HTML)
         self.assertNotIn(".submit-algorithm-group {\n      display: grid;\n      gap: 8px;\n      min-width: 0;\n      border: 1px solid var(--border);", mkexp2_web.HTML)
@@ -1718,26 +1721,46 @@ class WebBackendTest(unittest.TestCase):
         self.assertTrue(any(call[0][:3] == ["git", "commit", "-m"] and "ExperimentA:MockA" in call[0][3] for call in calls))
         self.assertTrue(all(call[1] in (exp_cwd, str(repo.resolve())) for call in calls))
 
-    def test_submit_preview_describes_command_plan(self):
+    def test_submit_preview_describes_generated_invocations(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            calls.append((list(argv), str(cwd) if cwd else None, timeout))
+            return {"returncode": 0, "stdout": "", "stderr": ""}
+
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             (repo / "exp").mkdir()
             (repo / "exp" / "Experiment").write_text("ExperimentA() { :; }\n")
+            (repo / "exp" / "jobs").mkdir()
+            (repo / "exp" / "jobs" / "ExperimentA__1x1x1.cmds").write_text(
+                "run MockA --graph a >> logs/a.log 2>&1\n"
+                "run MockB --graph b >> logs/b.log 2>&1\n"
+                "run MockC --graph c >> logs/c.log 2>&1\n"
+            )
+            (repo / "exp" / "jobs" / "ExperimentA__1x1x1.cmds.meta.tsv").write_text(
+                "0\tMockA\tMock\tExperimentA\t1x1x1\tlogs/a.log\n"
+                "1\tMockB\tMock\tExperimentB\t1x1x1\tlogs/b.log\n"
+                "2\tMockC\tMock\tExperimentA\t1x1x1\tlogs/c.log\n"
+            )
             app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
-            preview = app.submit_preview("exp", {
-                "selections": [
-                    {"experiment": "ExperimentA", "algorithm": "MockA"},
-                    {"experiment": "ExperimentB", "algorithm": "MockB"},
-                ],
-            })
+            mkexp2_web.run_command = fake_run_command
+            try:
+                preview = app.submit_preview("exp", {
+                    "selections": [
+                        {"experiment": "ExperimentA", "algorithm": "MockA"},
+                        {"experiment": "ExperimentB", "algorithm": "MockB"},
+                    ],
+                })
+            finally:
+                mkexp2_web.run_command = original_run_command
 
-        self.assertEqual([step["name"] for step in preview["steps"]], ["Check", "Probe", "Generate", "Submit"])
-        self.assertEqual(preview["steps"][0]["argv"], ["/fake/mkexp2", "check", "--json"])
-        self.assertEqual(preview["steps"][2]["argv"], ["/fake/mkexp2", "generate"])
-        self.assertEqual(preview["steps"][3]["argv"][:4], ["zsh", "./submit.sh", "--install", "--selection-file"])
-        self.assertEqual(preview["selection_file"], ".mkexp2/web-submit-selection-<temporary>.tsv")
-        self.assertIn("ExperimentA\tMockA\n", preview["selection_tsv"])
-        self.assertIn("ExperimentB\tMockB\n", preview["selection_tsv"])
+        self.assertEqual(calls[0][0], ["/fake/mkexp2", "generate"])
+        self.assertEqual([item["algorithm"] for item in preview["invocations"]], ["MockA", "MockB"])
+        self.assertEqual(preview["invocations"][0]["command"], "run MockA --graph a >> logs/a.log 2>&1")
+        self.assertEqual(preview["invocations"][1]["experiment"], "ExperimentB")
+        self.assertNotIn("steps", preview)
 
     def test_parse_action_uses_argv_array(self):
         calls = []
