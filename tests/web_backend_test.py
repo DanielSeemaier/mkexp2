@@ -499,7 +499,8 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("function formatExperimentDate", mkexp2_web.HTML)
         self.assertIn("${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}", mkexp2_web.HTML)
         self.assertIn("date.textContent = created || 'unknown'", mkexp2_web.HTML)
-        self.assertIn("selectedPathText(data.path, data)", mkexp2_web.HTML)
+        self.assertIn("function selectedDateText", mkexp2_web.HTML)
+        self.assertIn("setSelectedExperimentMetadata(id, data.path, data)", mkexp2_web.HTML)
         self.assertIn('id="copy-experiment"', mkexp2_web.HTML)
         self.assertIn('id="copy-modal"', mkexp2_web.HTML)
         self.assertIn("async function copyExperiment", mkexp2_web.HTML)
@@ -851,7 +852,16 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="create-open" class="icon-button" aria-label="Create experiment"', mkexp2_web.HTML)
         self.assertIn('class="panel-header experiment-editor-header"', mkexp2_web.HTML)
         self.assertIn('class="experiment-editor-heading"', mkexp2_web.HTML)
+        self.assertIn('class="muted experiment-editor-date" id="selected-date"', mkexp2_web.HTML)
         self.assertIn('class="muted experiment-editor-meta" id="selected-path"', mkexp2_web.HTML)
+        self.assertLess(
+            mkexp2_web.HTML.index('id="selected-title"'),
+            mkexp2_web.HTML.index('id="selected-date"'),
+        )
+        self.assertLess(
+            mkexp2_web.HTML.index('id="selected-date"'),
+            mkexp2_web.HTML.index('id="check"'),
+        )
         self.assertLess(
             mkexp2_web.HTML.index('id="experiment-editor"'),
             mkexp2_web.HTML.index('id="selected-path"'),

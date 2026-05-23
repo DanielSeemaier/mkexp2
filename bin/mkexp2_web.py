@@ -4161,8 +4161,13 @@ HTML = r"""<!doctype html>
       align-self: flex-start;
     }
     .experiment-editor-header .panel-title,
+    .experiment-editor-date,
     .experiment-editor-meta {
       overflow-wrap: anywhere;
+    }
+    .experiment-editor-date {
+      margin-top: 2px;
+      font-size: 12px;
     }
     .experiment-editor-meta {
       margin-top: 8px;
@@ -6823,6 +6828,7 @@ HTML = r"""<!doctype html>
             <div class="panel-header experiment-editor-header">
               <div class="experiment-editor-heading">
                 <div class="panel-title" id="selected-title">Experiment</div>
+                <div class="muted experiment-editor-date" id="selected-date"></div>
               </div>
               <div class="actions check-action">
                 <span id="check-indicator" class="check-indicator hidden" aria-live="polite"></span>
@@ -9580,9 +9586,16 @@ HTML = r"""<!doctype html>
       const pad = value => String(value).padStart(2, '0');
       return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
     }
-    function selectedPathText(path, exp) {
-      const date = formatExperimentDate(exp || {});
-      return date ? `${path} · ${date}` : path;
+    function selectedDateText(exp) {
+      return formatExperimentDate(exp || {});
+    }
+    function selectedPathText(path) {
+      return String(path || '');
+    }
+    function setSelectedExperimentMetadata(title, path = '', exp = {}) {
+      document.getElementById('selected-title').textContent = title || 'Experiment';
+      document.getElementById('selected-date').textContent = selectedDateText(exp);
+      document.getElementById('selected-path').textContent = selectedPathText(path);
     }
     function compareExperimentsByCreatedDesc(left, right) {
       const createdDelta = experimentCreationKey(right) - experimentCreationKey(left);
@@ -11114,8 +11127,7 @@ HTML = r"""<!doctype html>
       state.progressLoadSeq += 1;
       clearPlotPdfUrl();
       setView('experiment-view').catch(err => out(String(err)));
-      document.getElementById('selected-title').textContent = 'Experiment';
-      document.getElementById('selected-path').textContent = '';
+      setSelectedExperimentMetadata('Experiment');
       editor.readOnly = Boolean(state.shared);
       setEditorValue('');
       renderResultsWorkspace();
@@ -11671,8 +11683,7 @@ HTML = r"""<!doctype html>
       const data = await api(`/api/experiments/${encodeURIComponent(id)}/experiment`);
       if (state.selected !== id || state.selectionSeq !== selectionId) return;
       clearTransientOutput();
-      document.getElementById('selected-title').textContent = id;
-      document.getElementById('selected-path').textContent = selectedPathText(data.path, data);
+      setSelectedExperimentMetadata(id, data.path, data);
       setEditorValue(data.experiment);
       state.editorDirty = false;
       setExperimentTagInState(id, data.tag || null);
@@ -11744,8 +11755,7 @@ HTML = r"""<!doctype html>
       const data = await api(`/api/experiments/${encodeURIComponent(id)}/experiment`);
       if (state.selected !== id || state.selectionSeq !== selectionId) return;
       clearTransientOutput();
-      document.getElementById('selected-title').textContent = id;
-      document.getElementById('selected-path').textContent = selectedPathText(data.path, data);
+      setSelectedExperimentMetadata(id, data.path, data);
       setEditorValue(data.experiment);
       state.editorDirty = false;
       setExperimentTagInState(id, data.tag || null);
@@ -11769,8 +11779,7 @@ HTML = r"""<!doctype html>
       state.algorithmLoadSeq += 1;
       clearAlgorithmChoices();
       setView('experiment-view').catch(err => out(String(err)));
-      document.getElementById('selected-title').textContent = id;
-      document.getElementById('selected-path').textContent = selectedPathText(data.path, data);
+      setSelectedExperimentMetadata(id, data.path, data);
       setEditorValue(data.experiment);
       state.editorDirty = false;
       renderSubmitLock(data.submit_lock);
