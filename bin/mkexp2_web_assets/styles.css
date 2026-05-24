@@ -2712,9 +2712,13 @@
     }
     .tag-manager-grid {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(220px, auto) auto;
-      gap: 8px;
+      grid-template-columns: minmax(220px, 1fr) minmax(240px, auto) auto;
+      gap: 10px;
       align-items: end;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-2);
     }
     .tag-color-field {
       display: grid;
@@ -2955,7 +2959,7 @@
       min-height: 82px;
     }
     .settings-modal {
-      width: min(1040px, 100%);
+      width: min(1120px, calc(100vw - 32px));
     }
     .settings-modal .modal-body {
       display: block;
@@ -2964,24 +2968,24 @@
     }
     .settings-layout {
       display: grid;
-      grid-template-columns: 176px minmax(0, 1fr);
-      height: min(760px, calc(100vh - 118px));
+      grid-template-columns: 188px minmax(0, 1fr);
+      height: min(820px, calc(100vh - 118px));
       min-height: min(560px, calc(100vh - 118px));
       min-width: 0;
     }
     .settings-nav {
       display: grid;
       align-content: start;
-      gap: 4px;
+      gap: 5px;
       min-width: 0;
-      padding: 14px 10px;
+      padding: 16px 12px;
       border-right: 1px solid var(--border);
       background: var(--surface);
       overflow: auto;
       scrollbar-gutter: stable;
     }
     .settings-nav-title {
-      padding: 0 8px 7px;
+      padding: 0 8px 9px;
       color: var(--muted);
       font-size: 11px;
       font-weight: 800;
@@ -2993,8 +2997,8 @@
       align-items: center;
       justify-content: flex-start;
       width: 100%;
-      min-height: 34px;
-      padding: 0 9px;
+      min-height: 36px;
+      padding: 0 10px;
       border-color: transparent;
       border-radius: 6px;
       background: transparent;
@@ -3014,14 +3018,14 @@
       border-color: var(--tab-active-border);
       color: var(--tab-active-text);
       background: var(--tab-active-bg);
-      box-shadow: var(--shadow-soft);
+      box-shadow: inset 3px 0 0 var(--tab-active-border), var(--shadow-soft);
     }
     .settings-content {
       display: grid;
       align-content: start;
-      gap: 18px;
+      gap: 16px;
       min-width: 0;
-      padding: 16px 16px clamp(180px, 42vh, 360px);
+      padding: 18px 18px clamp(180px, 42vh, 360px);
       overflow: auto;
       scroll-behavior: smooth;
       scrollbar-gutter: stable;
@@ -3029,6 +3033,7 @@
     .settings-token {
       display: grid;
       gap: 6px;
+      max-width: 520px;
     }
     .settings-token label {
       font-weight: 750;
@@ -3039,7 +3044,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 10px;
+      padding: 12px;
       border: 1px solid var(--border);
       border-radius: 6px;
       background: var(--surface);
@@ -3071,7 +3076,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 10px;
+      padding: 12px;
       border: 1px solid var(--border);
       border-radius: 6px;
       background: var(--surface);
@@ -3081,6 +3086,12 @@
       font-weight: 750;
       font-size: 12px;
       margin-bottom: 3px;
+    }
+    .settings-section-title {
+      color: var(--text);
+      font-size: 15px;
+      font-weight: 850;
+      letter-spacing: 0;
     }
     .settings-tool button {
       flex: 0 0 auto;
@@ -3097,9 +3108,9 @@
     }
     .settings-section {
       display: grid;
-      gap: 10px;
+      gap: 12px;
       min-width: 0;
-      padding-bottom: 18px;
+      padding: 0 0 20px;
       border-bottom: 1px solid var(--border);
       scroll-margin-top: 14px;
     }
@@ -3112,21 +3123,23 @@
       justify-content: space-between;
       align-items: flex-start;
       gap: 12px;
-      margin-bottom: 2px;
+      padding-bottom: 2px;
     }
     .settings-section-header h3 {
       margin-top: 0;
     }
     .settings-subsection {
       display: grid;
-      gap: 8px;
-      padding-top: 10px;
-      border-top: 1px dashed var(--border);
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-2);
     }
     .settings-subsection-title {
       color: var(--muted);
       font-size: 12px;
-      font-weight: 750;
+      font-weight: 850;
       text-transform: uppercase;
       letter-spacing: 0;
     }
@@ -3136,15 +3149,15 @@
     }
     .insert-template-list {
       display: grid;
-      gap: 10px;
+      gap: 12px;
     }
     .insert-template-card {
       display: grid;
-      gap: 10px;
-      padding: 10px;
+      gap: 12px;
+      padding: 12px;
       border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--surface);
+      border-radius: 8px;
+      background: var(--panel);
       box-shadow: var(--shadow-soft);
     }
     .insert-template-header {
@@ -3157,9 +3170,15 @@
       display: grid;
       gap: 8px;
     }
+    .settings-template-param {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
     .insert-template-details {
       display: grid;
       gap: 8px;
+      padding-top: 2px;
     }
     .insert-template-details[open] {
       gap: 10px;
@@ -3168,7 +3187,8 @@
       color: var(--muted);
       cursor: pointer;
       font-size: 12px;
-      font-weight: 750;
+      font-weight: 850;
+      list-style-position: inside;
     }
     .insert-template-parameters,
     .insert-template-body {
@@ -3195,14 +3215,14 @@
     }
     .workspace-list {
       display: grid;
-      gap: 6px;
+      gap: 8px;
     }
     .workspace-row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
       align-items: center;
       gap: 10px;
-      padding: 9px 10px;
+      padding: 10px 12px;
       border: 1px solid var(--border);
       border-radius: 6px;
       background: var(--surface);
@@ -3215,7 +3235,8 @@
     }
     .workspace-row.active {
       border-color: var(--tab-active-border);
-      box-shadow: inset 3px 0 0 var(--tab-active-bg);
+      background: var(--accent-soft);
+      box-shadow: inset 3px 0 0 var(--tab-active-bg), var(--shadow-soft);
     }
     .workspace-name {
       font-weight: 750;
@@ -3720,6 +3741,9 @@
       .settings-tool {
         align-items: stretch;
         flex-direction: column;
+      }
+      .tag-manager-grid {
+        grid-template-columns: 1fr;
       }
       .settings-inline-tool {
         width: 100%;
