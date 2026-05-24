@@ -357,14 +357,13 @@ __MKEXP2_STYLES__
               <div class="settings-tool">
                 <div>
                   <div class="settings-tool-title">Download archives</div>
-                  <div class="csv-summary">Choose the archive format used by the experiment download button.</div>
+                  <div class="csv-summary">Choose the preferred archive format used by the experiment download button. Unavailable formats fall back automatically.</div>
                 </div>
                 <div class="settings-inline-tool">
                   <select id="download-archive-format" title="Download archive format">
-                    <option value="auto">Auto: tar.zst, fallback ZIP</option>
-                    <option value="tar.zst">tar.zst</option>
-                    <option value="zip">ZIP</option>
-                    <option value="tar">tar</option>
+                    <option value="tar.zstd">tar.zstd</option>
+                    <option value="tar.gz">tar.gz</option>
+                    <option value="zip">zip</option>
                   </select>
                 </div>
               </div>

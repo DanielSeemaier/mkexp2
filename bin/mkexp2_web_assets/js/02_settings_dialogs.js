@@ -282,14 +282,14 @@
       return ['light', 'dark', 'system'].includes(theme) ? theme : 'light';
     }
     function normalizeDownloadArchiveFormat(format) {
-      return ['auto', 'tar.zst', 'zip', 'tar'].includes(format) ? format : 'auto';
+      if (format === 'auto' || format === 'tar.zst') return 'tar.zstd';
+      return ['tar.zstd', 'tar.gz', 'zip'].includes(format) ? format : 'tar.zstd';
     }
     function downloadArchiveFormatLabel(format) {
       const normalized = normalizeDownloadArchiveFormat(format);
-      if (normalized === 'tar.zst') return 'tar.zst';
-      if (normalized === 'zip') return 'ZIP';
-      if (normalized === 'tar') return 'tar';
-      return 'Auto: tar.zst, fallback ZIP';
+      if (normalized === 'tar.gz') return 'tar.gz';
+      if (normalized === 'zip') return 'zip';
+      return 'tar.zstd';
     }
     function effectiveTheme(theme) {
       const normalized = normalizeTheme(theme);
@@ -315,7 +315,7 @@
       if (!select) return;
       const formats = Array.isArray(state.settings?.download_archive_formats)
         ? state.settings.download_archive_formats
-        : ['auto', 'tar.zst', 'zip', 'tar'];
+        : ['tar.zstd', 'tar.gz', 'zip'];
       const current = normalizeDownloadArchiveFormat(state.settings?.download_archive_format);
       select.innerHTML = '';
       for (const format of formats) {

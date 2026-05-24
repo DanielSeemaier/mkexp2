@@ -355,14 +355,14 @@ class WebBackendTest(unittest.TestCase):
                 options = app.experiment_download_options("exp")
                 self.assertEqual([item["name"] for item in options["directories"]], ["jobs", "logs", "results"])
                 self.assertIn("Experiment", options["root_files"])
-                self.assertEqual(options["archive_format"], "auto")
-                self.assertIn("zip", options["archive_formats"])
+                self.assertEqual(options["archive_format"], "tar.zstd")
+                self.assertEqual(options["archive_formats"], ["tar.zstd", "tar.gz", "zip"])
 
                 archive = app.experiment_archive("exp", include_dirs=["results"])
                 try:
-                    self.assertEqual(archive["format"], "zip")
-                    with zipfile.ZipFile(archive["path"]) as zip_file:
-                        names = set(zip_file.namelist())
+                    self.assertEqual(archive["format"], "tar.gz")
+                    with tarfile.open(archive["path"], "r:gz") as tar_file:
+                        names = set(tar_file.getnames())
                     self.assertIn("exp/Experiment", names)
                     self.assertIn("exp/description.md", names)
                     self.assertIn("exp/results/A.csv", names)
@@ -376,18 +376,18 @@ class WebBackendTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     app.experiment_archive("exp", include_dirs=["missing"])
 
-                app.write_settings({"download_archive_format": "tar"})
-                tar_archive = app.experiment_archive("exp", include_dirs=["results"])
+                app.write_settings({"download_archive_format": "zip"})
+                zip_archive = app.experiment_archive("exp", include_dirs=["results"])
                 try:
-                    self.assertEqual(tar_archive["format"], "tar")
-                    with tarfile.open(tar_archive["path"]) as tar_file:
-                        names = set(tar_file.getnames())
+                    self.assertEqual(zip_archive["format"], "zip")
+                    with zipfile.ZipFile(zip_archive["path"]) as zip_file:
+                        names = set(zip_file.namelist())
                     self.assertIn("exp/Experiment", names)
                     self.assertIn("exp/description.md", names)
                     self.assertIn("exp/results/A.csv", names)
                     self.assertNotIn("exp/logs/A.log", names)
                 finally:
-                    tar_archive["path"].unlink(missing_ok=True)
+                    zip_archive["path"].unlink(missing_ok=True)
             finally:
                 mkexp2_web.shutil.which = original_which
 
@@ -474,9 +474,11 @@ class WebBackendTest(unittest.TestCase):
             self.assertEqual(app.write_settings({"theme": "system"})["theme"], "system")
             self.assertTrue((repo / ".mkexp2" / "web-settings.json").is_file())
             self.assertEqual(app.write_settings({"theme": "bad"})["theme"], "light")
-            self.assertEqual(app.read_settings()["download_archive_format"], "auto")
+            self.assertEqual(app.read_settings()["download_archive_format"], "tar.zstd")
             self.assertEqual(app.write_settings({"download_archive_format": "zip"})["download_archive_format"], "zip")
-            self.assertEqual(app.write_settings({"download_archive_format": "bad"})["download_archive_format"], "auto")
+            self.assertEqual(app.write_settings({"download_archive_format": "tar.gz"})["download_archive_format"], "tar.gz")
+            self.assertEqual(app.write_settings({"download_archive_format": "tar.zst"})["download_archive_format"], "tar.zstd")
+            self.assertEqual(app.write_settings({"download_archive_format": "bad"})["download_archive_format"], "tar.zstd")
             saved = app.write_settings({"benchmark_base_path": str(repo / "graphs")})
             self.assertEqual(saved["benchmark_base_path"], str(repo / "graphs"))
             self.assertEqual(app.read_settings()["benchmark_base_path"], str(repo / "graphs"))
@@ -1399,7 +1401,7 @@ class WebBackendTest(unittest.TestCase):
             archive = app.experiment_archive("exp")
             try:
                 self.assertTrue(archive["path"].is_file())
-                self.assertIn(archive["format"], {"tar.zst", "zip"})
+                self.assertIn(archive["format"], {"tar.zstd", "tar.gz", "zip"})
                 self.assertTrue(archive["filename"].startswith("exp."))
                 if archive["format"] == "zip":
                     with zipfile.ZipFile(archive["path"]) as zip_file:
