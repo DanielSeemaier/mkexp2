@@ -165,7 +165,7 @@ ExperimentKaHIPAliases() {
 }
 
 ExperimentParHIPAliases() {
-  Algorithms ParHIP-Fast ParHIP-Eco
+  Algorithms ParHIP-Fast ParHIP-Eco ParHIP-SocialFast ParHIP-SocialEco
   Graph graphs/demo
   Ks 4
   Seeds 7
@@ -183,8 +183,8 @@ EOF
     assert_eq "$(jq -r '[.calls[].raw_command | contains("--num_threads=2")] | all' kahip-calls.json)" "true" "KaHIP generation passes thread count"
 
     "$MKEXP2" probe ParHIPAliases --calls > parhip-calls.json
-    assert_eq "$(jq -r '.calls | length' parhip-calls.json)" "2" "ParHIP aliases expand to two calls"
-    assert_eq "$(jq -r '[.calls[].raw_command | capture("--preconfiguration=(?<p>[^ ]+)").p] | sort | join(",")' parhip-calls.json)" "ecomesh,fastmesh" "ParHIP aliases use mesh preconfigurations"
+    assert_eq "$(jq -r '.calls | length' parhip-calls.json)" "4" "ParHIP aliases expand to four calls"
+    assert_eq "$(jq -r '[.calls[].raw_command | capture("--preconfiguration=(?<p>[^ ]+)").p] | sort | join(",")' parhip-calls.json)" "ecomesh,ecosocial,fastmesh,fastsocial" "ParHIP aliases use mesh and social preconfigurations"
     assert_eq "$(jq -r '[.calls[].raw_command | contains("--imbalance=3")] | all' parhip-calls.json)" "true" "ParHIP generation converts fractional epsilon to percent"
     assert_eq "$(jq -r '[.calls[].final_command | startswith("mpirun -n 2 ")] | all' parhip-calls.json)" "true" "ParHIP distributed local topology is wrapped with mpirun"
   )

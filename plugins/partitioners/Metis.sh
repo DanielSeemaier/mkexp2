@@ -6,9 +6,7 @@ PartitionerDefaults_Metis() {
   SetPartitionerDefault "Metis" "supports_distributed" "false" "enum:true|false"
   SetPartitionerDefault "Metis" "use_openmp_env" "false" "enum:true|false"
   SetPartitionerDefault "Metis" "binary" "gpmetis" "any"
-  SetPartitionerDefault "Metis" "seed_flag" "-seed" "any"
-  SetPartitionerDefault "Metis" "imbalance_flag" "-ufactor" "any"
-  SetPartitionerDefault "Metis" "ufactor_scale" "1000" "integer>=1" "used when imbalance_flag is non-empty"
+  SetPartitionerDefault "Metis" "ufactor_scale" "1000" "integer>=1"
 }
 
 PartitionerFetch_Metis() {
@@ -74,13 +72,9 @@ PartitionerInvoke_Metis() {
     return 1
   fi
 
-  local seed_flag=""
-  local imbalance_flag=""
   local ufactor_scale=""
   local ufactor="0"
 
-  seed_flag=$(PartitionerProperty "seed_flag" "-seed")
-  imbalance_flag=$(PartitionerProperty "imbalance_flag" "-ufactor")
   ufactor_scale=$(PartitionerProperty "ufactor_scale" "1000")
   if [[ "$ufactor_scale" != <-> ]] || (( ufactor_scale <= 0 )); then
     EchoFatal "Metis property 'ufactor_scale' must be a positive integer, got '$ufactor_scale'"
@@ -93,12 +87,8 @@ PartitionerInvoke_Metis() {
 
   local cmd=""
   cmd="${(q)RUN_binary_path}"
-  if [[ -n "$seed_flag" ]]; then
-    cmd+=" ${seed_flag}=${(q)RUN_seed}"
-  fi
-  if [[ -n "$imbalance_flag" ]]; then
-    cmd+=" ${imbalance_flag}=${(q)ufactor}"
-  fi
+  cmd+=" -seed=${(q)RUN_seed}"
+  cmd+=" -ufactor=${(q)ufactor}"
   if [[ -n "$RUN_args" ]]; then
     cmd+=" $RUN_args"
   fi

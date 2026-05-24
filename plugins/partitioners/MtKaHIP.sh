@@ -8,8 +8,6 @@ PartitionerDefaults_MtKaHIP() {
   SetPartitionerDefault "MtKaHIP" "use_openmp_env" "false" "enum:true|false"
   SetPartitionerDefault "MtKaHIP" "binary" "mtkahip" "any"
   SetPartitionerDefault "MtKaHIP" "preconfiguration" "socialparallel" "enum:socialparallel|multitrysocialparallel"
-  SetPartitionerDefault "MtKaHIP" "seed_flag" "--seed" "any"
-  SetPartitionerDefault "MtKaHIP" "epsilon_flag" "--imbalance" "any"
 }
 
 PartitionerAliases_MtKaHIP() {
@@ -87,11 +85,7 @@ PartitionerInvoke_MtKaHIP() {
   fi
 
   local preconfiguration=""
-  local seed_flag=""
-  local epsilon_flag=""
   preconfiguration=$(PartitionerProperty "preconfiguration" "socialparallel")
-  seed_flag=$(PartitionerProperty "seed_flag" "--seed")
-  epsilon_flag=$(PartitionerProperty "epsilon_flag" "--imbalance")
 
   local cmd=""
   cmd="${(q)RUN_binary_path}"
@@ -101,12 +95,8 @@ PartitionerInvoke_MtKaHIP() {
   if [[ -n "$preconfiguration" ]]; then
     cmd+=" --preconfiguration=${(q)preconfiguration}"
   fi
-  if [[ -n "$seed_flag" ]]; then
-    cmd+=" ${seed_flag}=${(q)RUN_seed}"
-  fi
-  if [[ -n "$epsilon_flag" ]]; then
-    cmd+=" ${epsilon_flag}=${(q)RUN_epsilon}"
-  fi
+  cmd+=" --seed=${(q)RUN_seed}"
+  cmd+=" --imbalance=${(q)RUN_epsilon}"
   if [[ -n "$RUN_args" ]]; then
     cmd+=" $RUN_args"
   fi

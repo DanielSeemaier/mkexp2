@@ -6,11 +6,6 @@ PartitionerDefaults_ParMETIS() {
   SetPartitionerDefault "ParMETIS" "supports_distributed" "true" "enum:true|false"
   SetPartitionerDefault "ParMETIS" "use_openmp_env" "false" "enum:true|false"
   SetPartitionerDefault "ParMETIS" "binary" "parmetis" "any"
-  SetPartitionerDefault "ParMETIS" "k_argument_style" "positional" "enum:positional|flag"
-  SetPartitionerDefault "ParMETIS" "k_flag" "--k" "any" "used when k_argument_style=flag"
-  SetPartitionerDefault "ParMETIS" "seed_flag" "" "any"
-  SetPartitionerDefault "ParMETIS" "imbalance_flag" "" "any"
-  SetPartitionerDefault "ParMETIS" "ufactor_scale" "1000" "integer>=1" "used when imbalance_flag is non-empty"
 }
 
 PartitionerFetch_ParMETIS() {
@@ -79,44 +74,13 @@ PartitionerInvoke_ParMETIS() {
     return 1
   fi
 
-  local k_argument_style=""
-  local k_flag=""
-  local seed_flag=""
-  local imbalance_flag=""
-  local ufactor_scale=""
-  local ufactor="0"
-
-  k_argument_style=$(PartitionerProperty "k_argument_style" "positional")
-  k_flag=$(PartitionerProperty "k_flag" "--k")
-  seed_flag=$(PartitionerProperty "seed_flag" "")
-  imbalance_flag=$(PartitionerProperty "imbalance_flag" "")
-  ufactor_scale=$(PartitionerProperty "ufactor_scale" "1000")
-  if [[ "$ufactor_scale" != <-> ]] || (( ufactor_scale <= 0 )); then
-    EchoFatal "ParMETIS property 'ufactor_scale' must be a positive integer, got '$ufactor_scale'"
-    exit 1
-  fi
-  printf -v ufactor "%.0f" "$((RUN_epsilon * ufactor_scale))"
-  if (( ufactor < 1 )); then
-    ufactor=1
-  fi
-
   local cmd=""
   cmd="${(q)RUN_binary_path}"
-  if [[ -n "$seed_flag" ]]; then
-    cmd+=" ${seed_flag}=${(q)RUN_seed}"
-  fi
-  if [[ -n "$imbalance_flag" ]]; then
-    cmd+=" ${imbalance_flag}=${(q)ufactor}"
-  fi
   if [[ -n "$RUN_args" ]]; then
     cmd+=" $RUN_args"
   fi
   cmd+=" ${(q)graph}"
-  if [[ "$k_argument_style" == "flag" ]]; then
-    cmd+=" ${k_flag}=${(q)RUN_k}"
-  else
-    cmd+=" ${(q)RUN_k}"
-  fi
+  cmd+=" ${(q)RUN_k}"
 
   PARTITIONER_INVOKE_CMD="$cmd"
 }

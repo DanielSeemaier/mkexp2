@@ -9,11 +9,6 @@ PartitionerDefaults_KaHIP() {
   SetPartitionerDefault "KaHIP" "binary" "kaffpa" "any"
   SetPartitionerDefault "KaHIP" "build_backend" "auto" "enum:auto|cmake|compile_withcmake|compile_sh"
   SetPartitionerDefault "KaHIP" "preconfiguration" "eco" "enum:fast|eco|strong|fsocial|esocial|ssocial"
-  SetPartitionerDefault "KaHIP" "preconfiguration_flag" "--preconfiguration" "any"
-  SetPartitionerDefault "KaHIP" "k_flag" "--k" "any"
-  SetPartitionerDefault "KaHIP" "seed_flag" "--seed" "any"
-  SetPartitionerDefault "KaHIP" "epsilon_flag" "--imbalance" "any"
-  SetPartitionerDefault "KaHIP" "threads_flag" "--num_threads" "any"
 }
 
 PartitionerAliases_KaHIP() {
@@ -184,38 +179,18 @@ PartitionerInvoke_KaHIP() {
   fi
 
   local preconfiguration=""
-  local preconfiguration_flag=""
-  local k_flag=""
-  local seed_flag=""
-  local epsilon_flag=""
-  local threads_flag=""
   local epsilon_percent=""
   preconfiguration=$(PartitionerProperty "preconfiguration" "")
-  preconfiguration_flag=$(PartitionerProperty "preconfiguration_flag" "--preconfiguration")
-  k_flag=$(PartitionerProperty "k_flag" "--k")
-  seed_flag=$(PartitionerProperty "seed_flag" "--seed")
-  epsilon_flag=$(PartitionerProperty "epsilon_flag" "--imbalance")
-  threads_flag=$(PartitionerProperty "threads_flag" "--num_threads")
   epsilon_percent=$(_KaHIPPercentImbalance)
 
   local cmd=""
   cmd="${(q)RUN_binary_path}"
   cmd+=" ${(q)graph}"
-  if [[ -n "$k_flag" ]]; then
-    cmd+=" ${k_flag} ${(q)RUN_k}"
-  fi
-  if [[ -n "$threads_flag" ]]; then
-    cmd+=" ${threads_flag}=${(q)RUN_threads}"
-  fi
-  if [[ -n "$preconfiguration_flag" && -n "$preconfiguration" ]]; then
-    cmd+=" ${preconfiguration_flag}=${(q)preconfiguration}"
-  fi
-  if [[ -n "$seed_flag" ]]; then
-    cmd+=" ${seed_flag}=${(q)RUN_seed}"
-  fi
-  if [[ -n "$epsilon_flag" ]]; then
-    cmd+=" ${epsilon_flag}=${(q)epsilon_percent}"
-  fi
+  cmd+=" --k ${(q)RUN_k}"
+  cmd+=" --num_threads=${(q)RUN_threads}"
+  cmd+=" --preconfiguration=${(q)preconfiguration}"
+  cmd+=" --seed=${(q)RUN_seed}"
+  cmd+=" --imbalance=${(q)epsilon_percent}"
   if [[ -n "$RUN_args" ]]; then
     cmd+=" $RUN_args"
   fi
