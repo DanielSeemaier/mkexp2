@@ -306,6 +306,13 @@
       for (const partitioner of describe?.partitioners || []) map.set(partitioner.name, partitioner);
       return map;
     }
+    function describeAliasNames(describe = state.guidedModel?.describe) {
+      const names = new Set();
+      for (const partitioner of describe?.partitioners || []) {
+        for (const alias of partitioner.aliases || []) if (alias.name) names.add(alias.name);
+      }
+      return names;
+    }
     function guidedBaseOptions(describe = state.guidedModel?.describe) {
       const names = new Set();
       for (const partitioner of describe?.partitioners || []) {
@@ -456,12 +463,33 @@
           declaredProperties[name] = { ...(declaredProperties[name] || {}), ...(properties || {}) };
         }
       }
+      const algorithmOptions = new Set();
+      for (const experiment of experiments) {
+        const declared = experiment.declared || {};
+        const selectedNames = guidedTextList(declared.algorithms?.length ? declared.algorithms : (experiment.resolved?.algorithms || []).map(algorithm => algorithm.name));
+        for (const name of selectedNames) algorithmOptions.add(name);
+      }
+      const builtinAliasNames = describeAliasNames(describe);
+      const editableDefinitions = new Map(Array.from(declaredDefinitions.entries()).filter(([name]) => !builtinAliasNames.has(name)));
+      for (const name of editableDefinitions.keys()) algorithmOptions.add(name);
       const algorithmMap = new Map();
+      for (const [name, definition] of editableDefinitions.entries()) {
+        algorithmMap.set(name, {
+          name,
+          base: definition.base || '',
+          args: definition.args ?? '',
+          properties: guidedPropertiesForAlgorithm({
+            name,
+            base: definition.base || '',
+            declaredProperties: declaredProperties[name] || {},
+          }, describe),
+        });
+      }
       for (const experiment of experiments) {
         for (const algorithm of experiment.resolved?.algorithms || []) {
-          if (!algorithmMap.has(algorithm.name)) {
-            const definition = declaredDefinitions.get(algorithm.name) || {};
-            algorithmMap.set(algorithm.name, {
+          if (editableDefinitions.has(algorithm.name) && algorithmMap.has(algorithm.name)) {
+            const definition = editableDefinitions.get(algorithm.name) || {};
+            algorithmMap.set(algorithm.name, Object.assign({}, algorithmMap.get(algorithm.name), {
               name: algorithm.name,
               base: definition.base || algorithm.base || '',
               args: definition.args ?? algorithm.args ?? '',
@@ -470,22 +498,8 @@
                 base: definition.base || algorithm.base || '',
                 declaredProperties: declaredProperties[algorithm.name] || {},
               }, describe),
-            });
+            }));
           }
-        }
-      }
-      for (const [name, definition] of declaredDefinitions.entries()) {
-        if (!algorithmMap.has(name)) {
-          algorithmMap.set(name, {
-            name,
-            base: definition.base || '',
-            args: definition.args ?? '',
-            properties: guidedPropertiesForAlgorithm({
-              name,
-              base: definition.base || '',
-              declaredProperties: declaredProperties[name] || {},
-            }, describe),
-          });
         }
       }
       const basePath = model?.settings?.benchmark_base_path || state.settings?.benchmark_base_path || '';
@@ -514,10 +528,11 @@
       return {
         system: first.experiment?.system || describe.systems?.[0]?.name || 'slurm',
         properties: guidedPropertyRows(first.declared?.global_properties || {}),
+        algorithm_options: Array.from(algorithmOptions).sort((left, right) => left.localeCompare(right)),
         algorithm_definitions: Array.from(algorithmMap.values()),
         experiments: formExperiments.length ? formExperiments : [{
           function: 'ExperimentWeb',
-          algorithms: Array.from(algorithmMap.keys()),
+          algorithms: Array.from(algorithmOptions.size ? algorithmOptions : algorithmMap.keys()),
           graphs: basePath ? [{ kind: 'Graphs', path: basePath, extension: '' }] : [],
           ks: ['2'],
           seeds: ['1'],
@@ -538,44 +553,51 @@
     function guidedArgumentList(className, values = [], placeholder = 'value') {
       const wrapper = document.createElement('div');
       wrapper.className = `guided-arg-list ${className}`;
-      const list = document.createElement('div');
-      list.className = 'guided-arg-items';
-      const renderItem = value => {
-        const row = document.createElement('div');
-        row.className = 'guided-arg-item';
-        const input = guidedInput('guided-arg-value', value || '', placeholder);
+      const renderToken = value => {
+        const text = String(value || '').trim();
+        if (!text) return;
+        const token = document.createElement('span');
+        token.className = 'guided-arg-token';
+        token.dataset.value = text;
+        const label = document.createElement('span');
+        label.textContent = text;
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.textContent = 'x';
         remove.title = 'Remove argument';
         remove.onclick = () => {
-          row.remove();
+          token.remove();
           markGuidedDirty();
         };
-        row.appendChild(input);
-        row.appendChild(remove);
-        list.appendChild(row);
+        token.appendChild(label);
+        token.appendChild(remove);
+        wrapper.insertBefore(token, input);
       };
-      const initial = guidedTextList(values);
-      for (const value of initial.length ? initial : ['']) renderItem(value);
-      const add = document.createElement('button');
-      add.type = 'button';
-      add.className = 'small-button';
-      add.textContent = 'Add argument';
-      add.onclick = () => {
-        renderItem('');
+      const input = guidedInput('guided-arg-value', '', placeholder);
+      const commitInput = () => {
+        const values = guidedTextList(input.value);
+        if (!values.length) return;
+        for (const value of values) renderToken(value);
+        input.value = '';
         markGuidedDirty();
-        list.lastElementChild?.querySelector('input')?.focus();
       };
-      wrapper.appendChild(list);
-      wrapper.appendChild(add);
+      input.addEventListener('keydown', event => {
+        if (event.key !== ' ' && event.key !== 'Enter') return;
+        if (!input.value.trim()) return;
+        event.preventDefault();
+        commitInput();
+      });
+      input.addEventListener('blur', commitInput);
+      const initial = guidedTextList(values);
+      wrapper.appendChild(input);
+      for (const value of initial) renderToken(value);
       return wrapper;
     }
     function collectGuidedArgumentList(card, className) {
       const root = card.querySelector(`.${className}`);
-      return Array.from(root?.querySelectorAll('.guided-arg-value') || [])
-        .map(input => input.value.trim())
-        .filter(Boolean);
+      const tokens = Array.from(root?.querySelectorAll('.guided-arg-token') || []).map(token => token.dataset.value || token.textContent || '');
+      const pending = guidedTextList(root?.querySelector('.guided-arg-value')?.value || '');
+      return [...tokens, ...pending].map(value => String(value).trim()).filter(Boolean);
     }
     function guidedSelect(className, options, value = '') {
       const select = document.createElement('select');
@@ -859,16 +881,19 @@
       grid.appendChild(guidedField('Timelimit', guidedInput('guided-experiment-timelimit', experiment.timelimit || '', 'empty = unlimited time')));
       const algorithmChecks = document.createElement('div');
       algorithmChecks.className = 'guided-check-grid';
-      for (const algorithm of state.guidedForm.algorithm_definitions || []) {
+      const algorithmNames = new Set(state.guidedForm.algorithm_options || []);
+      for (const algorithm of state.guidedForm.algorithm_definitions || []) if (algorithm.name) algorithmNames.add(algorithm.name);
+      for (const algorithm of experiment.algorithms || []) algorithmNames.add(algorithm);
+      for (const algorithmName of Array.from(algorithmNames).sort((left, right) => left.localeCompare(right))) {
         const label = document.createElement('label');
         label.className = 'guided-check';
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.value = algorithm.name;
-        checkbox.checked = (experiment.algorithms || []).includes(algorithm.name);
+        checkbox.value = algorithmName;
+        checkbox.checked = (experiment.algorithms || []).includes(algorithmName);
         const text = document.createElement('span');
-        text.textContent = algorithm.name;
-        text.title = algorithm.name;
+        text.textContent = algorithmName;
+        text.title = algorithmName;
         label.appendChild(checkbox);
         label.appendChild(text);
         algorithmChecks.appendChild(label);
@@ -1008,6 +1033,10 @@
       return {
         system: box.querySelector('.guided-system')?.value || 'slurm',
         properties: collectGuidedPropertyRows(box.querySelector('.guided-global-properties') || document.createElement('div')),
+        algorithm_options: Array.from(new Set([
+          ...(state.guidedForm?.algorithm_options || []),
+          ...Array.from(box.querySelectorAll('[data-guided-algorithm]')).map(card => card.querySelector('.guided-algorithm-name')?.value.trim() || '').filter(Boolean),
+        ])).sort((left, right) => left.localeCompare(right)),
         algorithm_definitions: Array.from(box.querySelectorAll('[data-guided-algorithm]')).map(card => ({
           name: card.querySelector('.guided-algorithm-name')?.value.trim() || '',
           base: card.querySelector('.guided-algorithm-base')?.value.trim() || '',
