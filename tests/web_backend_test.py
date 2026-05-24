@@ -82,6 +82,12 @@ class WebBackendTest(unittest.TestCase):
                 app.experiment_path("nested//path")
             self.assertEqual(app.experiment_path("nested/path"), (repo / "nested" / "path").resolve())
 
+    def test_hidden_partitioner_names_are_available_for_guided_ui(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = mkexp2_web.Mkexp2WebApp(Path(tmp), ROOT / "bin" / "mkexp2", "%Y.%m.%d-<name>", "token")
+
+            self.assertIn("TestHarness", app.hidden_partitioner_names())
+
     def test_list_experiments_detects_nested_directories(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -630,11 +636,13 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("function guidedCustomAlgorithmNames", mkexp2_web.HTML)
         self.assertIn("function describeAliasNames", mkexp2_web.HTML)
         self.assertIn("function describeAlgorithmOptionNames", mkexp2_web.HTML)
+        self.assertIn("function guidedHiddenPartitionerNames", mkexp2_web.HTML)
         self.assertIn("for (const definition of guidedDefinitionChain(base))", mkexp2_web.HTML)
         self.assertIn("const editableDefinitions = new Map", mkexp2_web.HTML)
         self.assertIn("!definition.builtin && !builtinAliasNames.has(name)", mkexp2_web.HTML)
         self.assertIn("!builtinAliasNames.has(name)", mkexp2_web.HTML)
         self.assertIn("const algorithmOptions = describeAlgorithmOptionNames(describe)", mkexp2_web.HTML)
+        self.assertIn("hidden_algorithm_options", mkexp2_web.HTML)
         self.assertIn("algorithm_options", mkexp2_web.HTML)
         self.assertIn("const algorithmNames = new Set(state.guidedForm.algorithm_options || [])", mkexp2_web.HTML)
         self.assertIn("guided-custom-algorithm-card", mkexp2_web.HTML)

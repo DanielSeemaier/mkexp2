@@ -321,11 +321,17 @@
       }
       return names;
     }
+    function guidedHiddenPartitionerNames(model = state.guidedModel) {
+      return new Set((model?.ui?.hidden_partitioners || []).map(name => String(name || '').trim()).filter(Boolean));
+    }
     function guidedBaseOptions(describe = state.guidedModel?.describe) {
       const names = new Set();
+      const hiddenPartitioners = guidedHiddenPartitionerNames();
       for (const partitioner of describe?.partitioners || []) {
-        names.add(partitioner.name);
-        for (const alias of partitioner.aliases || []) names.add(alias.name);
+        if (partitioner.name && !hiddenPartitioners.has(partitioner.name)) names.add(partitioner.name);
+        if (!hiddenPartitioners.has(partitioner.name)) {
+          for (const alias of partitioner.aliases || []) names.add(alias.name);
+        }
       }
       for (const algorithm of state.guidedForm?.algorithm_definitions || []) {
         if (algorithm.name) names.add(algorithm.name);
@@ -466,6 +472,7 @@
       const first = experiments[0] || {};
       const declaredDefinitions = new Map();
       const declaredProperties = {};
+      const resolvedAlgorithmsByName = new Map();
       for (const experiment of experiments) {
         for (const definition of experiment.declared?.algorithm_definitions || []) {
           if (definition.name && !declaredDefinitions.has(definition.name)) declaredDefinitions.set(definition.name, definition);
@@ -473,15 +480,40 @@
         for (const [name, properties] of Object.entries(experiment.declared?.algorithm_properties || {})) {
           declaredProperties[name] = { ...(declaredProperties[name] || {}), ...(properties || {}) };
         }
+        for (const algorithm of experiment.resolved?.algorithms || []) {
+          if (algorithm.name && !resolvedAlgorithmsByName.has(algorithm.name)) resolvedAlgorithmsByName.set(algorithm.name, algorithm);
+        }
       }
       const algorithmOptions = describeAlgorithmOptionNames(describe);
+      const hiddenPartitioners = guidedHiddenPartitionerNames(model);
+      const hiddenAlgorithmOptions = new Set();
+      const shouldHideAlgorithmOption = name => {
+        if (!name) return false;
+        if (hiddenPartitioners.has(name)) return true;
+        const definition = declaredDefinitions.get(name);
+        if (definition?.builtin && hiddenPartitioners.has(definition.base)) return true;
+        const resolved = resolvedAlgorithmsByName.get(name);
+        return !definition && Boolean(resolved?.base && hiddenPartitioners.has(resolved.base));
+      };
       for (const experiment of experiments) {
         const declared = experiment.declared || {};
         const selectedNames = guidedTextList(declared.algorithms?.length ? declared.algorithms : (experiment.resolved?.algorithms || []).map(algorithm => algorithm.name));
-        for (const name of selectedNames) algorithmOptions.add(name);
+        for (const name of selectedNames) {
+          if (shouldHideAlgorithmOption(name)) {
+            hiddenAlgorithmOptions.add(name);
+          } else {
+            algorithmOptions.add(name);
+          }
+        }
       }
       const builtinAliasNames = describeAliasNames(describe);
-      for (const name of declaredDefinitions.keys()) algorithmOptions.add(name);
+      for (const name of declaredDefinitions.keys()) {
+        if (shouldHideAlgorithmOption(name)) {
+          hiddenAlgorithmOptions.add(name);
+        } else {
+          algorithmOptions.add(name);
+        }
+      }
       const editableDefinitions = new Map(Array.from(declaredDefinitions.entries()).filter(([name, definition]) =>
         !definition.builtin && !builtinAliasNames.has(name)
       ));
@@ -528,7 +560,8 @@
               .map(graph => ({ kind: 'Graph', path: graph, extension: '' }));
         return {
           function: experiment.experiment?.function || `Experiment${index + 1}`,
-          algorithms: guidedTextList(declared.algorithms?.length ? declared.algorithms : (experiment.resolved?.algorithms || []).map(algorithm => algorithm.name)),
+          algorithms: guidedTextList(declared.algorithms?.length ? declared.algorithms : (experiment.resolved?.algorithms || []).map(algorithm => algorithm.name))
+            .filter(name => !shouldHideAlgorithmOption(name)),
           graphs: graphDirectives.length ? graphDirectives : (basePath ? [{ kind: 'Graphs', path: basePath, extension: '' }] : []),
           ks: guidedTextList(declared.ks || []),
           seeds: guidedTextList(declared.seeds || []),
@@ -542,6 +575,7 @@
         system: first.experiment?.system || describe.systems?.[0]?.name || 'slurm',
         properties: guidedPropertyRows(first.declared?.global_properties || {}),
         algorithm_options: Array.from(algorithmOptions).sort((left, right) => left.localeCompare(right)),
+        hidden_algorithm_options: Array.from(hiddenAlgorithmOptions).sort((left, right) => left.localeCompare(right)),
         algorithm_definitions: Array.from(algorithmMap.values()),
         experiments: formExperiments.length ? formExperiments : [{
           function: 'ExperimentWeb',
@@ -991,10 +1025,12 @@
       const algorithmChecks = document.createElement('div');
       algorithmChecks.className = 'guided-check-grid';
       const algorithmNames = new Set(state.guidedForm.algorithm_options || []);
+      const hiddenAlgorithms = new Set(state.guidedForm.hidden_algorithm_options || []);
       const customAlgorithms = guidedCustomAlgorithmNames();
       for (const algorithm of state.guidedForm.algorithm_definitions || []) if (algorithm.name) algorithmNames.add(algorithm.name);
-      for (const algorithm of experiment.algorithms || []) algorithmNames.add(algorithm);
+      for (const algorithm of experiment.algorithms || []) if (!hiddenAlgorithms.has(algorithm) || customAlgorithms.has(algorithm)) algorithmNames.add(algorithm);
       for (const algorithmName of Array.from(algorithmNames).sort((left, right) => left.localeCompare(right))) {
+        if (hiddenAlgorithms.has(algorithmName) && !customAlgorithms.has(algorithmName)) continue;
         const label = document.createElement('label');
         const isCustom = customAlgorithms.has(algorithmName);
         label.className = `guided-check${isCustom ? ' custom' : ''}`;
@@ -1154,6 +1190,7 @@
           ...(state.guidedForm?.algorithm_options || []),
           ...Array.from(box.querySelectorAll('[data-guided-algorithm]')).map(card => card.querySelector('.guided-algorithm-name')?.value.trim() || '').filter(Boolean),
         ])).sort((left, right) => left.localeCompare(right)),
+        hidden_algorithm_options: state.guidedForm?.hidden_algorithm_options || [],
         algorithm_definitions: Array.from(box.querySelectorAll('[data-guided-algorithm]')).map(card => ({
           name: card.querySelector('.guided-algorithm-name')?.value.trim() || '',
           base: card.querySelector('.guided-algorithm-base')?.value.trim() || '',

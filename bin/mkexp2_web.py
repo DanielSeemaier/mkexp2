@@ -881,6 +881,15 @@ class Mkexp2WebApp:
     def mkexp2_root(self):
         return self.mkexp2.parent.parent
 
+    def hidden_partitioner_names(self):
+        partitioners = self.mkexp2_root() / "plugins" / "partitioners"
+        names = []
+        for path in partitioners.glob(".*.sh"):
+            name = path.stem.lstrip(".")
+            if name:
+                names.append(name)
+        return sorted(set(names))
+
     def experiment_path(self, experiment_id):
         parts = str(experiment_id or "").split("/")
         if (
@@ -1889,6 +1898,7 @@ class Mkexp2WebApp:
             "probe": probe_payload,
             "describe": describe,
             "settings": self.read_settings(),
+            "ui": {"hidden_partitioners": self.hidden_partitioner_names()},
             "_command": probe,
         }
 
