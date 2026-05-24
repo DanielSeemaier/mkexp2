@@ -98,6 +98,7 @@
       downloadOptionsFor: null,
       queueServerUser: '',
       activeView: 'experiment-view',
+      authRequired: false,
       shared: false,
       shareId: '',
       shareCommandTemplate: '',
@@ -126,22 +127,76 @@
     const allowEmptyToken = __ALLOW_EMPTY_TOKEN__;
     const initialShareId = __SHARE_ID__;
     const tokenInput = document.getElementById('token');
+    const authTokenInput = document.getElementById('auth-token');
+    const authMessage = document.getElementById('auth-message');
     const editor = document.getElementById('experiment-editor');
     const editorHighlight = document.getElementById('experiment-highlight');
     tokenInput.value = localStorage.getItem('mkexp2-token') || '';
+    if (authTokenInput) authTokenInput.value = tokenInput.value;
     tokenInput.addEventListener('change', () => {
-      localStorage.setItem('mkexp2-token', tokenInput.value);
-      out('');
-      if (token() || allowEmptyToken) {
-        loadUiSettings().catch(err => out(String(err)));
-        refreshConfig().catch(err => out(String(err)));
-        refreshPresets().catch(err => out(String(err)));
-        refreshExperiments({ selectMostRecent: true }).catch(err => out(String(err)));
-        refreshStatus().catch(err => out(String(err)));
-      }
+      setStoredToken(tokenInput.value);
+      bootAuthenticatedUi({ selectMostRecent: true }).catch(err => out(String(err)));
     });
 
     function token() { return tokenInput.value; }
+    function setStoredToken(value) {
+      const next = String(value || '').trim();
+      tokenInput.value = next;
+      if (authTokenInput) authTokenInput.value = next;
+      localStorage.setItem('mkexp2-token', next);
+    }
+    function setAuthRequired(message = '') {
+      if (state.shared) return;
+      state.authRequired = true;
+      document.querySelector('.app')?.classList.add('auth-required');
+      if (authMessage) authMessage.textContent = message;
+      const experiments = document.getElementById('experiments');
+      if (experiments) {
+        experiments.className = 'experiment-list csv-empty';
+        experiments.textContent = 'Enter a session token to load experiments.';
+      }
+      const nodes = document.getElementById('slurm-status');
+      if (nodes) {
+        nodes.className = 'node-list muted';
+        nodes.textContent = 'Enter a session token to load node status.';
+      }
+      if (typeof stopNodeStatusPolling === 'function') stopNodeStatusPolling();
+      if (authTokenInput) {
+        authTokenInput.value = token();
+        window.setTimeout(() => authTokenInput.focus(), 0);
+      }
+    }
+    function clearAuthRequired() {
+      state.authRequired = false;
+      document.querySelector('.app')?.classList.remove('auth-required');
+      if (authMessage) authMessage.textContent = '';
+      const experiments = document.getElementById('experiments');
+      if (experiments) experiments.className = 'experiment-list';
+    }
+    async function submitAuthToken() {
+      const value = authTokenInput ? authTokenInput.value : tokenInput.value;
+      if (!String(value || '').trim() && !allowEmptyToken) {
+        setAuthRequired('Paste the session token printed by mkexp2 web.');
+        return;
+      }
+      setStoredToken(value);
+      clearAuthRequired();
+      await bootAuthenticatedUi({ selectMostRecent: true });
+    }
+    async function bootAuthenticatedUi(options = {}) {
+      if (state.shared) return;
+      if (!(token() || allowEmptyToken)) {
+        setAuthRequired();
+        return;
+      }
+      clearAuthRequired();
+      out('');
+      loadUiSettings().catch(err => out(String(err)));
+      refreshConfig().catch(err => out(String(err)));
+      refreshPresets().catch(err => out(String(err)));
+      refreshExperiments({ selectMostRecent: options.selectMostRecent !== false }).catch(err => out(String(err)));
+      refreshStatus().catch(err => out(String(err)));
+    }
     function apiPath(path) {
       if (!state.shared) return path;
       if (path.startsWith('/api/actions/')) {
@@ -672,6 +727,10 @@
       const response = await fetch(requestPath, Object.assign({}, options, { headers }));
       if (!response.ok) {
         const text = await response.text();
+        if (response.status === 401) {
+          setAuthRequired('Missing or invalid token. Paste the session token printed by mkexp2 web.');
+          throw new Error('Missing or invalid token.');
+        }
         appendConsoleLog(`${method} ${requestPath} failed`, text);
         throw new Error(text);
       }

@@ -512,6 +512,24 @@ __MKEXP2_STYLES__
       </div>
     </div>
     <main class="main">
+      <section id="auth-view" class="auth-panel panel" aria-live="polite">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Session Token Required</div>
+            <div class="csv-summary">Enter the token printed by <code>mkexp2 web</code> to load experiments.</div>
+          </div>
+        </div>
+        <div class="panel-body auth-body">
+          <label class="auth-token-field">
+            <span class="create-field-label">Session token</span>
+            <input id="auth-token" type="password" placeholder="Paste session token" autocomplete="current-password">
+          </label>
+          <div class="auth-actions">
+            <button id="auth-submit" class="primary">Connect</button>
+          </div>
+          <div id="auth-message" class="csv-summary"></div>
+        </div>
+      </section>
       <div class="view-tabs">
         <button class="view-tab active" data-view="experiment-view">Experiment</button>
         <button class="view-tab" data-view="results-view">Results</button>

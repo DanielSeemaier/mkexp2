@@ -72,6 +72,13 @@
       }
     }
     document.getElementById('refresh-status').onclick = () => refreshStatus().catch(err => out(String(err)));
+    document.getElementById('auth-submit').onclick = () => withBusyButton('auth-submit', 'Connecting...', submitAuthToken).catch(err => out(String(err)));
+    document.getElementById('auth-token').addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        withBusyButton('auth-submit', 'Connecting...', submitAuthToken).catch(err => out(String(err)));
+      }
+    });
     document.getElementById('queue-open').onclick = () => withBusyButton('queue-open', '', openQueueDialog).catch(err => out(String(err)));
     document.getElementById('queue-close').onclick = closeQueueDialog;
     document.getElementById('queue-refresh').onclick = () => withBusyButton('queue-refresh', '', loadQueue).catch(err => out(String(err)));
@@ -205,12 +212,6 @@
     initSidebarResize();
     if (initialShareId) {
       selectSharedExperiment(initialShareId).catch(err => out(String(err)));
-    } else if (token() || allowEmptyToken) {
-      loadUiSettings().catch(err => out(String(err)));
-      refreshConfig().catch(err => out(String(err)));
-      refreshPresets().catch(err => out(String(err)));
-      refreshExperiments({ selectMostRecent: true }).catch(err => out(String(err)));
-      refreshStatus().catch(err => out(String(err)));
     } else {
-      out('Enter the session token printed by mkexp2 web.');
+      bootAuthenticatedUi({ selectMostRecent: true }).catch(err => out(String(err)));
     }

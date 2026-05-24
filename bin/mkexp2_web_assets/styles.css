@@ -1085,6 +1085,33 @@
       align-items: center;
       flex-wrap: wrap;
     }
+    .auth-panel {
+      display: none;
+      min-height: calc(100vh - 36px);
+      align-content: start;
+      margin: 0;
+    }
+    .app.auth-required .auth-panel {
+      display: block;
+    }
+    .app.auth-required .view-tabs,
+    .app.auth-required .view-panel.active {
+      display: none;
+    }
+    .auth-body {
+      display: grid;
+      gap: 12px;
+      width: min(560px, 100%);
+    }
+    .auth-token-field {
+      display: grid;
+      gap: 6px;
+    }
+    .auth-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
     .view-tabs-spacer {
       flex: 1 1 140px;
       min-width: 140px;
