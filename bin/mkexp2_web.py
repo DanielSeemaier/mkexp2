@@ -3756,7 +3756,7 @@ def experiment_from_form(name, form):
     if not experiments:
         experiments = [{
             "function": experiment_function_name(name),
-            "algorithms": normalize_form_list(form.get("algorithms") or ["Mock"]),
+            "algorithms": normalize_form_list(form.get("algorithms") or ["KaMinPar-Fast"]),
             "graphs": normalize_form_lines(form.get("graphs") or ["graphs"]),
             "ks": normalize_form_list(form.get("ks") or ["2"]),
             "seeds": normalize_form_list(form.get("seeds") or ["1"]),

@@ -21,7 +21,6 @@ Requirements:
   - `local` (single machine, shared-memory)
   - `slurm` (supports arrays and dependencies between `Experiment*` functions)
 - Working partitioner plugins:
-  - `Mock` (local smoke tests)
   - `KaMinPar`
   - `dKaMinPar`
   - `Metis`
@@ -134,8 +133,8 @@ mkexp2 probe --all --algorithms
 mkexp2 probe Baseline --jobs
 mkexp2 probe Baseline --calls
 mkexp2 probe --presets
-mkexp2 probe Baseline --property Mock
-mkexp2 probe Baseline --property Mock.supports_distributed
+mkexp2 probe Baseline --property KaMinPar-Fast
+mkexp2 probe Baseline --property KaMinPar-Fast.supports_distributed
 ```
 
 Inspect a plugin (partitioner or system/launcher):

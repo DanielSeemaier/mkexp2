@@ -179,11 +179,11 @@ System slurm
 Property slurm.partition cpu
 Property slurm.use_array true
 Property slurm.array.max_parallel 7
-DefineAlgorithm MockA Mock --a
-DefineAlgorithm MockB Mock --b
+DefineAlgorithm HarnessA TestHarness --a
+DefineAlgorithm HarnessB TestHarness --b
 
 ExperimentArrayFilter() {
-  Algorithms MockA MockB
+  Algorithms HarnessA HarnessB
   Graph graphs/demo
   Ks 2 4
   Seeds 1
@@ -203,7 +203,7 @@ print -r -- "$@" >> "$SBATCH_ARGS_FILE"
 echo "Submitted batch job 123"
 EOF
     chmod +x fakebin/sbatch
-    PATH="$PWD/fakebin:$PATH" SBATCH_ARGS_FILE="$PWD/sbatch.args" zsh ./submit.sh MockB > submit.out
+    PATH="$PWD/fakebin:$PATH" SBATCH_ARGS_FILE="$PWD/sbatch.args" zsh ./submit.sh HarnessB > submit.out
     assert_file_not_contains sbatch.args "jobs/install__" "slurm submit without --install does not submit install job"
     assert_path_exists .mkexp2/submit.lock "slurm submit creates a submit lock"
     assert_file_contains .mkexp2/submit.lock "system=slurm" "slurm submit records system in lock"
@@ -212,7 +212,7 @@ EOF
     rm -f .mkexp2/submit.lock
 
     : > sbatch.args
-    PATH="$PWD/fakebin:$PATH" SBATCH_ARGS_FILE="$PWD/sbatch.args" zsh ./submit.sh --install MockB > submit-install.out
+    PATH="$PWD/fakebin:$PATH" SBATCH_ARGS_FILE="$PWD/sbatch.args" zsh ./submit.sh --install HarnessB > submit-install.out
     assert_file_contains sbatch.args "jobs/install__" "slurm submit --install submits install job first"
     assert_file_contains sbatch.args "--dependency=afterok:123" "slurm submit --install makes run jobs depend on install"
     assert_file_contains sbatch.args "--array=2,3%7" "slurm filtered submit overrides array indices"

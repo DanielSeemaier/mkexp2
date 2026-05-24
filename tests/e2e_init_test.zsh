@@ -24,7 +24,6 @@ test_e2e_init_and_discoverability() {
     git check-ignore -q logs/run.log || fail "init ignores generated run logs"
 
     "$MKEXP2" --list-partitioners > partitioners.out
-    assert_file_contains partitioners.out "Mock" "list-partitioners includes Mock"
     assert_file_not_contains partitioners.out "TestHarness" "hidden test plugin is not listed by discoverability"
 
     "$MKEXP2" --list-presets > presets.out

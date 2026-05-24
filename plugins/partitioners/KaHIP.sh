@@ -187,7 +187,6 @@ PartitionerInvoke_KaHIP() {
   cmd="${(q)RUN_binary_path}"
   cmd+=" ${(q)graph}"
   cmd+=" --k ${(q)RUN_k}"
-  cmd+=" --num_threads=${(q)RUN_threads}"
   cmd+=" --preconfiguration=${(q)preconfiguration}"
   cmd+=" --seed=${(q)RUN_seed}"
   cmd+=" --imbalance=${(q)epsilon_percent}"

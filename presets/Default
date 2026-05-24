@@ -1,4 +1,4 @@
-# v2 default preset. Starts with Mock so install+generate works without network.
+# v2 default preset.
 
 System local
 
@@ -29,7 +29,7 @@ Property slurm.array.max_parallel 64
 # AlgorithmProperty KaMinPar-Dev cmake_flags -DKAMINPAR_64BIT_IDS=On
 
 ExperimentBaseline() {
-  Algorithms Mock
+  Algorithms KaMinPar-Fast
 
   Ks 2 4
   Seeds 1 2
@@ -41,7 +41,7 @@ ExperimentBaseline() {
 }
 
 ExperimentStress() {
-  Algorithms Mock
+  Algorithms KaMinPar-Fast
 
   Ks 2 4
   Seeds 1 2

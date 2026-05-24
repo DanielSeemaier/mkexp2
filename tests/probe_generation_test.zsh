@@ -8,10 +8,10 @@ test_probe_local_generation_parity() {
   cat > "$tmp/Experiment" <<'EOF'
 System local
 Property local.call_wrapper none
-DefineAlgorithm MockArg Mock --alpha 1
+DefineAlgorithm HarnessArg TestHarness --alpha 1
 
 ExperimentLocalParity() {
-  Algorithms MockArg
+  Algorithms HarnessArg
   Graph graphs/demo
   Ks 2 4
   Seeds 3
@@ -58,7 +58,7 @@ Property postprocess.plots running-time-box
 Property timelimit 01:02:03
 
 ExperimentAlpha() {
-  Algorithms Mock
+  Algorithms TestHarness
   Graph graphs/demo
   Ks 2
   Seeds 1
@@ -67,7 +67,7 @@ ExperimentAlpha() {
 }
 
 ExperimentBeta() {
-  Algorithms Mock
+  Algorithms TestHarness
   Graph graphs/demo
   Ks 2 4
   Seeds 1
@@ -180,7 +180,7 @@ EOF
     assert_eq "$(jq -r '.calls | length' kahip-calls.json)" "6" "KaHIP aliases expand to six calls"
     assert_eq "$(jq -r '[.calls[].raw_command | capture("--preconfiguration=(?<p>[^ ]+)").p] | sort | join(",")' kahip-calls.json)" "eco,esocial,fast,fsocial,ssocial,strong" "KaHIP aliases use upstream preconfigurations"
     assert_eq "$(jq -r '[.calls[].raw_command | contains("--imbalance=3")] | all' kahip-calls.json)" "true" "KaHIP generation converts fractional epsilon to percent"
-    assert_eq "$(jq -r '[.calls[].raw_command | contains("--num_threads=2")] | all' kahip-calls.json)" "true" "KaHIP generation passes thread count"
+    assert_eq "$(jq -r '[.calls[].raw_command | contains("--num_threads")] | any' kahip-calls.json)" "false" "KaHIP generation does not pass unsupported thread count flag"
 
     "$MKEXP2" probe ParHIPAliases --calls > parhip-calls.json
     assert_eq "$(jq -r '.calls | length' parhip-calls.json)" "4" "ParHIP aliases expand to four calls"
