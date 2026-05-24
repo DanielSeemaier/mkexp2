@@ -352,6 +352,14 @@
     function guidedAlgorithmDefinition(name) {
       return (state.guidedForm?.algorithm_definitions || []).find(algorithm => algorithm.name === name) || null;
     }
+    function guidedDefinitionChain(base, seen = new Set()) {
+      const value = String(base || '').trim();
+      if (!value || seen.has(value)) return [];
+      seen.add(value);
+      const definition = guidedAlgorithmDefinition(value);
+      if (!definition) return [];
+      return [...guidedDefinitionChain(definition.base, seen), definition];
+    }
     function describePartitionerForBase(base, describe = state.guidedModel?.describe, seen = new Set()) {
       const value = String(base || '').trim();
       if (!value || seen.has(value)) return null;
@@ -383,29 +391,17 @@
       const resolved = describePartitionerForBase(base);
       mergePropertyCatalog(catalog, resolved?.partitioner?.defaults || []);
       mergePropertyCatalog(catalog, resolved?.alias?.properties || []);
-      mergePropertyCatalog(catalog, guidedPropertyRows(guidedAlgorithmDefinition(base)?.properties || []));
+      for (const definition of guidedDefinitionChain(base)) {
+        mergePropertyCatalog(catalog, guidedPropertyRows(definition.properties || []));
+      }
       return catalog;
     }
     function guidedPropertyCatalog(context) {
       if (context?.kind === 'algorithm') return algorithmPropertyCatalog(context.base || '');
       return systemPropertyCatalog(context?.system || state.guidedForm?.system || '');
     }
-    function pluginDefaultKeys(base, describe = state.guidedModel?.describe) {
-      const resolved = describePartitionerForBase(base, describe);
-      return new Set((resolved?.partitioner?.defaults || []).map(prop => prop.key));
-    }
-    function explicitGuidedAlgorithmProperty(base, key, seen = new Set()) {
-      const value = String(base || '').trim();
-      if (!value || seen.has(value)) return '';
-      seen.add(value);
-      const definition = guidedAlgorithmDefinition(value);
-      if (!definition) return '';
-      const direct = guidedPropertyRows(definition.properties || []).find(prop => prop.key === key && prop.value);
-      if (direct) return direct.value;
-      return explicitGuidedAlgorithmProperty(definition.base, key, seen);
-    }
     function defaultRepoUrlForBase(base) {
-      return explicitGuidedAlgorithmProperty(base, 'repo_url') || algorithmPropertyCatalog(base).get('repo_url')?.value || '';
+      return algorithmPropertyCatalog(base).get('repo_url')?.value || '';
     }
     function guidedPropertyKeyOptions(catalog, rows) {
       const keys = new Set(catalog.keys());
@@ -428,25 +424,23 @@
       return { key, value: meta?.value || '' };
     }
     function guidedPropertiesForAlgorithm(algorithm, describe) {
-      const defaults = pluginDefaultKeys(algorithm.base, describe);
-      const properties = algorithm.declaredProperties || algorithm.properties || {};
-      const keys = new Set(['repo_url', 'repo_ref']);
-      for (const key of ['parser', 'cmake_flags', 'build_opts', 'build_options']) keys.add(key);
-      for (const [key, value] of Object.entries(properties)) {
-        if (value !== '' && value !== null && value !== undefined) keys.add(key);
-      }
-      for (const key of defaults) {
-        if (['repo_url', 'repo_ref', 'cmake_flags', 'build_opts', 'build_options', 'parser'].includes(key)) keys.add(key);
-      }
-      return Array.from(keys)
-        .filter(key => key in properties || defaults.has(key) || key === 'repo_url' || key === 'repo_ref')
+      const resolved = describePartitionerForBase(algorithm.base, describe);
+      const defaults = new Map();
+      mergePropertyCatalog(defaults, resolved?.partitioner?.defaults || []);
+      mergePropertyCatalog(defaults, resolved?.alias?.properties || []);
+      const properties = algorithm.declaredProperties || {};
+      return Object.entries(properties)
+        .filter(([, value]) => value !== '' && value !== null && value !== undefined)
+        .filter(([key, value]) => String(value) !== String(defaults.get(key)?.value ?? ''))
         .sort((left, right) => {
           const priority = ['repo_url', 'repo_ref', 'parser', 'cmake_flags', 'build_opts', 'build_options'];
-          return (priority.indexOf(left) < 0 ? 99 : priority.indexOf(left))
-            - (priority.indexOf(right) < 0 ? 99 : priority.indexOf(right))
-            || left.localeCompare(right);
+          const leftKey = left[0];
+          const rightKey = right[0];
+          return (priority.indexOf(leftKey) < 0 ? 99 : priority.indexOf(leftKey))
+            - (priority.indexOf(rightKey) < 0 ? 99 : priority.indexOf(rightKey))
+            || leftKey.localeCompare(rightKey);
         })
-        .map(key => ({ key, value: String(properties[key] ?? '') }));
+        .map(([key, value]) => ({ key, value: String(value ?? '') }));
     }
     function guidedFormFromModel(model) {
       const experiments = model?.probe?.experiments || [];
@@ -478,6 +472,20 @@
               }, describe),
             });
           }
+        }
+      }
+      for (const [name, definition] of declaredDefinitions.entries()) {
+        if (!algorithmMap.has(name)) {
+          algorithmMap.set(name, {
+            name,
+            base: definition.base || '',
+            args: definition.args ?? '',
+            properties: guidedPropertiesForAlgorithm({
+              name,
+              base: definition.base || '',
+              declaredProperties: declaredProperties[name] || {},
+            }, describe),
+          });
         }
       }
       const basePath = model?.settings?.benchmark_base_path || state.settings?.benchmark_base_path || '';
@@ -526,6 +534,48 @@
       input.value = value ?? '';
       input.placeholder = placeholder;
       return input;
+    }
+    function guidedArgumentList(className, values = [], placeholder = 'value') {
+      const wrapper = document.createElement('div');
+      wrapper.className = `guided-arg-list ${className}`;
+      const list = document.createElement('div');
+      list.className = 'guided-arg-items';
+      const renderItem = value => {
+        const row = document.createElement('div');
+        row.className = 'guided-arg-item';
+        const input = guidedInput('guided-arg-value', value || '', placeholder);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = 'x';
+        remove.title = 'Remove argument';
+        remove.onclick = () => {
+          row.remove();
+          markGuidedDirty();
+        };
+        row.appendChild(input);
+        row.appendChild(remove);
+        list.appendChild(row);
+      };
+      const initial = guidedTextList(values);
+      for (const value of initial.length ? initial : ['']) renderItem(value);
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'small-button';
+      add.textContent = 'Add argument';
+      add.onclick = () => {
+        renderItem('');
+        markGuidedDirty();
+        list.lastElementChild?.querySelector('input')?.focus();
+      };
+      wrapper.appendChild(list);
+      wrapper.appendChild(add);
+      return wrapper;
+    }
+    function collectGuidedArgumentList(card, className) {
+      const root = card.querySelector(`.${className}`);
+      return Array.from(root?.querySelectorAll('.guided-arg-value') || [])
+        .map(input => input.value.trim())
+        .filter(Boolean);
     }
     function guidedSelect(className, options, value = '') {
       const select = document.createElement('select');
@@ -595,18 +645,16 @@
         row.appendChild(keySelect);
         const value = guidedPropertyValueControl(meta, prop.value || '');
         row.appendChild(value);
-        const fetch = document.createElement('button');
-        fetch.type = 'button';
-        fetch.textContent = 'Fetch refs';
-        fetch.className = 'guided-fetch-refs';
         if (key === 'repo_ref' && context.kind === 'algorithm') {
+          const fetch = document.createElement('button');
+          fetch.type = 'button';
+          fetch.textContent = 'Fetch refs';
+          fetch.className = 'guided-fetch-refs';
           fetch.onclick = () => fetchGuidedRepoRefs(fetch).catch(err => out(String(err)));
+          row.appendChild(fetch);
         } else {
-          fetch.disabled = true;
-          fetch.setAttribute('aria-hidden', 'true');
-          fetch.classList.add('guided-placeholder-button');
+          row.classList.add('no-fetch');
         }
-        row.appendChild(fetch);
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.textContent = 'x';
@@ -804,11 +852,11 @@
       const grid = document.createElement('div');
       grid.className = 'guided-grid';
       grid.appendChild(guidedField('Function', guidedInput('guided-experiment-function', experiment.function || '', 'ExperimentName')));
-      grid.appendChild(guidedField('Ks', guidedInput('guided-experiment-ks', (experiment.ks || []).join(' '), '2 4 8')));
-      grid.appendChild(guidedField('Seeds', guidedInput('guided-experiment-seeds', (experiment.seeds || []).join(' '), '1 2 3')));
-      grid.appendChild(guidedField('Epsilons', guidedInput('guided-experiment-epsilons', (experiment.epsilons || []).join(' '), '0.03')));
-      grid.appendChild(guidedField('Threads', guidedInput('guided-experiment-topologies', (experiment.topologies || []).join(' '), '1x1x64')));
-      grid.appendChild(guidedField('Timelimit', guidedInput('guided-experiment-timelimit', experiment.timelimit || '', '01:00:00')));
+      grid.appendChild(guidedField('Ks', guidedArgumentList('guided-experiment-ks', experiment.ks || [], '2')));
+      grid.appendChild(guidedField('Seeds', guidedArgumentList('guided-experiment-seeds', experiment.seeds || [], '1')));
+      grid.appendChild(guidedField('Epsilons', guidedArgumentList('guided-experiment-epsilons', experiment.epsilons || [], '0.03')));
+      grid.appendChild(guidedField('Threads', guidedArgumentList('guided-experiment-topologies', experiment.topologies || [], '1x1x64')));
+      grid.appendChild(guidedField('Timelimit', guidedInput('guided-experiment-timelimit', experiment.timelimit || '', 'empty = unlimited time')));
       const algorithmChecks = document.createElement('div');
       algorithmChecks.className = 'guided-check-grid';
       for (const algorithm of state.guidedForm.algorithm_definitions || []) {
@@ -970,10 +1018,10 @@
           function: card.querySelector('.guided-experiment-function')?.value.trim() || '',
           algorithms: Array.from(card.querySelectorAll('.guided-check input:checked')).map(input => input.value),
           graphs: collectGuidedGraphRows(card.querySelector('.guided-graphs') || document.createElement('div')),
-          ks: guidedTextList(card.querySelector('.guided-experiment-ks')?.value || ''),
-          seeds: guidedTextList(card.querySelector('.guided-experiment-seeds')?.value || ''),
-          epsilons: guidedTextList(card.querySelector('.guided-experiment-epsilons')?.value || ''),
-          topologies: guidedTextList(card.querySelector('.guided-experiment-topologies')?.value || ''),
+          ks: collectGuidedArgumentList(card, 'guided-experiment-ks'),
+          seeds: collectGuidedArgumentList(card, 'guided-experiment-seeds'),
+          epsilons: collectGuidedArgumentList(card, 'guided-experiment-epsilons'),
+          topologies: collectGuidedArgumentList(card, 'guided-experiment-topologies'),
           timelimit: card.querySelector('.guided-experiment-timelimit')?.value.trim() || '',
           timelimit_per_instance: '',
         })).filter(experiment => experiment.function),
@@ -1040,16 +1088,10 @@
     }
     async function switchEditorMode(mode) {
       if (mode === 'guided') {
-        if (state.editorDirty && !state.shared && !state.selectedArchived) {
-          await persistExperiment();
-        }
         state.editorMode = 'guided';
         renderEditorMode();
         await loadGuidedEditor(true);
         return;
-      }
-      if (state.editorMode === 'guided' && state.guidedForm && !state.shared && !state.selectedArchived) {
-        await renderGuidedExperimentPreview();
       }
       state.editorMode = 'text';
       renderEditorMode();

@@ -325,7 +325,7 @@ class WebBackendTest(unittest.TestCase):
             refs = app.fetch_repo_refs({"repo_url": str(source)})
             names = {item["name"] for item in refs["refs"]}
 
-            self.assertIn("feature/demo", names)
+            self.assertNotIn("feature/demo", names)
             self.assertIn("origin/feature/demo", names)
             self.assertIn("v1", names)
 
@@ -619,6 +619,14 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("async function fetchGuidedRepoRefs", mkexp2_web.HTML)
         self.assertIn("function expandGuidedGraphDirectory", mkexp2_web.HTML)
         self.assertIn("function guidedPropertyCatalog", mkexp2_web.HTML)
+        self.assertIn("function guidedArgumentList", mkexp2_web.HTML)
+        self.assertIn("function collectGuidedArgumentList", mkexp2_web.HTML)
+        self.assertIn("function guidedDefinitionChain", mkexp2_web.HTML)
+        self.assertIn("for (const definition of guidedDefinitionChain(base))", mkexp2_web.HTML)
+        self.assertIn("if (!algorithmMap.has(name))", mkexp2_web.HTML)
+        self.assertIn(".guided-property-row.no-fetch", mkexp2_web.HTML)
+        self.assertIn("row.classList.add('no-fetch')", mkexp2_web.HTML)
+        self.assertIn("empty = unlimited time", mkexp2_web.HTML)
         self.assertIn("/api/benchmark-sets", mkexp2_web.HTML)
         self.assertIn("/api/repo-refs", mkexp2_web.HTML)
         self.assertIn("/graph-directory", mkexp2_web.HTML)
@@ -1156,6 +1164,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("mkexp2 check failed. Submit anyway?", mkexp2_web.HTML)
         self.assertIn("state.editorDirty = true", mkexp2_web.HTML)
         self.assertIn("await persistExperiment();", mkexp2_web.HTML)
+        self.assertNotIn("await renderGuidedExperimentPreview();", mkexp2_web.HTML)
         self.assertIn("loadAlgorithms(experimentId, {", mkexp2_web.HTML)
         self.assertIn("function collectSubmitSelections", mkexp2_web.HTML)
         self.assertIn("selectedSelections: allSelectedBeforeSave ? null : priorSelection.selections", mkexp2_web.HTML)

@@ -1938,7 +1938,7 @@ class Mkexp2WebApp:
                 if ref.startswith("refs/heads/"):
                     short = ref.removeprefix("refs/heads/")
                     kind = "branch"
-                    names = [f"origin/{short}", short]
+                    names = [f"origin/{short}"]
                 elif ref.startswith("refs/tags/"):
                     short = ref.removeprefix("refs/tags/")
                     kind = "tag"
