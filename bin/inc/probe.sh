@@ -583,12 +583,16 @@ ProbeEmitParseJobSummary() {
 ProbeEmitJobsSection() {
   local detailed="$1"
   local use_array=""
+  local array_mode_requested=""
   local max_parallel=""
+  local partition=""
   local sep=""
   local job_key=""
 
   use_array=$(ResolveRunProperty "slurm.use_array" "false")
+  array_mode_requested=$(ResolveRunProperty "slurm.array.mode" "auto")
   max_parallel=$(ResolveRunProperty "slurm.array.max_parallel" "32")
+  partition=$(ResolveRunProperty "slurm.partition" "default")
 
   printf '{'
   printf '"summary":{'
@@ -600,8 +604,14 @@ ProbeEmitJobsSection() {
     printf ',"run_jobs":['
     for job_key in "${EXPAND_JOB_KEYS[@]}"; do
       local array_enabled="false"
+      local array_mode="none"
       if [[ "$_system" == "slurm" && "$use_array" == "true" && ${EXPAND_JOB["$job_key::cmd_count"]} -gt 1 ]]; then
         array_enabled="true"
+        if FunctionExists SlurmArrayMode; then
+          array_mode=$(SlurmArrayMode "$partition" "$array_mode_requested")
+        else
+          array_mode="scheduler"
+        fi
       fi
       printf '%s{' "$sep"
       printf '"key":%s,' "$(JsonString "$job_key")"
@@ -618,6 +628,7 @@ ProbeEmitJobsSection() {
       printf '"cmd_file":%s,' "$(JsonString "${EXPAND_JOB["$job_key::cmd_file"]}")"
       printf '"job_script":%s,' "$(JsonString "${EXPAND_JOB["$job_key::job_script"]}")"
       printf '"array_enabled":%s,' "$array_enabled"
+      printf '"array_mode":%s,' "$(JsonString "$array_mode")"
       printf '"array_max_parallel":%s' "$(JsonScalar "$max_parallel")"
       printf '}'
       sep=","

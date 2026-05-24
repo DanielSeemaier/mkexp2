@@ -145,6 +145,55 @@ EOF
   pass "slurm generation parity"
 }
 
+test_probe_slurm_auto_packs_whole_node_partition() {
+  local tmp=""
+  tmp=$(mktemp -d)
+  mkdir -p "$tmp/graphs" "$tmp/fakebin"
+  : > "$tmp/graphs/demo.metis"
+  cat > "$tmp/fakebin/scontrol" <<'EOF'
+#!/usr/bin/env zsh
+cat <<'PARTITION'
+PartitionName=liskov
+   Nodes=liskov OverSubscribe=NO
+   State=UP TotalCPUs=256 TotalNodes=1 SelectTypeParameters=NONE
+PARTITION
+EOF
+  chmod +x "$tmp/fakebin/scontrol"
+
+  cat > "$tmp/Experiment" <<'EOF'
+System slurm
+Property slurm.partition liskov
+Property slurm.use_array true
+Property slurm.array.max_parallel 4
+
+ExperimentPackedArray() {
+  Algorithms TestHarness
+  Graph graphs/demo
+  Ks 2 4 8
+  Seeds 1
+  Epsilons 0.03
+  Threads 1x1x1
+}
+EOF
+
+  (
+    cd "$tmp"
+    PATH="$PWD/fakebin:$PATH" "$MKEXP2" probe PackedArray --jobs > probe-jobs.json
+    PATH="$PWD/fakebin:$PATH" "$MKEXP2" generate >/dev/null
+
+    assert_eq "$(json_value probe-jobs.json '.jobs.run_jobs[0].array_enabled')" "true" "probe reports packed array usage"
+    assert_eq "$(json_value probe-jobs.json '.jobs.run_jobs[0].array_mode')" "packed" "probe reports packed array mode"
+    assert_file_not_contains jobs/ExperimentPackedArray__1x1x1.sh "#SBATCH --array=" "packed array mode does not emit scheduler array"
+    assert_file_contains jobs/ExperimentPackedArray__1x1x1.sh "# mkexp2 array mode: packed (3 concurrent command(s) in one Slurm allocation)" "packed array script documents local fanout"
+    assert_file_contains jobs/ExperimentPackedArray__1x1x1.sh "#SBATCH --nodes=1" "packed array requests one liskov node"
+    assert_file_contains jobs/ExperimentPackedArray__1x1x1.sh "#SBATCH --ntasks=3" "packed array scales task count to command fanout"
+    assert_file_contains jobs/ExperimentPackedArray__1x1x1.sh "#SBATCH --ntasks-per-node=3" "packed array places fanout tasks on the node"
+    assert_file_contains jobs/ExperimentPackedArray__1x1x1.sh "mkexp2_init_semaphore 3" "packed array limits concurrent commands"
+  )
+
+  pass "slurm auto packed array on whole-node partition"
+}
+
 test_probe_kahip_parhip_alias_generation() {
   local tmp=""
   tmp=$(mktemp -d)

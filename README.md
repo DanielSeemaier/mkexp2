@@ -277,6 +277,16 @@ Example:
   - `Property slurm.call_wrapper srun|taskset` (default: `srun`)
   - `Property local.call_wrapper taskset|none` (default: `taskset`)
   - `taskset` expands to `taskset -c 0-<nproc-1> <cmd>`
+- Slurm array execution is configurable:
+  - `Property slurm.array.mode auto|scheduler|packed` (default: `auto`)
+  - `scheduler` emits a native `#SBATCH --array=...%N` job.
+  - `packed` submits one Slurm allocation sized for up to
+    `slurm.array.max_parallel` concurrent commands and fans them out inside that
+    allocation with `srun`; this is useful for whole-node partitions where
+    separate array elements cannot share one node.
+  - `auto` uses packed mode when `scontrol show partition` reports
+    `OverSubscribe=NO` and `SelectTypeParameters=NONE`, otherwise native
+    scheduler arrays.
 - Slurm header controls:
   - `Property slurm.minimal_header true|false` (default: `false`)
   - when `true`, Slurm run jobs only emit `--job-name`, `--partition`, `--output`, and `--error` (plus `--array` if applicable)

@@ -478,7 +478,7 @@ slurm_export_arg() {
   if [[ -n "$meta_file" ]]; then
     exports+=("MKEXP2_META_FILE=$meta_file")
   fi
-  if [[ -n "$SELECTED_FILTER_FILE" ]]; then
+  if [[ -n "$SELECTED_FILTER_FILE" && -z "$cmd_file" ]]; then
     exports+=("MKEXP2_SUBMIT_ALGORITHMS_FILE=$SELECTED_FILTER_FILE")
   fi
 

@@ -175,6 +175,7 @@ _CheckValidateKnownProperties() {
     slurm.account
     slurm.constraint
     slurm.use_array
+    slurm.array.mode
     slurm.array.max_parallel
     slurm.call_wrapper
     slurm.minimal_header
