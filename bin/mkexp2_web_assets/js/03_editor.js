@@ -1096,22 +1096,6 @@
       state.editorMode = 'text';
       renderEditorMode();
     }
-    async function renderGuidedExperimentPreview() {
-      if (!state.selected || state.selectedArchived || state.shared) return null;
-      const selected = state.selected;
-      state.guidedForm = collectGuidedForm();
-      const result = await api(`/api/experiments/${encodeURIComponent(selected)}/guided/render`, {
-        method: 'POST',
-        body: JSON.stringify({ form: state.guidedForm })
-      });
-      if (state.selected !== selected) return null;
-      setEditorValue(result.experiment || '');
-      state.editorDirty = true;
-      state.guidedDirty = false;
-      setSelectedExperimentMetadata(selected, result.experiment_file || result.path, result);
-      clearCheckIndicator();
-      return result;
-    }
     async function saveGuidedExperiment() {
       if (!state.selected || state.selectedArchived || state.shared) return;
       state.guidedForm = collectGuidedForm();
