@@ -123,6 +123,13 @@ mkexp2 progress
 mkexp2 progress --json
 ```
 
+Remove generated state from an experiment directory while keeping only
+`Experiment`:
+
+```bash
+mkexp2 purge
+```
+
 Inspect experiments as JSON:
 
 ```bash
@@ -445,6 +452,9 @@ The UI can:
   `<name>.archived`; archived experiments are hidden from the sidebar and can
   be searched, opened read-only, and restored from the header archive dialog;
   archive/delete actions are also rejected while `.mkexp2/submit.lock` exists
+- purge generated files from the Experiment page Danger Zone; this removes
+  everything in that experiment directory except the root `Experiment` file and
+  is rejected while `.mkexp2/submit.lock` exists
 - inspect the configured experiment Git repo from the header Git button, review
   added/modified/deleted files, enter a commit message, and run `git add -A`,
   `git commit`, and `git push`

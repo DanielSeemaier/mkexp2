@@ -27,6 +27,38 @@ ExperimentPipeline() {
 EOF
 }
 
+test_purge_keeps_only_experiment() {
+  local tmp=""
+  tmp=$(mktemp -d)
+  local purge_out=""
+  purge_out=$(mktemp)
+
+  (
+    cd "$tmp"
+    cat > Experiment <<'EOF'
+# Purge intentionally does not require a valid Experiment* function.
+EOF
+    mkdir -p .mkexp2 jobs logs results slurm plots misc-dir
+    : > submit.sh
+    : > plots.pdf
+    : > description.md
+    : > .hidden-state
+    : > misc-dir/file
+
+    "$MKEXP2" purge > "$purge_out"
+
+    assert_path_exists Experiment "purge keeps Experiment"
+    assert_file_contains "$purge_out" "kept Experiment" "purge reports preserved Experiment file"
+    for path in .mkexp2 jobs logs results slurm plots misc-dir submit.sh plots.pdf description.md .hidden-state; do
+      if [[ -e "$path" ]]; then
+        fail "purge removes $path"
+      fi
+    done
+  )
+
+  pass "purge keeps only Experiment"
+}
+
 test_e2e_local_pipeline_and_parse() {
   local tmp_generate=""
   tmp_generate=$(mktemp -d)

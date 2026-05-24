@@ -26,6 +26,7 @@ MKEXP2_HOME=$(cd "$script_dir/.." && pwd)
 . "$MKEXP2_HOME/bin/inc/probe.sh"
 . "$MKEXP2_HOME/bin/inc/progress.sh"
 . "$MKEXP2_HOME/bin/inc/stats.sh"
+. "$MKEXP2_HOME/bin/inc/purge.sh"
 . "$MKEXP2_HOME/bin/inc/cli.sh"
 
 ParseCli "$@"
@@ -99,6 +100,11 @@ fi
 if [[ ! -f "$PWD/Experiment" ]]; then
   EchoFatal "no Experiment file in current directory"
   exit 1
+fi
+
+if [[ "$MKEXP2_MODE" == "purge" ]]; then
+  PurgeExperimentDirectory
+  exit $?
 fi
 
 if (( MKEXP2_DO_GENERATE )); then

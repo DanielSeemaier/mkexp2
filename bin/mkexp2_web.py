@@ -2194,6 +2194,35 @@ class Mkexp2WebApp:
         self.remove_column_visibility(experiment_id)
         return {"deleted": True, "id": experiment_id, "path": str(path)}
 
+    def purge_experiment(self, experiment_id, payload):
+        path = self.active_experiment_path(experiment_id)
+        known = {experiment["id"] for experiment in self.list_experiments(force=True)}
+        if experiment_id not in known:
+            raise ValueError(f"experiment not found: {experiment_id}")
+        if not path.is_dir() or not (path / "Experiment").is_file():
+            raise ValueError(f"experiment not found: {experiment_id}")
+        self.require_submit_unlocked(experiment_id, "purge")
+        if str((payload or {}).get("confirm_id") or "") != experiment_id:
+            raise ValueError("purge confirmation mismatch")
+
+        removed = []
+        for child in sorted(path.iterdir(), key=lambda item: item.name):
+            if child.name == "Experiment":
+                continue
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+            removed.append(child.name)
+
+        self.invalidate_experiments_cache()
+        return {
+            "purged": True,
+            "id": experiment_id,
+            "path": str(path),
+            "removed": removed,
+        }
+
     def rename_experiment(self, experiment_id, payload):
         path = self.active_experiment_path(experiment_id)
         known = {experiment["id"] for experiment in self.list_experiments(force=True)}
@@ -4309,6 +4338,11 @@ def make_handler(app):
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
                     json_response(self, 200, app.cancel_submit(experiment_id, payload))
+                    return
+                match = re.match(r"^/api/experiments/([^/]+)/purge$", path)
+                if match:
+                    experiment_id = urllib.parse.unquote(match.group(1))
+                    json_response(self, 200, app.purge_experiment(experiment_id, payload))
                     return
                 match = re.match(r"^/api/experiments/([^/]+)/(archive|unarchive)$", path)
                 if match:

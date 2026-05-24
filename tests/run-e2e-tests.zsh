@@ -23,6 +23,7 @@ ensure_plots_submodule() {
 ensure_plots_submodule
 
 test_e2e_init_and_discoverability
+test_purge_keeps_only_experiment
 test_e2e_local_pipeline_and_parse
 test_e2e_local_per_experiment_submit_filter
 test_e2e_slurm_array_submit_filter

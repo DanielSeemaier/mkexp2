@@ -12,6 +12,7 @@ Commands:
   stats     Summarize parsed CSV results
   plot      Generate plots from parsed CSV results
   progress  Show run completion progress for each experiment / algorithm
+  purge     Delete generated experiment state, keeping only ./Experiment
   check     Validate Experiment configuration without generating jobs
   probe     Inspect Experiment definitions and print JSON
   web       Serve the tunnel-only experiment management UI
@@ -259,6 +260,20 @@ ParseCli() {
         MKEXP2_DO_GENERATE=0
         MKEXP2_DO_PARSE=0
         MKEXP2_DO_PROGRESS=1
+        command_set=1
+        shift
+        ;;
+      purge)
+        if (( command_set )); then
+          EchoFatal "multiple commands provided"
+          PrintHelp
+          exit 1
+        fi
+        MKEXP2_MODE="purge"
+        MKEXP2_DO_INSTALL=0
+        MKEXP2_DO_GENERATE=0
+        MKEXP2_DO_PARSE=0
+        MKEXP2_DO_PURGE=1
         command_set=1
         shift
         ;;

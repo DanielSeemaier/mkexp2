@@ -1253,6 +1253,7 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("/plot-artifact-sets/", source)
         self.assertIn("/submit-lock", source)
         self.assertIn("app.delete_experiment", source)
+        self.assertIn("app.purge_experiment", inspect.getsource(handler.do_POST))
 
     def test_html_contains_csv_tabs_and_comparison_view(self):
         self.assertIn('data-view="results-view"', mkexp2_web.HTML)
@@ -1747,6 +1748,39 @@ class WebBackendTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "submit is locked"):
                 app.delete_experiment("exp")
             self.assertTrue((exp / "Experiment").is_file())
+
+    def test_purge_experiment_keeps_only_experiment_and_rejects_submit_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            exp.mkdir()
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            for name in [".mkexp2", "jobs", "logs", "results", "slurm", "plots"]:
+                (exp / name).mkdir()
+                (exp / name / "file").write_text("generated\n")
+            for name in ["submit.sh", "plots.pdf", "description.md", ".hidden-state"]:
+                (exp / name).write_text("generated\n")
+            other = repo / "other"
+            other.mkdir()
+            (other / "Experiment").write_text("ExperimentY() { :; }\n")
+            app = mkexp2_web.Mkexp2WebApp(repo, ROOT / "bin" / "mkexp2", "x-<name>", "token")
+
+            with self.assertRaisesRegex(ValueError, "confirmation"):
+                app.purge_experiment("exp", {"confirm_id": "wrong"})
+
+            purged = app.purge_experiment("exp", {"confirm_id": "exp"})
+            self.assertTrue(purged["purged"])
+            self.assertTrue((exp / "Experiment").is_file())
+            self.assertEqual([item.name for item in exp.iterdir()], ["Experiment"])
+            self.assertIn("logs", purged["removed"])
+            self.assertIn("description.md", purged["removed"])
+            self.assertIn("exp", [item["id"] for item in app.list_experiments(force=True)])
+
+            (exp / ".mkexp2").mkdir()
+            (exp / ".mkexp2" / "submit.lock").write_text("started_at=now\n")
+            with self.assertRaisesRegex(ValueError, "submit is locked"):
+                app.purge_experiment("exp", {"confirm_id": "exp"})
+            self.assertTrue((exp / ".mkexp2" / "submit.lock").is_file())
 
     def test_rename_experiment_moves_directory_and_updates_pins(self):
         with tempfile.TemporaryDirectory() as tmp:

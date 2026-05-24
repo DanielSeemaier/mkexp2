@@ -168,6 +168,7 @@
     document.getElementById('unarchive-nav').onclick = () => unarchiveSelectedExperiment().catch(err => alert(String(err)));
     document.getElementById('clear-submit-lock').onclick = clearSubmitLock;
     document.getElementById('rename-experiment').onclick = renameExperiment;
+    document.getElementById('purge-experiment').onclick = purgeExperiment;
     document.getElementById('archive-experiment').onclick = archiveExperiment;
     document.getElementById('delete-experiment').onclick = deleteExperiment;
     document.getElementById('refresh-progress').onclick = () => loadProgress().catch(err => out(String(err)));

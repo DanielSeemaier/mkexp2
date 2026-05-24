@@ -1378,6 +1378,11 @@
         archiveButton.disabled = locked || !state.selected || state.selectedArchived;
         archiveButton.title = state.selectedArchived ? 'Already archived.' : (locked ? 'Cannot archive while submit is locked.' : '');
       }
+      const purgeButton = document.getElementById('purge-experiment');
+      if (purgeButton) {
+        purgeButton.disabled = locked || !state.selected || state.selectedArchived;
+        purgeButton.title = state.selectedArchived ? 'Unarchive before purging generated files.' : (locked ? 'Cannot purge while submit is locked.' : '');
+      }
       const deleteButton = document.getElementById('delete-experiment');
       if (deleteButton) {
         deleteButton.disabled = locked || !state.selected || state.selectedArchived;
@@ -1921,6 +1926,25 @@
       });
       if (state.selected !== experimentId) return;
       renderSubmitPreview(data);
+    }
+    async function purgeExperiment() {
+      if (!state.selected || state.selectedArchived) return;
+      if (state.submitLock?.locked) {
+        alert('Cannot purge while submit is locked.');
+        renderSubmitButton();
+        return;
+      }
+      const id = state.selected;
+      if (!confirm(`Purge generated files for "${id}"?\n\nThis deletes everything in the experiment directory except the Experiment file, including .mkexp2, jobs, logs, results, plots, submit.sh, and description.md.`)) return;
+      const button = document.getElementById('purge-experiment');
+      await withBusyButton(button, 'Purging...', async () => {
+        await api(`/api/experiments/${encodeURIComponent(id)}/purge`, {
+          method: 'POST',
+          body: JSON.stringify({ confirm_id: id })
+        });
+        await refreshExperiments({ force: true });
+        await selectExperiment(id);
+      });
     }
     async function deleteExperiment() {
       if (!state.selected || state.selectedArchived) return;
