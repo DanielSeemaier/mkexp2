@@ -359,6 +359,9 @@
     function guidedAlgorithmDefinition(name) {
       return (state.guidedForm?.algorithm_definitions || []).find(algorithm => algorithm.name === name) || null;
     }
+    function guidedCustomAlgorithmNames() {
+      return new Set((state.guidedForm?.algorithm_definitions || []).map(algorithm => algorithm.name).filter(Boolean));
+    }
     function guidedDefinitionChain(base, seen = new Set()) {
       const value = String(base || '').trim();
       if (!value || seen.has(value)) return [];
@@ -812,13 +815,17 @@
     }
     function renderGuidedAlgorithm(container, algorithm) {
       const card = document.createElement('article');
-      card.className = 'guided-card';
+      card.className = 'guided-card guided-custom-algorithm-card';
       card.dataset.guidedAlgorithm = '1';
       const header = document.createElement('div');
       header.className = 'guided-card-header';
       const title = document.createElement('div');
       title.className = 'guided-card-title';
       title.textContent = algorithm.name || 'Algorithm';
+      const badge = document.createElement('span');
+      badge.className = 'guided-algorithm-badge';
+      badge.textContent = 'Custom';
+      title.appendChild(badge);
       const actions = document.createElement('div');
       actions.className = 'guided-inline-actions';
       const remove = document.createElement('button');
@@ -974,11 +981,13 @@
       const algorithmChecks = document.createElement('div');
       algorithmChecks.className = 'guided-check-grid';
       const algorithmNames = new Set(state.guidedForm.algorithm_options || []);
+      const customAlgorithms = guidedCustomAlgorithmNames();
       for (const algorithm of state.guidedForm.algorithm_definitions || []) if (algorithm.name) algorithmNames.add(algorithm.name);
       for (const algorithm of experiment.algorithms || []) algorithmNames.add(algorithm);
       for (const algorithmName of Array.from(algorithmNames).sort((left, right) => left.localeCompare(right))) {
         const label = document.createElement('label');
-        label.className = 'guided-check';
+        const isCustom = customAlgorithms.has(algorithmName);
+        label.className = `guided-check${isCustom ? ' custom' : ''}`;
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.value = algorithmName;
@@ -988,6 +997,12 @@
         text.title = algorithmName;
         label.appendChild(checkbox);
         label.appendChild(text);
+        if (isCustom) {
+          const badge = document.createElement('span');
+          badge.className = 'guided-algorithm-badge';
+          badge.textContent = 'Custom';
+          label.appendChild(badge);
+        }
         algorithmChecks.appendChild(label);
       }
       const graphList = document.createElement('div');
@@ -1089,7 +1104,7 @@
       experimentsHeader.className = 'guided-section-header';
       const experimentsTitle = document.createElement('div');
       experimentsTitle.className = 'guided-section-title';
-      experimentsTitle.textContent = 'Experiment functions';
+      experimentsTitle.textContent = 'Experiments';
       const addExperiment = document.createElement('button');
       addExperiment.type = 'button';
       addExperiment.textContent = 'Add experiment';
