@@ -550,9 +550,86 @@
       input.placeholder = placeholder;
       return input;
     }
+    function guidedOptionValuesFromDatalist(id) {
+      return Array.from(document.getElementById(id)?.querySelectorAll('option') || [])
+        .map(option => option.value || option.textContent || '')
+        .filter(Boolean);
+    }
+    function guidedComboInput(className, value = '', placeholder = '', optionsProvider = () => []) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'guided-combo';
+      const input = guidedInput(className, value, placeholder);
+      input.autocomplete = 'off';
+      const options = document.createElement('div');
+      options.className = 'guided-combo-options hidden';
+      const closeOptions = () => {
+        options.classList.add('hidden');
+        options.innerHTML = '';
+      };
+      const optionValues = () => {
+        const raw = typeof optionsProvider === 'function' ? optionsProvider() : optionsProvider;
+        return Array.from(new Set((raw || []).map(item => String(item || '').trim()).filter(Boolean)))
+          .sort((left, right) => left.localeCompare(right));
+      };
+      const renderOptions = () => {
+        const query = input.value.trim().toLowerCase();
+        const values = optionValues()
+          .filter(item => !query || item.toLowerCase().includes(query))
+          .slice(0, 60);
+        options.innerHTML = '';
+        if (!values.length) {
+          closeOptions();
+          return;
+        }
+        for (const item of values) {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'guided-combo-option';
+          button.textContent = item;
+          button.title = item;
+          button.onmousedown = event => event.preventDefault();
+          button.onclick = () => {
+            input.value = item;
+            closeOptions();
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            input.focus();
+          };
+          options.appendChild(button);
+        }
+        options.classList.remove('hidden');
+      };
+      input.addEventListener('focus', renderOptions);
+      input.addEventListener('input', renderOptions);
+      input.addEventListener('keydown', event => {
+        if (event.key === 'Escape') closeOptions();
+        if (event.key === 'ArrowDown' && !options.classList.contains('hidden')) {
+          event.preventDefault();
+          options.querySelector('.guided-combo-option')?.focus();
+        }
+      });
+      wrapper.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        closeOptions();
+        input.focus();
+      });
+      wrapper.addEventListener('focusout', () => {
+        setTimeout(() => {
+          if (!wrapper.contains(document.activeElement)) closeOptions();
+        }, 80);
+      });
+      wrapper.appendChild(input);
+      wrapper.appendChild(options);
+      wrapper.input = input;
+      return { control: wrapper, input };
+    }
     function guidedArgumentList(className, values = [], placeholder = 'value') {
       const wrapper = document.createElement('div');
       wrapper.className = `guided-arg-list ${className}`;
+      let input = null;
+      const updatePlaceholder = () => {
+        if (input) input.placeholder = wrapper.querySelector('.guided-arg-token') ? '' : placeholder;
+      };
       const renderToken = value => {
         const text = String(value || '').trim();
         if (!text) return;
@@ -567,18 +644,21 @@
         remove.title = 'Remove argument';
         remove.onclick = () => {
           token.remove();
+          updatePlaceholder();
           markGuidedDirty();
         };
         token.appendChild(label);
         token.appendChild(remove);
         wrapper.insertBefore(token, input);
+        updatePlaceholder();
       };
-      const input = guidedInput('guided-arg-value', '', placeholder);
+      input = guidedInput('guided-arg-value', '', placeholder);
       const commitInput = () => {
         const values = guidedTextList(input.value);
         if (!values.length) return;
         for (const value of values) renderToken(value);
         input.value = '';
+        updatePlaceholder();
         markGuidedDirty();
       };
       input.addEventListener('keydown', event => {
@@ -591,6 +671,7 @@
       const initial = guidedTextList(values);
       wrapper.appendChild(input);
       for (const value of initial) renderToken(value);
+      updatePlaceholder();
       return wrapper;
     }
     function collectGuidedArgumentList(card, className) {
@@ -622,8 +703,15 @@
       if (values.length) {
         return guidedSelect('guided-property-value', values, value || meta?.value || values[0] || '');
       }
+      if (meta?.key === 'repo_ref') {
+        return guidedComboInput(
+          'guided-property-value',
+          value || '',
+          meta?.value || 'origin/main',
+          () => guidedOptionValuesFromDatalist('guided-repo-ref-suggestions')
+        ).control;
+      }
       const input = guidedInput('guided-property-value', value || '', meta?.value || 'value');
-      if (meta?.key === 'repo_ref') input.setAttribute('list', 'guided-repo-ref-suggestions');
       return input;
     }
     function guidedField(label, control) {
@@ -742,10 +830,10 @@
       header.appendChild(actions);
       const grid = document.createElement('div');
       grid.className = 'guided-grid';
-      const baseInput = guidedInput('guided-algorithm-base', algorithm.base || '', 'KaMinPar or existing algorithm');
-      baseInput.setAttribute('list', 'guided-algorithm-base-suggestions');
+      const baseCombo = guidedComboInput('guided-algorithm-base', algorithm.base || '', 'KaMinPar or existing algorithm', guidedBaseOptions);
+      const baseInput = baseCombo.input;
       grid.appendChild(guidedField('Name', guidedInput('guided-algorithm-name', algorithm.name || '', 'MyVariant')));
-      grid.appendChild(guidedField('Base / alias', baseInput));
+      grid.appendChild(guidedField('Base / alias', baseCombo.control));
       grid.appendChild(guidedField('CLI arguments', guidedInput('guided-algorithm-args', algorithm.args || '', '-P strong')));
       const propList = document.createElement('div');
       propList.className = 'guided-row-list guided-algorithm-properties';
@@ -831,9 +919,13 @@
         row.className = 'guided-row guided-graph-row';
         const kind = guidedSelect('guided-graph-kind', ['Graphs', 'Graph'], graph.kind || 'Graphs');
         row.appendChild(kind);
-        const input = guidedInput('guided-graph', graph.path || '', 'graph file or benchmark set');
-        input.setAttribute('list', 'guided-graph-suggestions');
-        row.appendChild(input);
+        const graphCombo = guidedComboInput(
+          'guided-graph',
+          graph.path || '',
+          'graph file or benchmark set',
+          () => guidedOptionValuesFromDatalist('guided-graph-suggestions')
+        );
+        row.appendChild(graphCombo.control);
         const extension = guidedInput('guided-graph-extension', graph.extension || '', 'ext');
         row.appendChild(extension);
         const expand = document.createElement('button');

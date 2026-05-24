@@ -827,6 +827,48 @@
       font-weight: 750;
       text-transform: uppercase;
     }
+    .guided-combo {
+      position: relative;
+      min-width: 0;
+    }
+    .guided-combo-options {
+      position: absolute;
+      z-index: 40;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      display: grid;
+      max-height: 230px;
+      overflow: auto;
+      padding: 4px;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .guided-combo-options.hidden {
+      display: none;
+    }
+    .guided-combo-option {
+      display: block;
+      width: 100%;
+      height: auto;
+      min-height: 28px;
+      padding: 5px 7px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .guided-combo-option:hover,
+    .guided-combo-option:focus {
+      background: var(--surface-2);
+      outline: none;
+    }
     .guided-arg-list {
       display: flex;
       flex-wrap: wrap;
