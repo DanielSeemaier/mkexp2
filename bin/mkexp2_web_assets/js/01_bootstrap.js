@@ -143,7 +143,8 @@
       const next = String(value || '').trim();
       tokenInput.value = next;
       if (authTokenInput) authTokenInput.value = next;
-      localStorage.setItem('mkexp2-token', next);
+      if (next) localStorage.setItem('mkexp2-token', next);
+      else localStorage.removeItem('mkexp2-token');
     }
     function setAuthRequired(message = '') {
       if (state.shared) return;

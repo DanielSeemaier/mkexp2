@@ -893,6 +893,7 @@
     async function refreshConfig() {
       const data = await api('/api/config');
       state.config = data || state.config;
+      renderSettingsSummary();
       document.getElementById('create-template').value = state.config.name_template || '%Y.%m.%d-<name>';
       updateCreatePreview();
       return state.config;

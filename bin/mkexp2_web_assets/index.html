@@ -196,7 +196,7 @@ __MKEXP2_STYLES__
         <div class="modal-header">
           <div>
             <div id="settings-modal-title" class="modal-title">Settings</div>
-            <div class="modal-subtitle">Server preferences, editor defaults, and maintenance actions.</div>
+            <div id="settings-summary" class="modal-subtitle">Server preferences, editor defaults, and maintenance actions.</div>
           </div>
           <button id="settings-close" class="icon-button" aria-label="Close settings" title="Close">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -221,9 +221,13 @@ __MKEXP2_STYLES__
                 <div class="csv-summary">Use the active session token for authenticated API requests.</div>
               </div>
             </div>
-            <div class="settings-token">
-              <label for="token">Session token</label>
-              <input id="token" type="password" placeholder="Session token">
+            <div class="settings-token-row">
+              <div class="settings-token">
+                <label for="token">Session token</label>
+                <input id="token" type="password" placeholder="Session token">
+              </div>
+              <button id="token-toggle" type="button">Show</button>
+              <button id="token-clear" type="button">Clear</button>
             </div>
           </section>
           <section id="settings-workspaces" class="settings-section">

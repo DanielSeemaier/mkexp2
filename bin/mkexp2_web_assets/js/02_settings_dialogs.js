@@ -300,6 +300,32 @@
       if (!select) return;
       select.value = normalizeTheme(state.settings?.theme);
     }
+    function renderSettingsSummary() {
+      const summary = document.getElementById('settings-summary');
+      if (!summary) return;
+      const repo = state.config?.repo || '';
+      summary.textContent = repo || 'Server preferences, editor defaults, and maintenance actions.';
+      summary.title = repo || '';
+    }
+    function renderTokenVisibilityControl() {
+      const button = document.getElementById('token-toggle');
+      if (!button) return;
+      const visible = tokenInput.type === 'text';
+      button.textContent = visible ? 'Hide' : 'Show';
+      button.title = visible ? 'Hide session token' : 'Show session token';
+      button.setAttribute('aria-label', button.title);
+    }
+    function toggleTokenVisibility() {
+      tokenInput.type = tokenInput.type === 'password' ? 'text' : 'password';
+      renderTokenVisibilityControl();
+      tokenInput.focus();
+    }
+    function clearSessionToken() {
+      setStoredToken('');
+      renderTokenVisibilityControl();
+      bootAuthenticatedUi({ selectMostRecent: true }).catch(err => out(String(err)));
+      tokenInput.focus();
+    }
     function renderGuidedSettings() {
       const input = document.getElementById('benchmark-base-path');
       if (input) input.value = state.settings?.benchmark_base_path || '';
@@ -842,8 +868,10 @@
     }
     function openSettingsDialog() {
       document.getElementById('settings-modal').classList.remove('hidden');
+      renderSettingsSummary();
       requestAnimationFrame(() => scrollSettingsSection(initialSettingsSection(), 'auto'));
       renderThemeSetting();
+      renderTokenVisibilityControl();
       loadWorkspaces().catch(err => {
         setWorkspaceOutput(String(err), true);
         out(String(err));

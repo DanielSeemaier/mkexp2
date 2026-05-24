@@ -121,6 +121,8 @@
     document.getElementById('settings-open').onclick = openSettingsDialog;
     document.getElementById('settings-close').onclick = closeSettingsDialog;
     initializeSettingsNav();
+    document.getElementById('token-toggle').onclick = toggleTokenVisibility;
+    document.getElementById('token-clear').onclick = clearSessionToken;
     document.getElementById('workspace-create').onclick = () => createWorkspace().catch(err => {
       setWorkspaceOutput(String(err), true);
       out(String(err));

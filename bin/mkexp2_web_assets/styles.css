@@ -2752,6 +2752,9 @@
     .tag-list {
       display: grid;
       gap: 6px;
+      max-height: 260px;
+      overflow: auto;
+      scrollbar-gutter: stable;
     }
     .tag-row {
       width: 100%;
@@ -2793,6 +2796,9 @@
       display: grid;
       gap: 8px;
       min-width: 0;
+      max-height: 260px;
+      overflow: auto;
+      scrollbar-gutter: stable;
     }
     .hidden-column-group {
       display: grid;
@@ -3035,6 +3041,16 @@
       gap: 6px;
       max-width: 520px;
     }
+    .settings-token-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      align-items: end;
+      gap: 8px;
+      max-width: 680px;
+    }
+    .settings-token-row .settings-token {
+      max-width: none;
+    }
     .settings-token label {
       font-weight: 750;
       font-size: 12px;
@@ -3216,6 +3232,9 @@
     .workspace-list {
       display: grid;
       gap: 8px;
+      max-height: 260px;
+      overflow: auto;
+      scrollbar-gutter: stable;
     }
     .workspace-row {
       display: grid;
@@ -3741,6 +3760,10 @@
       .settings-tool {
         align-items: stretch;
         flex-direction: column;
+      }
+      .settings-token-row {
+        grid-template-columns: 1fr;
+        max-width: none;
       }
       .tag-manager-grid {
         grid-template-columns: 1fr;
