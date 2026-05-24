@@ -15,6 +15,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import tarfile
 import tempfile
 import threading
 import time
@@ -38,6 +39,7 @@ WEB_TAGS_FILE = "web-tags.json"
 WEB_COLUMNS_FILE = "web-column-visibility.json"
 WEB_SETTINGS_FILE = "web-settings.json"
 WEB_WORKSPACES_FILE = "web-workspaces.json"
+DOWNLOAD_ARCHIVE_FORMATS = ("auto", "tar.zst", "zip", "tar")
 PLOT_INDEX_FILE = "index.json"
 ARCHIVE_SUFFIX = ".archived"
 EXPERIMENT_SKIP_DIRS = {".git", ".mkexp2", "jobs", "logs", "plots", "results", "slurm"}
@@ -1295,6 +1297,9 @@ class Mkexp2WebApp:
         if theme not in ("light", "dark", "system"):
             theme = "light"
         benchmark_base_path = str(payload.get("benchmark_base_path") or "").strip()
+        download_archive_format = str(payload.get("download_archive_format") or "auto").strip().lower()
+        if download_archive_format not in DOWNLOAD_ARCHIVE_FORMATS:
+            download_archive_format = "auto"
         raw_postprocess = payload.get("postprocess_defaults")
         if not isinstance(raw_postprocess, dict):
             raw_postprocess = {}
@@ -1341,6 +1346,7 @@ class Mkexp2WebApp:
         return {
             "theme": theme,
             "benchmark_base_path": benchmark_base_path,
+            "download_archive_format": download_archive_format,
             "postprocess_defaults": postprocess_defaults,
             "insert_templates": insert_templates,
         }
@@ -1356,6 +1362,7 @@ class Mkexp2WebApp:
                 raise ValueError(f"invalid settings JSON: {exc}") from exc
         settings = self.normalize_settings(payload)
         settings["path"] = str(path)
+        settings["download_archive_formats"] = list(DOWNLOAD_ARCHIVE_FORMATS)
         return settings
 
     def write_settings(self, payload):
@@ -1367,6 +1374,7 @@ class Mkexp2WebApp:
         tmp.replace(path)
         settings["path"] = str(path)
         settings["saved"] = True
+        settings["download_archive_formats"] = list(DOWNLOAD_ARCHIVE_FORMATS)
         return settings
 
     def columns_path(self):
@@ -2949,6 +2957,8 @@ class Mkexp2WebApp:
             "path": str(path),
             "directories": directories,
             "root_files": root_files,
+            "archive_format": self.read_settings().get("download_archive_format", "auto"),
+            "archive_formats": list(DOWNLOAD_ARCHIVE_FORMATS),
         }
 
     def archive_entries(self, path, include_dirs):
@@ -2978,37 +2988,66 @@ class Mkexp2WebApp:
         root_files.sort(key=str.lower)
         return root_files + selected
 
-    def experiment_archive(self, experiment_id, include_dirs=None):
-        path = self.readable_experiment_path(experiment_id)
-        base = download_filename(path.name)
-        entries = self.archive_entries(path, include_dirs)
+    def archive_tar_targets(self, path, entries):
+        return [path.name] if entries is None else [f"{path.name}/{name}" for name in entries]
+
+    def archive_walk_roots(self, path, entries):
+        return [path] if entries is None else [path / name for name in entries]
+
+    def create_zstd_tar_archive(self, path, entries, base, allow_fallback):
         tar_command = shutil.which("tar")
         zstd_command = shutil.which("zstd")
-        if tar_command and zstd_command:
-            archive = tempfile.NamedTemporaryFile(prefix=f"{base}-", suffix=".tar.zst", delete=False)
-            archive.close()
-            archive_path = Path(archive.name)
-            tar_targets = [path.name] if entries is None else [f"{path.name}/{name}" for name in entries]
-            result = run_command(
-                [tar_command, "--zstd", "-cf", str(archive_path), "-C", str(path.parent), *tar_targets],
-                timeout=3600,
-            )
-            if result["returncode"] == 0 and archive_path.is_file() and archive_path.stat().st_size > 0:
-                return {
-                    "path": archive_path,
-                    "filename": f"{base}.tar.zst",
-                    "content_type": "application/zstd",
-                    "format": "tar.zst",
-                }
-            archive_path.unlink(missing_ok=True)
+        if not (tar_command and zstd_command):
+            if allow_fallback:
+                return None
+            raise ValueError("tar.zst downloads require both tar and zstd on the server")
 
+        archive = tempfile.NamedTemporaryFile(prefix=f"{base}-", suffix=".tar.zst", delete=False)
+        archive.close()
+        archive_path = Path(archive.name)
+        result = run_command(
+            [tar_command, "--zstd", "-cf", str(archive_path), "-C", str(path.parent), *self.archive_tar_targets(path, entries)],
+            timeout=3600,
+        )
+        if result["returncode"] == 0 and archive_path.is_file() and archive_path.stat().st_size > 0:
+            return {
+                "path": archive_path,
+                "filename": f"{base}.tar.zst",
+                "content_type": "application/zstd",
+                "format": "tar.zst",
+            }
+        archive_path.unlink(missing_ok=True)
+        if allow_fallback:
+            return None
+        details = "\n".join(part for part in [result.get("stdout", ""), result.get("stderr", "")] if part).strip()
+        raise ValueError(f"tar.zst archive failed with return code {result['returncode']}" + (f": {details}" if details else ""))
+
+    def create_tar_archive(self, path, entries, base):
+        archive = tempfile.NamedTemporaryFile(prefix=f"{base}-", suffix=".tar", delete=False)
+        archive.close()
+        archive_path = Path(archive.name)
+        try:
+            with tarfile.open(archive_path, "w") as tar:
+                for walk_root in self.archive_walk_roots(path, entries):
+                    arcname = path.name if walk_root == path else (Path(path.name) / walk_root.relative_to(path)).as_posix()
+                    tar.add(walk_root, arcname=arcname, recursive=True)
+            return {
+                "path": archive_path,
+                "filename": f"{base}.tar",
+                "content_type": "application/x-tar",
+                "format": "tar",
+            }
+        except Exception:
+            archive_path.unlink(missing_ok=True)
+            raise
+
+    def create_zip_archive(self, path, entries, base):
         archive = tempfile.NamedTemporaryFile(prefix=f"{base}-", suffix=".zip", delete=False)
         archive.close()
         archive_path = Path(archive.name)
         try:
             with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as zip_file:
-                walk_roots = [path] if entries is None else [path / name for name in entries]
-                for walk_root in walk_roots:
+                for walk_root in self.archive_walk_roots(path, entries):
                     if walk_root.is_file():
                         rel_path = Path(path.name) / walk_root.relative_to(path)
                         zip_file.write(walk_root, rel_path.as_posix())
@@ -3030,6 +3069,23 @@ class Mkexp2WebApp:
         except Exception:
             archive_path.unlink(missing_ok=True)
             raise
+
+    def experiment_archive(self, experiment_id, include_dirs=None, archive_format=None):
+        path = self.readable_experiment_path(experiment_id)
+        base = download_filename(path.name)
+        entries = self.archive_entries(path, include_dirs)
+        requested_format = str(archive_format or self.read_settings().get("download_archive_format") or "auto").strip().lower()
+        if requested_format not in DOWNLOAD_ARCHIVE_FORMATS:
+            requested_format = "auto"
+
+        if requested_format == "auto":
+            zstd_archive = self.create_zstd_tar_archive(path, entries, base, allow_fallback=True)
+            return zstd_archive or self.create_zip_archive(path, entries, base)
+        if requested_format == "tar.zst":
+            return self.create_zstd_tar_archive(path, entries, base, allow_fallback=False)
+        if requested_format == "tar":
+            return self.create_tar_archive(path, entries, base)
+        return self.create_zip_archive(path, entries, base)
 
     def plots_info(self, experiment_id):
         path = self.readable_experiment_path(experiment_id)

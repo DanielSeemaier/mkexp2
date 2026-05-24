@@ -1741,6 +1741,10 @@
       const list = document.getElementById('download-directories');
       const rootFiles = options?.root_files || [];
       const directories = options?.directories || [];
+      const summary = document.getElementById('download-summary');
+      if (summary) {
+        summary.textContent = `Download ${options?.id || state.selected} as ${downloadArchiveFormatLabel(options?.archive_format || state.settings?.download_archive_format)}.`;
+      }
       root.textContent = rootFiles.length
         ? `Root files are always included: ${rootFiles.join(', ')}.`
         : 'Root files are always included.';

@@ -356,6 +356,20 @@ __MKEXP2_STYLES__
               <div id="archive-subdir-output" class="csv-empty hidden"></div>
               <div class="settings-tool">
                 <div>
+                  <div class="settings-tool-title">Download archives</div>
+                  <div class="csv-summary">Choose the archive format used by the experiment download button.</div>
+                </div>
+                <div class="settings-inline-tool">
+                  <select id="download-archive-format" title="Download archive format">
+                    <option value="auto">Auto: tar.zst, fallback ZIP</option>
+                    <option value="tar.zst">tar.zst</option>
+                    <option value="zip">ZIP</option>
+                    <option value="tar">tar</option>
+                  </select>
+                </div>
+              </div>
+              <div class="settings-tool">
+                <div>
                   <div class="settings-tool-title">Spack R library cache</div>
                   <div id="spack-cache-summary" class="csv-summary">Not loaded.</div>
                 </div>

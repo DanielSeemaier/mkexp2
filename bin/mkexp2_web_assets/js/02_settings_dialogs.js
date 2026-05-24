@@ -281,6 +281,16 @@
     function normalizeTheme(theme) {
       return ['light', 'dark', 'system'].includes(theme) ? theme : 'light';
     }
+    function normalizeDownloadArchiveFormat(format) {
+      return ['auto', 'tar.zst', 'zip', 'tar'].includes(format) ? format : 'auto';
+    }
+    function downloadArchiveFormatLabel(format) {
+      const normalized = normalizeDownloadArchiveFormat(format);
+      if (normalized === 'tar.zst') return 'tar.zst';
+      if (normalized === 'zip') return 'ZIP';
+      if (normalized === 'tar') return 'tar';
+      return 'Auto: tar.zst, fallback ZIP';
+    }
     function effectiveTheme(theme) {
       const normalized = normalizeTheme(theme);
       return normalized === 'system' ? (systemPrefersDark() ? 'dark' : 'light') : normalized;
@@ -299,6 +309,23 @@
       const select = document.getElementById('theme-select');
       if (!select) return;
       select.value = normalizeTheme(state.settings?.theme);
+    }
+    function renderDownloadArchiveFormatSetting() {
+      const select = document.getElementById('download-archive-format');
+      if (!select) return;
+      const formats = Array.isArray(state.settings?.download_archive_formats)
+        ? state.settings.download_archive_formats
+        : ['auto', 'tar.zst', 'zip', 'tar'];
+      const current = normalizeDownloadArchiveFormat(state.settings?.download_archive_format);
+      select.innerHTML = '';
+      for (const format of formats) {
+        const normalized = normalizeDownloadArchiveFormat(format);
+        const option = document.createElement('option');
+        option.value = normalized;
+        option.textContent = downloadArchiveFormatLabel(normalized);
+        select.appendChild(option);
+      }
+      select.value = current;
     }
     function renderSettingsSummary() {
       const summary = document.getElementById('settings-summary');
@@ -596,6 +623,7 @@
       state.settingsLoaded = true;
       state.settings = Object.assign({}, state.settings || {}, settings || {});
       applyTheme(settings.theme || 'light');
+      renderDownloadArchiveFormatSetting();
       renderGuidedSettings();
       return settings;
     }
@@ -609,6 +637,7 @@
       state.settingsLoaded = true;
       state.settings = Object.assign({}, state.settings || {}, saved || {});
       applyTheme(state.settings.theme || 'light');
+      renderDownloadArchiveFormatSetting();
       renderGuidedSettings();
       return state.settings;
     }
@@ -626,6 +655,10 @@
       await saveUiSettingsPatch({ benchmark_base_path: input?.value.trim() || '' });
       state.benchmarkSets = [];
       state.benchmarkSetsFor = '';
+    }
+    async function saveDownloadArchiveFormat() {
+      const select = document.getElementById('download-archive-format');
+      await saveUiSettingsPatch({ download_archive_format: normalizeDownloadArchiveFormat(select?.value) });
     }
     function zshSingleQuote(value) {
       return `'${String(value ?? '').replace(/'/g, `'\\''`)}'`;
@@ -871,6 +904,7 @@
       renderSettingsSummary();
       requestAnimationFrame(() => scrollSettingsSection(initialSettingsSection(), 'auto'));
       renderThemeSetting();
+      renderDownloadArchiveFormatSetting();
       renderTokenVisibilityControl();
       loadWorkspaces().catch(err => {
         setWorkspaceOutput(String(err), true);

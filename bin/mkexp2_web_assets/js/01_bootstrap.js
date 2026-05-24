@@ -102,7 +102,7 @@
       shared: false,
       shareId: '',
       shareCommandTemplate: '',
-      settings: { theme: 'light', benchmark_base_path: '', postprocess_defaults: { email_to: '', plots: 'default', email_subject: 'mkexp2 {status}: {experiment_id}', email_body: '' }, insert_templates: [] },
+      settings: { theme: 'light', benchmark_base_path: '', download_archive_format: 'auto', download_archive_formats: ['auto', 'tar.zst', 'zip', 'tar'], postprocess_defaults: { email_to: '', plots: 'default', email_subject: 'mkexp2 {status}: {experiment_id}', email_body: '' }, insert_templates: [] },
       settingsLoaded: false,
       workspaces: [],
       workspacesLoaded: false

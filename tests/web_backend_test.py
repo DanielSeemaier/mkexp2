@@ -3,6 +3,7 @@ import importlib.util
 import inspect
 import json
 import subprocess
+import tarfile
 import tempfile
 import threading
 import time
@@ -354,9 +355,12 @@ class WebBackendTest(unittest.TestCase):
                 options = app.experiment_download_options("exp")
                 self.assertEqual([item["name"] for item in options["directories"]], ["jobs", "logs", "results"])
                 self.assertIn("Experiment", options["root_files"])
+                self.assertEqual(options["archive_format"], "auto")
+                self.assertIn("zip", options["archive_formats"])
 
                 archive = app.experiment_archive("exp", include_dirs=["results"])
                 try:
+                    self.assertEqual(archive["format"], "zip")
                     with zipfile.ZipFile(archive["path"]) as zip_file:
                         names = set(zip_file.namelist())
                     self.assertIn("exp/Experiment", names)
@@ -371,6 +375,19 @@ class WebBackendTest(unittest.TestCase):
                     app.experiment_archive("exp", include_dirs=["../logs"])
                 with self.assertRaises(ValueError):
                     app.experiment_archive("exp", include_dirs=["missing"])
+
+                app.write_settings({"download_archive_format": "tar"})
+                tar_archive = app.experiment_archive("exp", include_dirs=["results"])
+                try:
+                    self.assertEqual(tar_archive["format"], "tar")
+                    with tarfile.open(tar_archive["path"]) as tar_file:
+                        names = set(tar_file.getnames())
+                    self.assertIn("exp/Experiment", names)
+                    self.assertIn("exp/description.md", names)
+                    self.assertIn("exp/results/A.csv", names)
+                    self.assertNotIn("exp/logs/A.log", names)
+                finally:
+                    tar_archive["path"].unlink(missing_ok=True)
             finally:
                 mkexp2_web.shutil.which = original_which
 
@@ -457,6 +474,9 @@ class WebBackendTest(unittest.TestCase):
             self.assertEqual(app.write_settings({"theme": "system"})["theme"], "system")
             self.assertTrue((repo / ".mkexp2" / "web-settings.json").is_file())
             self.assertEqual(app.write_settings({"theme": "bad"})["theme"], "light")
+            self.assertEqual(app.read_settings()["download_archive_format"], "auto")
+            self.assertEqual(app.write_settings({"download_archive_format": "zip"})["download_archive_format"], "zip")
+            self.assertEqual(app.write_settings({"download_archive_format": "bad"})["download_archive_format"], "auto")
             saved = app.write_settings({"benchmark_base_path": str(repo / "graphs")})
             self.assertEqual(saved["benchmark_base_path"], str(repo / "graphs"))
             self.assertEqual(app.read_settings()["benchmark_base_path"], str(repo / "graphs"))
@@ -741,6 +761,9 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("Create a new experiment from the current Experiment file.", mkexp2_web.HTML)
         self.assertIn('id="download-modal"', mkexp2_web.HTML)
         self.assertIn('id="download-directories"', mkexp2_web.HTML)
+        self.assertIn('id="download-archive-format"', mkexp2_web.HTML)
+        self.assertIn("download_archive_format", mkexp2_web.HTML)
+        self.assertIn("function saveDownloadArchiveFormat", mkexp2_web.HTML)
         self.assertIn("download-options", mkexp2_web.HTML)
         self.assertIn("function selectedDownloadDirectories", mkexp2_web.HTML)
         self.assertIn("Root files are always included", mkexp2_web.HTML)

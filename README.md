@@ -469,7 +469,8 @@ The UI can:
   link in the browser.
 - download an experiment from the top navigation after choosing which
   top-level subdirectories to include; root files such as `Experiment` are
-  always included in the archive
+  always included in the archive, and Settings can choose `auto`, `tar.zst`,
+  `zip`, or `tar` as the archive format
 - open the header settings button to manage the session token, dark mode,
   experiment tags, bulk-archive active experiments in a selected subdirectory
   while skipping starred or submit-locked experiments, and the native plotting

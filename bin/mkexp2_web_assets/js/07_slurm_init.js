@@ -123,6 +123,7 @@
     initializeSettingsNav();
     document.getElementById('token-toggle').onclick = toggleTokenVisibility;
     document.getElementById('token-clear').onclick = clearSessionToken;
+    document.getElementById('download-archive-format').onchange = () => saveDownloadArchiveFormat().catch(err => out(String(err)));
     document.getElementById('workspace-create').onclick = () => createWorkspace().catch(err => {
       setWorkspaceOutput(String(err), true);
       out(String(err));
