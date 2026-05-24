@@ -144,3 +144,50 @@ EOF
 
   pass "slurm generation parity"
 }
+
+test_probe_kahip_parhip_alias_generation() {
+  local tmp=""
+  tmp=$(mktemp -d)
+  mkdir -p "$tmp/graphs"
+  : > "$tmp/graphs/demo.graph"
+
+  cat > "$tmp/Experiment" <<'EOF'
+System local
+Property local.call_wrapper none
+
+ExperimentKaHIPAliases() {
+  Algorithms KaHIP-Fast KaHIP-Eco KaHIP-Strong KaHIP-SocialFast KaHIP-SocialEco KaHIP-SocialStrong
+  Graph graphs/demo
+  Ks 4
+  Seeds 7
+  Epsilons 0.03
+  Threads 1x1x2
+}
+
+ExperimentParHIPAliases() {
+  Algorithms ParHIP-Fast ParHIP-Eco
+  Graph graphs/demo
+  Ks 4
+  Seeds 7
+  Epsilons 0.03
+  Threads 1x2x1
+}
+EOF
+
+  (
+    cd "$tmp"
+    "$MKEXP2" probe KaHIPAliases --calls > kahip-calls.json
+    assert_eq "$(jq -r '.calls | length' kahip-calls.json)" "6" "KaHIP aliases expand to six calls"
+    assert_eq "$(jq -r '[.calls[].raw_command | capture("--preconfiguration=(?<p>[^ ]+)").p] | sort | join(",")' kahip-calls.json)" "eco,esocial,fast,fsocial,ssocial,strong" "KaHIP aliases use upstream preconfigurations"
+    assert_eq "$(jq -r '[.calls[].raw_command | contains("--imbalance=3")] | all' kahip-calls.json)" "true" "KaHIP generation converts fractional epsilon to percent"
+    assert_eq "$(jq -r '[.calls[].raw_command | contains("--num_threads=2")] | all' kahip-calls.json)" "true" "KaHIP generation passes thread count"
+
+    "$MKEXP2" probe ParHIPAliases --calls > parhip-calls.json
+    assert_eq "$(jq -r '.calls | length' parhip-calls.json)" "2" "ParHIP aliases expand to two calls"
+    assert_eq "$(jq -r '[.calls[].raw_command | capture("--preconfiguration=(?<p>[^ ]+)").p] | sort | join(",")' parhip-calls.json)" "ecomesh,fastmesh" "ParHIP aliases use mesh preconfigurations"
+    assert_eq "$(jq -r '[.calls[].raw_command | contains("--imbalance=3")] | all' parhip-calls.json)" "true" "ParHIP generation converts fractional epsilon to percent"
+    assert_eq "$(jq -r '[.calls[].final_command | startswith("mpirun -n 2 ")] | all' parhip-calls.json)" "true" "ParHIP distributed local topology is wrapped with mpirun"
+  )
+
+  pass "KaHIP and ParHIP alias generation"
+}

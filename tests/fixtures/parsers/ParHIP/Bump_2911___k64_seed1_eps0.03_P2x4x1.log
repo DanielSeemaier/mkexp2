@@ -1,0 +1,10 @@
+running collective dummy operations took 0.001
+took 0.317
+n:2911419 m: 124818480
+memory usage of graph data structure: 1024 MB
+log>=====================================
+log>============AND WE R DONE============
+log>=====================================
+log>total partitioning time elapsed 7.89
+log>final edge cut 3328698
+log>final balance 1.029984

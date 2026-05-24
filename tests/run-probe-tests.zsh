@@ -11,5 +11,6 @@ test_probe_resolution_and_flags
 test_probe_algorithm_property_inheritance_chain
 test_probe_local_generation_parity
 test_probe_slurm_generation_parity
+test_probe_kahip_parhip_alias_generation
 
 echo "1..$TEST_COUNT"

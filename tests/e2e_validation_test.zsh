@@ -71,6 +71,8 @@ EOF
     "$MKEXP2" describe --all --json > describe-all.json
     assert_eq "$(jq -r '.ok' describe-all.json)" "true" "describe --all --json reports ok"
     assert_eq "$(jq -r '.partitioners[] | select(.name == "KaMinPar") | .aliases[] | select(.name == "KaMinPar-Fast") | .args' describe-all.json)" "-P fast" "describe --all --json reports algorithm aliases"
+    assert_eq "$(jq -r '.partitioners[] | select(.name == "KaHIP") | .aliases[] | select(.name == "KaHIP-SocialStrong") | .properties[] | select(.key == "preconfiguration") | .value' describe-all.json)" "ssocial" "describe --all --json reports KaHIP social aliases"
+    assert_eq "$(jq -r '.partitioners[] | select(.name == "ParHIP") | .aliases[] | select(.name == "ParHIP-Fast") | .properties[] | select(.key == "preconfiguration") | .value' describe-all.json)" "fastmesh" "describe --all --json reports ParHIP aliases"
     assert_eq "$(jq -r '.systems[] | select(.name == "local") | .defaults[] | select(.key == "local.call_wrapper") | .value' describe-all.json)" "taskset" "describe --all --json reports system defaults"
     assert_eq "$(jq -r '.dsl.commands[] | select(.name == "DefineAlgorithm") | .usage' describe-all.json)" "DefineAlgorithm Name Base [CLI args...]" "describe --all --json reports DSL help"
 

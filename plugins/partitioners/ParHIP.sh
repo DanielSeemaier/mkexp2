@@ -7,13 +7,21 @@ PartitionerDefaults_ParHIP() {
   SetPartitionerDefault "ParHIP" "supports_distributed" "true" "enum:true|false"
   SetPartitionerDefault "ParHIP" "use_openmp_env" "false" "enum:true|false"
   SetPartitionerDefault "ParHIP" "binary" "parhip" "any"
-  SetPartitionerDefault "ParHIP" "build_backend" "auto" "enum:auto|cmake|compile_sh"
-  SetPartitionerDefault "ParHIP" "preconfiguration" "" "any"
+  SetPartitionerDefault "ParHIP" "build_backend" "auto" "enum:auto|cmake|compile_withcmake|compile_sh"
+  SetPartitionerDefault "ParHIP" "preconfiguration" "fastmesh" "enum:fastmesh|ecomesh|ultrafastmesh|fastsocial|ecosocial|ultrafastsocial"
   SetPartitionerDefault "ParHIP" "preconfiguration_flag" "--preconfiguration" "any"
   SetPartitionerDefault "ParHIP" "k_flag" "--k" "any"
   SetPartitionerDefault "ParHIP" "seed_flag" "--seed" "any"
   SetPartitionerDefault "ParHIP" "epsilon_flag" "--imbalance" "any"
   SetPartitionerDefault "ParHIP" "threads_flag" "" "any"
+}
+
+PartitionerAliases_ParHIP() {
+  DefineAlgorithm ParHIP-Fast ParHIP
+  AlgorithmProperty ParHIP-Fast "preconfiguration" "fastmesh"
+
+  DefineAlgorithm ParHIP-Eco ParHIP
+  AlgorithmProperty ParHIP-Eco "preconfiguration" "ecomesh"
 }
 
 PartitionerFetch_ParHIP() {
@@ -52,12 +60,38 @@ _ParHIPBuildViaCompileScript() {
   cd "$current_pwd"
 }
 
+_ParHIPBuildViaCompileWithCMake() {
+  local current_pwd="$PWD"
+  local -a compile_cmd
+  local -a extra_args
+
+  compile_cmd=()
+  if [[ -n "$CTX_build_max_cores" ]]; then
+    compile_cmd=(env "NCORES=$CTX_build_max_cores")
+  fi
+  compile_cmd+=("./compile_withcmake.sh")
+
+  extra_args=()
+  if [[ -n "$CTX_cmake_flags" ]]; then
+    extra_args+=( ${=CTX_cmake_flags} )
+  fi
+  if [[ -n "$CTX_build_opts" ]]; then
+    extra_args+=( ${=CTX_build_opts} )
+  fi
+
+  cd "$CTX_source_dir"
+  Run "${compile_cmd[@]}" "${extra_args[@]}"
+  cd "$current_pwd"
+}
+
 PartitionerBuild_ParHIP() {
   local backend=""
   backend=$(PartitionerProperty "build_backend" "auto")
 
   if [[ "$backend" == "auto" ]]; then
-    if [[ -x "$CTX_source_dir/compile.sh" ]]; then
+    if [[ -x "$CTX_source_dir/compile_withcmake.sh" ]]; then
+      backend="compile_withcmake"
+    elif [[ -x "$CTX_source_dir/compile.sh" ]]; then
       backend="compile_sh"
     else
       backend="cmake"
@@ -68,6 +102,13 @@ PartitionerBuild_ParHIP() {
     cmake)
       _ParHIPBuildViaCMake
       ;;
+    compile_withcmake)
+      if [[ ! -x "$CTX_source_dir/compile_withcmake.sh" ]]; then
+        EchoFatal "ParHIP build_backend=compile_withcmake but '$CTX_source_dir/compile_withcmake.sh' is missing or not executable"
+        exit 1
+      fi
+      _ParHIPBuildViaCompileWithCMake
+      ;;
     compile_sh)
       if [[ ! -x "$CTX_source_dir/compile.sh" ]]; then
         EchoFatal "ParHIP build_backend=compile_sh but '$CTX_source_dir/compile.sh' is missing or not executable"
@@ -76,7 +117,7 @@ PartitionerBuild_ParHIP() {
       _ParHIPBuildViaCompileScript
       ;;
     *)
-      EchoFatal "invalid ParHIP build_backend '$backend' (expected auto|cmake|compile_sh)"
+      EchoFatal "invalid ParHIP build_backend '$backend' (expected auto|cmake|compile_withcmake|compile_sh)"
       exit 1
       ;;
   esac
@@ -93,6 +134,7 @@ PartitionerBuild_ParHIP() {
     "$CTX_source_dir/build/apps/$binary_name"
     "$CTX_source_dir/deploy/$binary_name"
     "$CTX_source_dir/$binary_name"
+    "$CTX_source_dir/build/parallel/parallel_src/$binary_name"
     "$CTX_source_dir"/*/"$binary_name"(N)
   )
 
@@ -106,6 +148,12 @@ PartitionerBuild_ParHIP() {
   EchoFatal "could not find built binary '$binary_name' in expected locations"
   EchoInfo "checked: ${candidates[*]}"
   exit 1
+}
+
+_ParHIPPercentImbalance() {
+  local value=""
+  printf -v value "%.12g" "$(( RUN_epsilon * 100.0 ))"
+  echo "$value"
 }
 
 PartitionerInvoke_ParHIP() {
@@ -129,12 +177,14 @@ PartitionerInvoke_ParHIP() {
   local seed_flag=""
   local epsilon_flag=""
   local threads_flag=""
+  local epsilon_percent=""
   preconfiguration=$(PartitionerProperty "preconfiguration" "")
   preconfiguration_flag=$(PartitionerProperty "preconfiguration_flag" "--preconfiguration")
   k_flag=$(PartitionerProperty "k_flag" "--k")
   seed_flag=$(PartitionerProperty "seed_flag" "--seed")
   epsilon_flag=$(PartitionerProperty "epsilon_flag" "--imbalance")
   threads_flag=$(PartitionerProperty "threads_flag" "")
+  epsilon_percent=$(_ParHIPPercentImbalance)
 
   local cmd=""
   cmd="${(q)RUN_binary_path}"
@@ -152,7 +202,7 @@ PartitionerInvoke_ParHIP() {
     cmd+=" ${seed_flag}=${(q)RUN_seed}"
   fi
   if [[ -n "$epsilon_flag" ]]; then
-    cmd+=" ${epsilon_flag}=${(q)RUN_epsilon}"
+    cmd+=" ${epsilon_flag}=${(q)epsilon_percent}"
   fi
   if [[ -n "$RUN_args" ]]; then
     cmd+=" $RUN_args"

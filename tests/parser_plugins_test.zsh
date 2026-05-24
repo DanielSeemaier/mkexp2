@@ -44,3 +44,21 @@ test_parser_kaminpar_example() {
 
   pass "KaMinPar parser fixture"
 }
+
+test_parser_kahip_example() {
+  run_parser_fixture \
+    "KaHIP" \
+    "$ROOT/tests/fixtures/parsers/KaHIP" \
+    "KaHIP parser"
+
+  pass "KaHIP parser fixture"
+}
+
+test_parser_parhip_example() {
+  run_parser_fixture \
+    "ParHIP" \
+    "$ROOT/tests/fixtures/parsers/ParHIP" \
+    "ParHIP parser"
+
+  pass "ParHIP parser fixture"
+}
