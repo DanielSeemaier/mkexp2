@@ -2758,37 +2758,71 @@
     .settings-modal {
       width: min(1040px, 100%);
     }
-    .settings-nav {
-      position: sticky;
-      top: -14px;
-      z-index: 2;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      padding: 10px 0;
-      margin-top: -14px;
-      background: var(--panel);
-      border-bottom: 1px solid var(--border);
+    .settings-modal .modal-body {
+      display: block;
+      padding: 0;
+      overflow: hidden;
     }
-    .settings-nav a {
-      display: inline-flex;
-      align-items: center;
-      min-height: 28px;
-      padding: 0 10px;
-      border: 1px solid var(--border);
-      border-radius: 999px;
+    .settings-layout {
+      display: grid;
+      grid-template-columns: 176px minmax(0, 1fr);
+      height: min(760px, calc(100vh - 118px));
+      min-height: min(560px, calc(100vh - 118px));
+      min-width: 0;
+    }
+    .settings-nav {
+      display: grid;
+      align-content: start;
+      gap: 4px;
+      min-width: 0;
+      padding: 14px 10px;
+      border-right: 1px solid var(--border);
       background: var(--surface);
+      overflow: auto;
+    }
+    .settings-nav-title {
+      padding: 0 8px 7px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+    .settings-nav button {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      width: 100%;
+      min-height: 34px;
+      padding: 0 9px;
+      border-color: transparent;
+      border-radius: 6px;
+      background: transparent;
       color: var(--muted);
       font-size: 12px;
       font-weight: 700;
-      text-decoration: none;
+      text-align: left;
     }
-    .settings-nav a:hover,
-    .settings-nav a:focus-visible {
+    .settings-nav button:hover,
+    .settings-nav button:focus-visible {
+      border-color: var(--border);
+      color: var(--text);
+      background: var(--surface-2);
+      outline: none;
+    }
+    .settings-nav button.active {
       border-color: var(--tab-active-border);
       color: var(--tab-active-text);
       background: var(--tab-active-bg);
-      outline: none;
+    }
+    .settings-content {
+      display: grid;
+      align-content: start;
+      gap: 18px;
+      min-width: 0;
+      padding: 16px 16px clamp(180px, 42vh, 360px);
+      overflow: auto;
+      scroll-behavior: smooth;
     }
     .settings-token {
       display: grid;
@@ -2854,14 +2888,15 @@
     }
     .settings-section {
       display: grid;
-      gap: 8px;
-      padding-top: 14px;
-      border-top: 1px solid var(--border);
-      scroll-margin-top: 52px;
+      gap: 10px;
+      min-width: 0;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--border);
+      scroll-margin-top: 14px;
     }
-    .settings-section:first-of-type {
-      border-top: 0;
-      padding-top: 0;
+    .settings-section:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
     }
     .settings-section-header {
       display: flex;
@@ -3437,8 +3472,26 @@
         max-width: 100%;
         flex-basis: auto;
       }
+      .settings-layout {
+        display: grid;
+        grid-template-columns: 1fr;
+        height: min(760px, calc(100vh - 118px));
+      }
       .settings-nav {
-        top: -14px;
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 6px;
+        padding: 10px;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+        overflow-x: auto;
+      }
+      .settings-nav-title {
+        display: none;
+      }
+      .settings-nav button {
+        width: auto;
+        flex: 0 0 auto;
       }
       .settings-tool {
         align-items: stretch;

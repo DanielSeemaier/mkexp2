@@ -113,6 +113,7 @@
     document.getElementById('tag-save').onclick = () => saveTag().catch(err => out(String(err)));
     document.getElementById('settings-open').onclick = openSettingsDialog;
     document.getElementById('settings-close').onclick = closeSettingsDialog;
+    initializeSettingsNav();
     document.getElementById('workspace-create').onclick = () => createWorkspace().catch(err => {
       setWorkspaceOutput(String(err), true);
       out(String(err));

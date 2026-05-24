@@ -203,15 +203,18 @@ __MKEXP2_STYLES__
           </button>
         </div>
         <div class="modal-body">
-          <nav class="settings-nav" aria-label="Settings sections">
-            <a href="#settings-access">Access</a>
-            <a href="#settings-workspaces">Workspaces</a>
-            <a href="#settings-editor">Editor</a>
-            <a href="#settings-results">Results</a>
-            <a href="#settings-tags">Tags</a>
-            <a href="#settings-maintenance">Maintenance</a>
-          </nav>
-          <div id="settings-access" class="settings-section">
+          <div class="settings-layout">
+            <nav class="settings-nav" aria-label="Settings sections">
+              <div class="settings-nav-title">Settings</div>
+              <button type="button" data-settings-section="settings-access">Access</button>
+              <button type="button" data-settings-section="settings-workspaces">Workspaces</button>
+              <button type="button" data-settings-section="settings-editor">Editor</button>
+              <button type="button" data-settings-section="settings-results">Results</button>
+              <button type="button" data-settings-section="settings-tags">Tags</button>
+              <button type="button" data-settings-section="settings-maintenance">Maintenance</button>
+            </nav>
+            <div class="settings-content">
+          <section id="settings-access" class="settings-section">
             <div class="settings-section-header">
               <div>
                 <div class="settings-tool-title">Access</div>
@@ -222,8 +225,8 @@ __MKEXP2_STYLES__
               <label for="token">Session token</label>
               <input id="token" type="password" placeholder="Session token">
             </div>
-          </div>
-          <div id="settings-workspaces" class="settings-section">
+          </section>
+          <section id="settings-workspaces" class="settings-section">
             <div class="settings-section-header">
               <div>
                 <div class="settings-tool-title">Workspaces</div>
@@ -242,8 +245,8 @@ __MKEXP2_STYLES__
               </button>
             </div>
             <div id="workspace-output" class="csv-empty hidden"></div>
-          </div>
-          <div id="settings-editor" class="settings-section">
+          </section>
+          <section id="settings-editor" class="settings-section">
             <div class="settings-section-header">
               <div>
                 <div class="settings-tool-title">Editor and authoring</div>
@@ -282,8 +285,8 @@ __MKEXP2_STYLES__
                 </div>
               </div>
             </div>
-          </div>
-          <div id="settings-results" class="settings-section">
+          </section>
+          <section id="settings-results" class="settings-section">
             <div class="settings-section-header">
               <div>
                 <div class="settings-tool-title">Results</div>
@@ -292,8 +295,8 @@ __MKEXP2_STYLES__
             </div>
             <div class="settings-subsection-title">Hidden columns</div>
             <div id="settings-hidden-columns" class="settings-hidden-columns csv-empty">No globally hidden columns loaded.</div>
-          </div>
-          <div id="settings-tags" class="settings-section">
+          </section>
+          <section id="settings-tags" class="settings-section">
             <div class="settings-section-header">
               <div>
                 <div class="settings-tool-title">Tags</div>
@@ -313,8 +316,8 @@ __MKEXP2_STYLES__
               <button id="tag-save">Save Tag</button>
             </div>
             <div id="tag-list" class="tag-list"></div>
-          </div>
-          <div id="settings-maintenance" class="settings-section">
+          </section>
+          <section id="settings-maintenance" class="settings-section">
             <div class="settings-section-header">
               <div>
                 <div class="settings-tool-title">Maintenance</div>
@@ -357,6 +360,8 @@ __MKEXP2_STYLES__
                   <span>Resolve Spack R cache</span>
                 </button>
               </div>
+            </div>
+          </section>
             </div>
           </div>
         </div>

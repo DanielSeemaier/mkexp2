@@ -792,8 +792,57 @@
         await saveGlobalColumnVisibility();
       });
     }
+    const SETTINGS_SECTION_IDS = [
+      'settings-access',
+      'settings-workspaces',
+      'settings-editor',
+      'settings-results',
+      'settings-tags',
+      'settings-maintenance',
+    ];
+    function setActiveSettingsSection(sectionId) {
+      document.querySelectorAll('[data-settings-section]').forEach(button => {
+        const active = button.dataset.settingsSection === sectionId;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-current', active ? 'true' : 'false');
+      });
+    }
+    function scrollSettingsSection(sectionId, behavior = 'smooth') {
+      const content = document.querySelector('.settings-content');
+      const section = document.getElementById(sectionId);
+      if (!content || !section) return;
+      const target = content.scrollTop + section.getBoundingClientRect().top - content.getBoundingClientRect().top - 4;
+      content.scrollTo({ top: Math.max(0, target), behavior });
+      setActiveSettingsSection(sectionId);
+    }
+    function updateSettingsNavFromScroll() {
+      const content = document.querySelector('.settings-content');
+      if (!content) return;
+      const contentTop = content.getBoundingClientRect().top;
+      const activeThreshold = Math.min(150, content.clientHeight * 0.24);
+      let active = SETTINGS_SECTION_IDS[0];
+      for (const sectionId of SETTINGS_SECTION_IDS) {
+        const section = document.getElementById(sectionId);
+        if (!section) continue;
+        if (section.getBoundingClientRect().top - contentTop <= activeThreshold) active = sectionId;
+      }
+      setActiveSettingsSection(active);
+    }
+    function initialSettingsSection() {
+      const fromHash = String(window.location.hash || '').slice(1);
+      return SETTINGS_SECTION_IDS.includes(fromHash) ? fromHash : SETTINGS_SECTION_IDS[0];
+    }
+    function initializeSettingsNav() {
+      document.querySelectorAll('[data-settings-section]').forEach(button => {
+        button.onclick = () => scrollSettingsSection(button.dataset.settingsSection);
+      });
+      const content = document.querySelector('.settings-content');
+      if (content) content.addEventListener('scroll', updateSettingsNavFromScroll, { passive: true });
+      setActiveSettingsSection(initialSettingsSection());
+    }
     function openSettingsDialog() {
       document.getElementById('settings-modal').classList.remove('hidden');
+      requestAnimationFrame(() => scrollSettingsSection(initialSettingsSection(), 'auto'));
       renderThemeSetting();
       loadWorkspaces().catch(err => {
         setWorkspaceOutput(String(err), true);
