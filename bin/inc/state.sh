@@ -73,6 +73,8 @@ _system="local"
 # User-facing experiment DSL state.
 typeset -A ALG_DEF_BASE=()
 typeset -A ALG_DEF_ARGS=()
+typeset -A PLUGIN_ALG_DEF_BASE=()
+typeset -A PLUGIN_ALG_DEF_ARGS=()
 typeset -A FLAT_ALGO_BASE=()
 typeset -A FLAT_ALGO_ARGS=()
 
@@ -180,6 +182,8 @@ ResetExperiment() {
 
   ALG_DEF_BASE=()
   ALG_DEF_ARGS=()
+  PLUGIN_ALG_DEF_BASE=()
+  PLUGIN_ALG_DEF_ARGS=()
   FLAT_ALGO_BASE=()
   FLAT_ALGO_ARGS=()
 

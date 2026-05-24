@@ -217,11 +217,18 @@ ProbeEmitDeclaredAlgorithmDefinitions() {
   printf '['
   for name in "${names[@]}"; do
     name=$(ProbeCleanKey "$name")
-    printf '%s{"name":%s,"base":%s,"args":%s}' \
+    local builtin="false"
+    if [[ -n "${PLUGIN_ALG_DEF_BASE["$name"]:-}" \
+      && "${PLUGIN_ALG_DEF_BASE["$name"]}" == "${ALG_DEF_BASE["$name"]}" \
+      && "${PLUGIN_ALG_DEF_ARGS["$name"]:-}" == "${ALG_DEF_ARGS["$name"]:-}" ]]; then
+      builtin="true"
+    fi
+    printf '%s{"name":%s,"base":%s,"args":%s,"builtin":%s}' \
       "$sep" \
       "$(JsonString "$name")" \
       "$(JsonString "${ALG_DEF_BASE["$name"]}")" \
-      "$(JsonString "${ALG_DEF_ARGS["$name"]:-}")"
+      "$(JsonString "${ALG_DEF_ARGS["$name"]:-}")" \
+      "$builtin"
     sep=","
   done
   printf ']'

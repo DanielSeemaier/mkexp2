@@ -6,6 +6,8 @@ LoadExperimentFunctionState() {
 
   ResetExperiment
   LoadPartitionerAliasHooks
+  PLUGIN_ALG_DEF_BASE=("${(@kv)ALG_DEF_BASE}")
+  PLUGIN_ALG_DEF_ARGS=("${(@kv)ALG_DEF_ARGS}")
   # Re-source for each experiment function to restore global declarations.
   . "$experiment_file"
   "$local_fn"

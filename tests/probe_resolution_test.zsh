@@ -101,3 +101,32 @@ EOF
 
   pass "algorithm property inheritance follows DefineAlgorithm chain"
 }
+
+test_probe_declared_algorithm_definitions_mark_builtin_aliases() {
+  local tmp=""
+  tmp=$(mktemp -d)
+  mkdir -p "$tmp/graphs"
+  : > "$tmp/graphs/demo.metis"
+  cat > "$tmp/Experiment" <<'EOF'
+System local
+DefineAlgorithm TestHarness-Custom TestHarness --custom
+
+ExperimentBuiltinAliases() {
+  Algorithms TestHarness TestHarness-Dbg TestHarness-Custom
+  Graph graphs/demo
+  Ks 2
+  Seeds 1
+  Epsilons 0.03
+  Threads 1
+}
+EOF
+
+  (
+    cd "$tmp"
+    "$MKEXP2" probe BuiltinAliases > builtin-aliases.json
+    assert_eq "$(json_value builtin-aliases.json '.declared.algorithm_definitions[] | select(.name=="TestHarness-Dbg") | .builtin')" "true" "plugin aliases are marked builtin in declared definitions"
+    assert_eq "$(json_value builtin-aliases.json '.declared.algorithm_definitions[] | select(.name=="TestHarness-Custom") | .builtin')" "false" "user-defined algorithms are not marked builtin"
+  )
+
+  pass "declared algorithm definitions distinguish builtin aliases"
+}

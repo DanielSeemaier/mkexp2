@@ -313,6 +313,14 @@
       }
       return names;
     }
+    function describeAlgorithmOptionNames(describe = state.guidedModel?.describe) {
+      const names = new Set();
+      for (const partitioner of describe?.partitioners || []) {
+        if (partitioner.name) names.add(partitioner.name);
+        for (const alias of partitioner.aliases || []) if (alias.name) names.add(alias.name);
+      }
+      return names;
+    }
     function guidedBaseOptions(describe = state.guidedModel?.describe) {
       const names = new Set();
       for (const partitioner of describe?.partitioners || []) {
@@ -466,15 +474,17 @@
           declaredProperties[name] = { ...(declaredProperties[name] || {}), ...(properties || {}) };
         }
       }
-      const algorithmOptions = new Set();
+      const algorithmOptions = describeAlgorithmOptionNames(describe);
       for (const experiment of experiments) {
         const declared = experiment.declared || {};
         const selectedNames = guidedTextList(declared.algorithms?.length ? declared.algorithms : (experiment.resolved?.algorithms || []).map(algorithm => algorithm.name));
         for (const name of selectedNames) algorithmOptions.add(name);
       }
       const builtinAliasNames = describeAliasNames(describe);
-      const editableDefinitions = new Map(Array.from(declaredDefinitions.entries()).filter(([name]) => !builtinAliasNames.has(name)));
-      for (const name of editableDefinitions.keys()) algorithmOptions.add(name);
+      for (const name of declaredDefinitions.keys()) algorithmOptions.add(name);
+      const editableDefinitions = new Map(Array.from(declaredDefinitions.entries()).filter(([name, definition]) =>
+        !definition.builtin && !builtinAliasNames.has(name)
+      ));
       const algorithmMap = new Map();
       for (const [name, definition] of editableDefinitions.entries()) {
         algorithmMap.set(name, {
