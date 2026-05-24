@@ -1269,7 +1269,32 @@
       state.guidedDirty = false;
       renderEditorMode();
     }
+    async function saveBeforeEditorModeSwitch(mode) {
+      const fromGuided = state.editorMode === 'guided';
+      const toGuided = mode === 'guided';
+      if (fromGuided === toGuided) return true;
+      if (fromGuided && state.guidedDirty) {
+        if (!confirm('Save guided changes before switching to Text?\n\nCancel keeps you in Guided mode.')) return false;
+        await saveGuidedExperiment();
+        return true;
+      }
+      if (!fromGuided && state.editorDirty && !state.shared) {
+        if (!confirm('Save text changes before switching to Guided?\n\nCancel keeps you in Text mode.')) return false;
+        const selected = state.selected;
+        await persistExperiment();
+        if (state.selected !== selected) return false;
+        state.editorDirty = false;
+        clearCheckIndicator();
+        await loadAlgorithms(selected, { force: true }).catch(err => out(String(err)));
+      }
+      return true;
+    }
     async function switchEditorMode(mode) {
+      if ((mode === 'guided') === (state.editorMode === 'guided')) return;
+      if (!(await saveBeforeEditorModeSwitch(mode))) {
+        renderEditorMode();
+        return;
+      }
       if (mode === 'guided') {
         state.editorMode = 'guided';
         renderEditorMode();
