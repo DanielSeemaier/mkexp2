@@ -16,7 +16,7 @@ __MKEXP2_STYLES__
   </style>
 </head>
 <body>
-  <div class="app">
+  <div class="app dashboard-mode">
     <aside class="sidebar">
       <div class="brand">
         <h1>mkexp2</h1>
@@ -38,9 +38,15 @@ __MKEXP2_STYLES__
           <span>Dashboard</span>
         </button>
       </nav>
+      <div class="sidebar-tree-header">
+        <div class="sidebar-section-title">Experiments</div>
+      </div>
       <div id="experiments" class="experiment-list"></div>
       <div class="archive-nav">
-        <button id="archive-open" class="archive-nav-button" aria-label="Show archived experiments">Archive</button>
+        <button id="archive-open" class="archive-nav-button" aria-label="Show archived experiments">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+          <span>Archive</span>
+        </button>
       </div>
       <section class="sidebar-nodes">
         <div class="sidebar-section-header">
@@ -553,7 +559,7 @@ __MKEXP2_STYLES__
           <div id="auth-message" class="csv-summary"></div>
         </div>
       </section>
-      <div class="view-tabs">
+      <div class="view-tabs" aria-label="Experiment navigation">
         <button class="view-tab" data-view="experiment-view">Experiment</button>
         <button class="view-tab" data-view="results-view">Results</button>
         <button class="view-tab" data-view="logs-view">Logs</button>

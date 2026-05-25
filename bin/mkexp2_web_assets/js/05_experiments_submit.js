@@ -1,5 +1,6 @@
     async function setView(viewId) {
       state.activeView = viewId;
+      document.querySelector('.app')?.classList.toggle('dashboard-mode', viewId === 'dashboard-view');
       const previousSidebarFocus = state.sidebarFocus;
       if (viewId === 'dashboard-view') state.sidebarFocus = 'dashboard';
       else if (state.sidebarFocus === 'dashboard' && state.selected && !state.selectedArchived) state.sidebarFocus = 'experiments';
