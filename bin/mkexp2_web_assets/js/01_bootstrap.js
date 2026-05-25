@@ -89,6 +89,11 @@
       progressTimer: null,
       progressBusyRestore: null,
       progressLoadSeq: 0,
+      dashboardProgress: null,
+      dashboardProgressFor: '',
+      dashboardProgressLoading: false,
+      dashboardProgressLoadSeq: 0,
+      nodeStatusPayload: null,
       nodeStatusTimer: null,
       nodeStatusBusyRestore: null,
       description: null,
@@ -97,7 +102,7 @@
       downloadOptions: null,
       downloadOptionsFor: null,
       queueServerUser: '',
-      activeView: 'experiment-view',
+      activeView: 'dashboard-view',
       authRequired: false,
       shared: false,
       shareId: '',
@@ -135,7 +140,7 @@
     if (authTokenInput) authTokenInput.value = tokenInput.value;
     tokenInput.addEventListener('change', () => {
       setStoredToken(tokenInput.value);
-      bootAuthenticatedUi({ selectMostRecent: true }).catch(err => out(String(err)));
+      bootAuthenticatedUi({ selectMostRecent: false }).catch(err => out(String(err)));
     });
 
     function token() { return tokenInput.value; }
@@ -182,7 +187,7 @@
       }
       setStoredToken(value);
       clearAuthRequired();
-      await bootAuthenticatedUi({ selectMostRecent: true });
+      await bootAuthenticatedUi({ selectMostRecent: false });
     }
     async function bootAuthenticatedUi(options = {}) {
       if (state.shared) return;
@@ -195,7 +200,7 @@
       loadUiSettings().catch(err => out(String(err)));
       refreshConfig().catch(err => out(String(err)));
       refreshPresets().catch(err => out(String(err)));
-      refreshExperiments({ selectMostRecent: options.selectMostRecent !== false }).catch(err => out(String(err)));
+      refreshExperiments({ selectMostRecent: options.selectMostRecent === true }).catch(err => out(String(err)));
       refreshStatus().catch(err => out(String(err)));
     }
     function apiPath(path) {

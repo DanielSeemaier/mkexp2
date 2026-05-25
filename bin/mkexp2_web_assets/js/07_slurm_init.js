@@ -46,6 +46,8 @@
       setNodeStatusLoading(true);
       try {
         const data = await api('/api/status/slurm');
+        state.nodeStatusPayload = data;
+        renderDashboard();
         clearTransientOutput();
         const box = document.getElementById('slurm-status');
         if (!data.nodes.length) {
@@ -84,6 +86,10 @@
     document.getElementById('queue-refresh').onclick = () => withBusyButton('queue-refresh', '', loadQueue).catch(err => out(String(err)));
     document.getElementById('queue-cancel-all').onclick = () => cancelAllQueueJobs(document.getElementById('queue-cancel-all')).catch(err => out(String(err)));
     document.getElementById('create-open').onclick = () => withBusyButton('create-open', '', openCreateDialog).catch(err => out(String(err)));
+    document.getElementById('dashboard-create').onclick = () => withBusyButton('dashboard-create', 'Opening...', openCreateDialog).catch(err => out(String(err)));
+    document.getElementById('dashboard-refresh').onclick = () => withBusyButton('dashboard-refresh', 'Refreshing...', () => refreshExperiments({ force: true, selectMostRecent: false })).catch(err => out(String(err)));
+    document.getElementById('dashboard-archive').onclick = () => withBusyButton('dashboard-archive', 'Loading...', openArchivePane).catch(err => out(String(err)));
+    document.getElementById('dashboard-git').onclick = () => withBusyButton('dashboard-git', 'Loading...', openGitDialog).catch(err => out(String(err)));
     document.getElementById('create-close').onclick = closeCreateDialog;
     document.getElementById('create-cancel').onclick = closeCreateDialog;
     document.getElementById('create-submit').onclick = createExperiment;
@@ -217,5 +223,5 @@
     if (initialShareId) {
       selectSharedExperiment(initialShareId).catch(err => out(String(err)));
     } else {
-      bootAuthenticatedUi({ selectMostRecent: true }).catch(err => out(String(err)));
+      bootAuthenticatedUi({ selectMostRecent: false }).catch(err => out(String(err)));
     }

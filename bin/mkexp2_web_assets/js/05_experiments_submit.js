@@ -6,6 +6,10 @@
       document.querySelectorAll('.view-panel').forEach(panel => {
         panel.classList.toggle('active', panel.id === viewId);
       });
+      if (viewId === 'dashboard-view') {
+        renderDashboard();
+        await loadDashboardSelectedProgress();
+      }
       if (viewId === 'results-view') {
         await activateCsvView(viewId);
       }
@@ -65,6 +69,305 @@
     }
     function mostRecentExperiment(experiments) {
       return Array.from(experiments || []).sort(compareExperimentsByCreatedDesc)[0] || null;
+    }
+    function experimentHasResults(exp) {
+      return Boolean(exp?.has_results);
+    }
+    function experimentHasPlots(exp) {
+      return Boolean(exp?.has_plots_pdf || exp?.has_plot_artifacts);
+    }
+    function dashboardExperimentById(id) {
+      return (state.experiments || []).find(exp => exp.id === id) || null;
+    }
+    function dashboardCountText(count, singular, plural = `${singular}s`) {
+      return `${count} ${count === 1 ? singular : plural}`;
+    }
+    function dashboardSortedExperiments(experiments) {
+      return Array.from(experiments || []).sort(compareExperimentsByCreatedDesc);
+    }
+    function renderDashboardStat(container, label, value, detail = '') {
+      const item = document.createElement('div');
+      item.className = 'dashboard-stat';
+      const number = document.createElement('div');
+      number.className = 'dashboard-stat-value';
+      number.textContent = String(value);
+      const text = document.createElement('div');
+      text.className = 'dashboard-stat-label';
+      text.textContent = label;
+      item.appendChild(number);
+      item.appendChild(text);
+      if (detail) {
+        const small = document.createElement('div');
+        small.className = 'dashboard-stat-detail';
+        small.textContent = detail;
+        item.appendChild(small);
+      }
+      container.appendChild(item);
+    }
+    function appendDashboardBadge(container, text, className = '') {
+      const badge = document.createElement('span');
+      badge.className = `dashboard-badge${className ? ` ${className}` : ''}`;
+      badge.textContent = text;
+      container.appendChild(badge);
+      return badge;
+    }
+    function renderDashboardBadges(container, exp) {
+      const tag = experimentTag(exp);
+      if (tag) {
+        const badge = appendDashboardBadge(container, tag.name, 'tag');
+        if (validTagColor(tag.color)) badge.style.setProperty('--dashboard-tag-color', tag.color);
+      }
+      if (exp?.submit_lock?.locked) appendDashboardBadge(container, 'Running', 'locked');
+      if (experimentHasResults(exp)) appendDashboardBadge(container, 'Results', 'results');
+      if (experimentHasPlots(exp)) appendDashboardBadge(container, 'Plots', 'plots');
+      if (!container.childElementCount) appendDashboardBadge(container, 'Ready', 'muted');
+    }
+    function dashboardOpenExperiment(id, button = null) {
+      return withBusyButton(button, 'Opening...', () => selectExperiment(id));
+    }
+    function renderDashboardExperimentRow(container, exp, options = {}) {
+      const row = document.createElement('article');
+      row.className = 'dashboard-exp-row'
+        + (exp.id === state.selected ? ' selected' : '')
+        + (exp?.submit_lock?.locked ? ' locked' : '');
+      const pinned = state.pinnedExperiments.has(exp.id);
+      const pin = document.createElement('button');
+      pin.type = 'button';
+      pin.className = `dashboard-pin${pinned ? ' active' : ''}`;
+      pin.textContent = pinned ? '★' : '☆';
+      pin.title = pinned ? 'Unpin experiment' : 'Pin experiment';
+      pin.setAttribute('aria-label', `${pinned ? 'Unpin' : 'Pin'} ${exp.id}`);
+      pin.onclick = () => withBusyButton(pin, '', () => togglePinnedExperiment(exp.id)).catch(err => out(String(err)));
+      row.appendChild(pin);
+
+      const main = document.createElement('div');
+      main.className = 'dashboard-exp-main';
+      const title = document.createElement('div');
+      title.className = 'dashboard-exp-title';
+      title.textContent = options.label || exp.id;
+      const meta = document.createElement('div');
+      meta.className = 'dashboard-exp-meta';
+      const date = formatExperimentDate(exp) || 'unknown date';
+      const lockText = submitLockText(exp.submit_lock);
+      meta.textContent = [date, lockText].filter(Boolean).join(' | ');
+      const badges = document.createElement('div');
+      badges.className = 'dashboard-badges';
+      renderDashboardBadges(badges, exp);
+      main.appendChild(title);
+      main.appendChild(meta);
+      main.appendChild(badges);
+      row.appendChild(main);
+
+      const action = document.createElement('button');
+      action.type = 'button';
+      action.className = 'small-button dashboard-open';
+      action.textContent = 'Open';
+      action.title = `Open ${exp.id}`;
+      action.onclick = () => dashboardOpenExperiment(exp.id, action).catch(err => out(String(err)));
+      row.appendChild(action);
+      container.appendChild(row);
+    }
+    function renderDashboardExperimentList(container, experiments, emptyText, options = {}) {
+      if (!container) return;
+      container.innerHTML = '';
+      const rows = Array.from(experiments || []);
+      if (!rows.length) {
+        container.className = 'dashboard-list panel-body csv-empty';
+        container.textContent = emptyText;
+        return;
+      }
+      container.className = 'dashboard-list panel-body';
+      for (const exp of rows.slice(0, options.limit || rows.length)) {
+        renderDashboardExperimentRow(container, exp, { label: options.label === 'id' ? exp.id : (exp.name || exp.id) });
+      }
+    }
+    function dashboardClusterCounts(nodes) {
+      const counts = { total: nodes.length, idle: 0, reserved: 0, allocated: 0, down: 0, other: 0 };
+      for (const node of nodes) {
+        const stateClass = nodeStateClass(node.state || node.availability || '');
+        if (stateClass === 'node-state-idle') counts.idle += 1;
+        else if (stateClass === 'node-state-idle-reserved') counts.reserved += 1;
+        else if (stateClass === 'node-state-allocated') counts.allocated += 1;
+        else if (stateClass === 'node-state-down') counts.down += 1;
+        else counts.other += 1;
+      }
+      return counts;
+    }
+    function renderDashboardCluster() {
+      const summary = document.getElementById('dashboard-cluster-summary');
+      const box = document.getElementById('dashboard-cluster');
+      if (!summary || !box) return;
+      const nodes = Array.isArray(state.nodeStatusPayload?.nodes) ? state.nodeStatusPayload.nodes : [];
+      box.innerHTML = '';
+      if (!nodes.length) {
+        summary.textContent = 'No node status loaded.';
+        box.className = 'dashboard-cluster panel-body csv-empty';
+        box.textContent = 'Node status loads alongside the sidebar status panel.';
+        return;
+      }
+      const counts = dashboardClusterCounts(nodes);
+      summary.textContent = dashboardCountText(counts.total, 'node');
+      box.className = 'dashboard-cluster panel-body';
+      renderDashboardStat(box, 'Idle', counts.idle, counts.reserved ? `${counts.reserved} reserved` : '');
+      renderDashboardStat(box, 'Allocated', counts.allocated);
+      renderDashboardStat(box, 'Down', counts.down);
+      if (counts.other) renderDashboardStat(box, 'Other', counts.other);
+    }
+    function renderDashboardSelectedProgress(panel, exp) {
+      const progressWrap = document.createElement('div');
+      progressWrap.className = 'dashboard-selected-progress';
+      const header = document.createElement('div');
+      header.className = 'dashboard-selected-progress-header';
+      const title = document.createElement('div');
+      title.className = 'dashboard-selected-progress-title';
+      title.textContent = 'Progress';
+      const refresh = document.createElement('button');
+      refresh.type = 'button';
+      refresh.className = 'icon-button';
+      refresh.title = 'Refresh selected progress';
+      refresh.setAttribute('aria-label', 'Refresh selected progress');
+      refresh.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>';
+      refresh.onclick = () => withBusyButton(refresh, '', () => loadDashboardSelectedProgress({ force: true })).catch(err => out(String(err)));
+      header.appendChild(title);
+      header.appendChild(refresh);
+      progressWrap.appendChild(header);
+
+      const progress = state.dashboardProgressFor === exp.id ? state.dashboardProgress?.progress_json : null;
+      if (state.dashboardProgressLoading && state.dashboardProgressFor === exp.id) {
+        const loading = document.createElement('div');
+        loading.className = 'csv-summary';
+        loading.textContent = 'Loading selected progress...';
+        progressWrap.appendChild(loading);
+      } else if (progress) {
+        const bar = document.createElement('div');
+        bar.className = 'progress-bar dashboard-mini-progress';
+        const fill = document.createElement('div');
+        fill.className = 'progress-bar-fill';
+        fill.style.width = `${Math.max(0, Math.min(100, Number(progress.percent) || 0))}%`;
+        bar.appendChild(fill);
+        const count = document.createElement('div');
+        count.className = 'progress-count';
+        count.textContent = `${progress.done || 0}/${progress.total || 0}`;
+        progressWrap.appendChild(bar);
+        progressWrap.appendChild(count);
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'csv-summary';
+        empty.textContent = exp.submit_lock?.locked ? 'Progress has not been loaded yet.' : 'No generated progress metadata loaded.';
+        progressWrap.appendChild(empty);
+      }
+      panel.appendChild(progressWrap);
+    }
+    function renderDashboardSelected() {
+      const panel = document.getElementById('dashboard-selected');
+      if (!panel) return;
+      const exp = dashboardExperimentById(state.selected);
+      if (!exp) {
+        panel.className = 'panel dashboard-selected-panel hidden';
+        panel.innerHTML = '';
+        return;
+      }
+      panel.className = 'panel dashboard-selected-panel';
+      panel.innerHTML = '';
+      const header = document.createElement('div');
+      header.className = 'panel-header dashboard-selected-header';
+      const heading = document.createElement('div');
+      const title = document.createElement('div');
+      title.className = 'panel-title';
+      title.textContent = exp.id;
+      const meta = document.createElement('div');
+      meta.className = 'csv-summary';
+      meta.textContent = [formatExperimentDate(exp), submitLockText(exp.submit_lock)].filter(Boolean).join(' | ') || 'Selected experiment';
+      const badges = document.createElement('div');
+      badges.className = 'dashboard-badges';
+      renderDashboardBadges(badges, exp);
+      heading.appendChild(title);
+      heading.appendChild(meta);
+      heading.appendChild(badges);
+      const links = document.createElement('div');
+      links.className = 'dashboard-quick-links';
+      for (const [view, label] of [['experiment-view', 'Experiment'], ['results-view', 'Results'], ['logs-view', 'Logs'], ['plots-view', 'Plots']]) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        button.onclick = () => setView(view).catch(err => out(String(err)));
+        links.appendChild(button);
+      }
+      header.appendChild(heading);
+      header.appendChild(links);
+      panel.appendChild(header);
+      const body = document.createElement('div');
+      body.className = 'panel-body';
+      renderDashboardSelectedProgress(body, exp);
+      panel.appendChild(body);
+    }
+    function renderDashboard() {
+      const summary = document.getElementById('dashboard-summary');
+      if (!summary) return;
+      const experiments = state.experiments || [];
+      const pinned = Array.from(state.pinnedExperiments || [])
+        .map(id => dashboardExperimentById(id))
+        .filter(Boolean);
+      const running = dashboardSortedExperiments(experiments.filter(exp => exp.submit_lock?.locked));
+      const recent = dashboardSortedExperiments(experiments.filter(exp => !state.pinnedExperiments.has(exp.id))).slice(0, 8);
+      const withResults = experiments.filter(experimentHasResults).length;
+      const withPlots = experiments.filter(experimentHasPlots).length;
+      const subtitle = document.getElementById('dashboard-subtitle');
+      if (subtitle) {
+        subtitle.textContent = experiments.length
+          ? `${dashboardCountText(experiments.length, 'active experiment')} in this workspace.`
+          : 'No active experiments found in this workspace.';
+      }
+      summary.innerHTML = '';
+      renderDashboardStat(summary, 'Experiments', experiments.length);
+      renderDashboardStat(summary, 'Pinned', pinned.length);
+      renderDashboardStat(summary, 'Running', running.length);
+      renderDashboardStat(summary, 'Results', withResults);
+      renderDashboardStat(summary, 'Plots', withPlots);
+
+      const runningSummary = document.getElementById('dashboard-running-summary');
+      if (runningSummary) runningSummary.textContent = running.length ? dashboardCountText(running.length, 'submit lock') : 'No running submissions.';
+      renderDashboardExperimentList(document.getElementById('dashboard-running'), running, 'No experiments are submit-locked right now.', { label: 'id', limit: 8 });
+
+      const pinnedSummary = document.getElementById('dashboard-pinned-summary');
+      if (pinnedSummary) pinnedSummary.textContent = pinned.length ? dashboardCountText(pinned.length, 'pinned experiment') : 'No pinned experiments.';
+      renderDashboardExperimentList(document.getElementById('dashboard-pinned'), pinned, 'Pin experiments from the sidebar or dashboard to keep them here.', { label: 'id' });
+
+      const recentSummary = document.getElementById('dashboard-recent-summary');
+      if (recentSummary) recentSummary.textContent = recent.length ? `Newest ${recent.length} unpinned experiment${recent.length === 1 ? '' : 's'}.` : 'No recent experiments.';
+      renderDashboardExperimentList(document.getElementById('dashboard-recent'), recent, 'Create an experiment to start filling this workspace.', { label: 'id', limit: 8 });
+
+      renderDashboardSelected();
+      renderDashboardCluster();
+    }
+    async function loadDashboardSelectedProgress(options = {}) {
+      if (state.shared || !state.selected || state.selectedArchived) {
+        state.dashboardProgress = null;
+        state.dashboardProgressFor = '';
+        state.dashboardProgressLoading = false;
+        renderDashboard();
+        return;
+      }
+      const experimentId = state.selected;
+      if (!options.force && state.dashboardProgressFor === experimentId && state.dashboardProgress) {
+        renderDashboard();
+        return;
+      }
+      const loadId = ++state.dashboardProgressLoadSeq;
+      state.dashboardProgressFor = experimentId;
+      state.dashboardProgressLoading = true;
+      renderDashboard();
+      try {
+        const result = await api(`/api/experiments/${encodeURIComponent(experimentId)}/progress`);
+        if (state.dashboardProgressLoadSeq !== loadId || state.selected !== experimentId) return;
+        state.dashboardProgress = result;
+        if (result?.submit_lock) renderSubmitLock(result.submit_lock);
+      } finally {
+        if (state.dashboardProgressLoadSeq === loadId) {
+          state.dashboardProgressLoading = false;
+          renderDashboard();
+        }
+      }
     }
     function experimentTree(experiments) {
       const root = treeNode();
@@ -267,6 +570,7 @@
       renderTagColorPalette(document.getElementById('tag-color')?.value);
       renderTagManager();
       renderExperimentsList();
+      renderDashboard();
       return data;
     }
     async function assignSelectedTag() {
@@ -284,6 +588,7 @@
       } finally {
         renderTagSelect();
         renderExperimentsList();
+        renderDashboard();
       }
     }
     async function saveTag() {
@@ -301,6 +606,7 @@
         renderTagManager();
         renderTagSelect();
         renderExperimentsList();
+        renderDashboard();
       });
     }
     async function deleteTag(name, button) {
@@ -316,6 +622,7 @@
         renderTagManager();
         renderTagSelect();
         renderExperimentsList();
+        renderDashboard();
       });
     }
     function renderArchiveCodexResult(result) {
@@ -539,7 +846,7 @@
       await loadUiSettings().catch(err => out(String(err)));
       await refreshPresets().catch(err => out(String(err)));
       await loadSettingsColumnVisibility().catch(err => out(String(err)));
-      await refreshExperiments({ force: true, selectMostRecent: true }).catch(err => out(String(err)));
+      await refreshExperiments({ force: true, selectMostRecent: false }).catch(err => out(String(err)));
       await loadArchivedExperiments({ force: true }).catch(err => out(String(err)));
       await refreshTags().catch(err => out(String(err)));
       await loadExperimentSubdirectories().catch(err => out(String(err)));
@@ -694,6 +1001,7 @@
         modified_at: lock?.modified_at || ''
       };
       renderExperimentsList();
+      renderDashboard();
     }
     function renderPinnedExperiments(container) {
       const order = Array.from(state.pinnedExperiments);
@@ -867,6 +1175,7 @@
         state.pinnedExperiments = new Set(result.pinned || []);
       } finally {
         renderExperimentsList();
+        renderDashboard();
       }
     }
     async function refreshExperiments(options = {}) {
@@ -885,6 +1194,7 @@
       state.tagAssignments = tags.assignments || {};
       renderTagSelect();
       renderExperimentsList();
+      renderDashboard();
       if (options.selectMostRecent && !state.selected && state.experiments.length) {
         const latest = mostRecentExperiment(state.experiments);
         if (latest) await selectExperiment(latest.id);
@@ -1314,6 +1624,7 @@
       const locked = Boolean(state.submitLock.locked);
       clearButton.disabled = !locked || !state.selected;
       updateSelectedExperimentLock(state.submitLock);
+      renderDashboard();
       renderSubmitButton();
     }
     function submitLockText(lock) {
@@ -1621,8 +1932,12 @@
       state.plotLabelTouched = false;
       state.plotGenerationRunning = false;
       state.progressLoadSeq += 1;
+      state.dashboardProgress = null;
+      state.dashboardProgressFor = '';
+      state.dashboardProgressLoading = false;
+      state.dashboardProgressLoadSeq += 1;
       clearPlotPdfUrl();
-      setView('experiment-view').catch(err => out(String(err)));
+      setView('dashboard-view').catch(err => out(String(err)));
       setSelectedExperimentMetadata('Experiment');
       editor.readOnly = Boolean(state.shared);
       setEditorValue('');
@@ -1635,6 +1950,7 @@
       resetProbePanel();
       renderTagSelect();
       renderExperimentsList();
+      renderDashboard();
     }
     async function archiveExperiment() {
       if (!state.selected || state.selectedArchived) return;
@@ -2139,6 +2455,9 @@
         throw err;
       }
       if (state.selected !== experimentId || state.progressLoadSeq !== loadId) return;
+      state.dashboardProgress = result;
+      state.dashboardProgressFor = experimentId;
+      state.dashboardProgressLoading = false;
       renderSubmitLock(result.submit_lock);
       renderProgress(result);
     }
@@ -2184,6 +2503,10 @@
       state.selectedPlotArtifact = '';
       state.plotLabelTouched = false;
       state.plotGenerationRunning = false;
+      state.dashboardProgress = null;
+      state.dashboardProgressFor = id;
+      state.dashboardProgressLoading = false;
+      state.dashboardProgressLoadSeq += 1;
       clearPlotPdfUrl();
       editor.readOnly = Boolean(state.shared);
       setView('experiment-view').catch(err => out(String(err)));
@@ -2201,6 +2524,7 @@
       openExperimentAncestors(id);
       renderTagSelect();
       renderExperimentsList();
+      renderDashboard();
       const data = await api(`/api/experiments/${encodeURIComponent(id)}/experiment`);
       if (state.selected !== id || state.selectionSeq !== selectionId) return;
       clearTransientOutput();
@@ -2210,6 +2534,7 @@
       setExperimentTagInState(id, data.tag || null);
       renderSubmitLock(data.submit_lock);
       renderTagSelect();
+      renderDashboard();
       loadDescription().catch(err => out(String(err)));
       await loadAlgorithms(id);
     }
@@ -2256,6 +2581,10 @@
       state.plotLabelTouched = false;
       state.plotGenerationRunning = false;
       state.progressLoadSeq += 1;
+      state.dashboardProgress = null;
+      state.dashboardProgressFor = id;
+      state.dashboardProgressLoading = false;
+      state.dashboardProgressLoadSeq += 1;
       clearPlotPdfUrl();
       editor.readOnly = true;
       setView('experiment-view').catch(err => out(String(err)));
@@ -2275,6 +2604,7 @@
       renderSubmitButton();
       renderExperimentsList();
       renderArchivedExperiments();
+      renderDashboard();
       const data = await api(`/api/experiments/${encodeURIComponent(id)}/experiment`);
       if (state.selected !== id || state.selectionSeq !== selectionId) return;
       clearTransientOutput();
@@ -2285,6 +2615,7 @@
       renderSubmitLock(data.submit_lock || { locked: false });
       renderTagSelect();
       renderSubmitButton();
+      renderDashboard();
       loadDescription().catch(err => out(String(err)));
     }
     async function selectSharedExperiment(shareId) {

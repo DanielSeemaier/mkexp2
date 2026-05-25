@@ -548,7 +548,8 @@ __MKEXP2_STYLES__
         </div>
       </section>
       <div class="view-tabs">
-        <button class="view-tab active" data-view="experiment-view">Experiment</button>
+        <button class="view-tab active" data-view="dashboard-view">Dashboard</button>
+        <button class="view-tab" data-view="experiment-view">Experiment</button>
         <button class="view-tab" data-view="results-view">Results</button>
         <button class="view-tab" data-view="logs-view">Logs</button>
         <button class="view-tab" data-view="plots-view">Plots</button>
@@ -569,7 +570,79 @@ __MKEXP2_STYLES__
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
         </button>
       </div>
-      <section id="experiment-view" class="view-panel active">
+      <section id="dashboard-view" class="view-panel active">
+        <section class="dashboard-shell">
+          <div class="dashboard-header">
+            <div>
+              <h2>Dashboard</h2>
+              <div id="dashboard-subtitle" class="csv-summary">Load experiments to see repo activity.</div>
+            </div>
+            <div class="dashboard-actions">
+              <button id="dashboard-create" class="icon-text-button" aria-label="Create experiment" title="Create experiment">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                <span>Create</span>
+              </button>
+              <button id="dashboard-refresh" class="icon-text-button" aria-label="Refresh experiments" title="Refresh experiments">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
+                <span>Refresh</span>
+              </button>
+              <button id="dashboard-archive" class="icon-text-button" aria-label="Open archive" title="Open archive">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8"/><path d="M1 3h22v5H1z"/><path d="M10 12h4"/></svg>
+                <span>Archive</span>
+              </button>
+              <button id="dashboard-git" class="icon-text-button" aria-label="Open Git status" title="Open Git status">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M8.5 7.5 16 15"/></svg>
+                <span>Git</span>
+              </button>
+            </div>
+          </div>
+          <section id="dashboard-summary" class="dashboard-summary" aria-label="Experiment summary"></section>
+          <section id="dashboard-selected" class="panel dashboard-selected-panel hidden"></section>
+          <section class="dashboard-grid">
+            <div class="dashboard-column">
+              <section class="panel dashboard-panel">
+                <div class="panel-header">
+                  <div>
+                    <div class="panel-title">Running Now</div>
+                    <div id="dashboard-running-summary" class="csv-summary">No submit locks loaded.</div>
+                  </div>
+                </div>
+                <div id="dashboard-running" class="dashboard-list panel-body"></div>
+              </section>
+              <section class="panel dashboard-panel">
+                <div class="panel-header">
+                  <div>
+                    <div class="panel-title">Pinned</div>
+                    <div id="dashboard-pinned-summary" class="csv-summary">No pinned experiments loaded.</div>
+                  </div>
+                </div>
+                <div id="dashboard-pinned" class="dashboard-list panel-body"></div>
+              </section>
+            </div>
+            <div class="dashboard-column">
+              <section class="panel dashboard-panel">
+                <div class="panel-header">
+                  <div>
+                    <div class="panel-title">Recent Experiments</div>
+                    <div id="dashboard-recent-summary" class="csv-summary">No experiments loaded.</div>
+                  </div>
+                </div>
+                <div id="dashboard-recent" class="dashboard-list panel-body"></div>
+              </section>
+              <section class="panel dashboard-panel">
+                <div class="panel-header">
+                  <div>
+                    <div class="panel-title">Cluster Status</div>
+                    <div id="dashboard-cluster-summary" class="csv-summary">No node status loaded.</div>
+                  </div>
+                </div>
+                <div id="dashboard-cluster" class="dashboard-cluster panel-body"></div>
+              </section>
+            </div>
+          </section>
+        </section>
+      </section>
+      <section id="experiment-view" class="view-panel">
         <section class="grid">
           <div class="panel">
             <div class="panel-header experiment-editor-header">

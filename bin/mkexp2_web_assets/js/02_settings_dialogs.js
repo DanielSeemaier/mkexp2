@@ -350,7 +350,7 @@
     function clearSessionToken() {
       setStoredToken('');
       renderTokenVisibilityControl();
-      bootAuthenticatedUi({ selectMostRecent: true }).catch(err => out(String(err)));
+      bootAuthenticatedUi({ selectMostRecent: false }).catch(err => out(String(err)));
       tokenInput.focus();
     }
     function renderGuidedSettings() {

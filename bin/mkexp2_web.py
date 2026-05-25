@@ -1012,6 +1012,7 @@ class Mkexp2WebApp:
                     "modified_at": time_metadata["modified_at"],
                     "has_results": (path / "results").is_dir(),
                     "has_plots_pdf": (path / "plots.pdf").is_file(),
+                    "has_plot_artifacts": (path / "plots" / PLOT_INDEX_FILE).is_file(),
                     "archived": is_archived,
                 }
             )
