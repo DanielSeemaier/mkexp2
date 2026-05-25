@@ -350,6 +350,7 @@
     }
     .sidebar-nav {
       display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 6px;
       margin: 0 0 14px;
     }
@@ -358,9 +359,9 @@
       width: 100%;
       display: inline-flex;
       align-items: center;
-      justify-content: flex-start;
+      justify-content: center;
       gap: 8px;
-      text-align: left;
+      text-align: center;
       font-weight: 800;
     }
     .sidebar-nav-button svg,
@@ -385,11 +386,6 @@
       display: grid;
       gap: 6px;
       margin-top: 0;
-    }
-    .archive-nav {
-      margin-top: 14px;
-      padding-top: 14px;
-      border-top: 1px solid var(--border);
     }
     .archive-nav-button {
       height: 34px;
@@ -1282,7 +1278,7 @@
     }
     .dashboard-summary {
       display: grid;
-      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
       gap: 10px;
       min-width: 0;
     }
@@ -1447,6 +1443,52 @@
     }
     .dashboard-cluster.csv-empty {
       display: block;
+    }
+    .dashboard-queue {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }
+    .dashboard-queue.csv-empty {
+      display: block;
+    }
+    .dashboard-queue-row {
+      display: grid;
+      grid-template-columns: minmax(72px, 0.8fr) minmax(0, 1.4fr) auto minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+      min-width: 0;
+      padding: 8px 9px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      font-size: 12px;
+    }
+    .dashboard-queue-id,
+    .dashboard-queue-name,
+    .dashboard-queue-user {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+    .dashboard-queue-id {
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+    .dashboard-queue-name {
+      color: var(--text);
+    }
+    .dashboard-queue-user {
+      color: var(--muted);
+    }
+    .dashboard-queue-state {
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+    .dashboard-queue-more {
+      color: var(--muted);
+      font-size: 12px;
     }
     .muted { color: var(--muted); }
     .output {
@@ -3958,6 +4000,13 @@
       .dashboard-open {
         grid-column: 2;
         justify-self: start;
+      }
+      .dashboard-queue-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+      }
+      .dashboard-queue-name,
+      .dashboard-queue-user {
+        grid-column: 1 / -1;
       }
       .compare-grid { grid-template-columns: 1fr; }
       .logs-panel {

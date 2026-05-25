@@ -1,26 +1,45 @@
-    async function setView(viewId) {
-      state.activeView = viewId;
-      document.querySelector('.app')?.classList.toggle('dashboard-mode', viewId === 'dashboard-view');
-      const previousSidebarFocus = state.sidebarFocus;
-      if (viewId === 'dashboard-view') state.sidebarFocus = 'dashboard';
-      else if (state.sidebarFocus === 'dashboard' && state.selected && !state.selectedArchived) state.sidebarFocus = 'experiments';
-      document.querySelectorAll('.view-tab').forEach(button => {
-        button.classList.toggle('active', button.dataset.view === viewId);
-      });
+    function renderSidebarNavState() {
       const dashboardButton = document.getElementById('dashboard-open');
       if (dashboardButton) {
-        const active = viewId === 'dashboard-view';
+        const active = state.sidebarFocus === 'dashboard';
         dashboardButton.classList.toggle('active', active);
         if (active) dashboardButton.setAttribute('aria-current', 'page');
         else dashboardButton.removeAttribute('aria-current');
       }
+      const archiveButton = document.getElementById('archive-open');
+      if (archiveButton) {
+        const active = state.sidebarFocus === 'archive';
+        archiveButton.classList.toggle('active', active);
+        archiveButton.setAttribute('aria-expanded', state.archivePaneOpen ? 'true' : 'false');
+        if (active) archiveButton.setAttribute('aria-current', 'page');
+        else archiveButton.removeAttribute('aria-current');
+      }
+    }
+    async function setView(viewId) {
+      state.activeView = viewId;
+      document.querySelector('.app')?.classList.toggle('dashboard-mode', viewId === 'dashboard-view');
+      const previousSidebarFocus = state.sidebarFocus;
+      const previousArchivePaneOpen = state.archivePaneOpen;
+      if (viewId === 'dashboard-view') {
+        state.sidebarFocus = 'dashboard';
+        state.archivePaneOpen = false;
+      } else if (state.sidebarFocus === 'dashboard' && state.selected) {
+        state.sidebarFocus = state.selectedArchived ? 'archive' : 'experiments';
+      }
+      document.querySelectorAll('.view-tab').forEach(button => {
+        button.classList.toggle('active', button.dataset.view === viewId);
+      });
       document.querySelectorAll('.view-panel').forEach(panel => {
         panel.classList.toggle('active', panel.id === viewId);
       });
-      if (state.sidebarFocus !== previousSidebarFocus) renderExperimentsList();
+      if (state.sidebarFocus !== previousSidebarFocus || state.archivePaneOpen !== previousArchivePaneOpen) renderExperimentsList();
+      else renderArchivePaneState();
       if (viewId === 'dashboard-view') {
         renderDashboard();
-        await loadDashboardRunningProgress();
+        await Promise.all([
+          loadDashboardRunningProgress(),
+          loadQueue().catch(err => out(String(err)))
+        ]);
       }
       if (viewId === 'results-view') {
         await activateCsvView(viewId);
@@ -101,11 +120,11 @@
       return dashboardSortedExperiments((experiments || []).filter(exp => exp.submit_lock?.locked));
     }
     function dashboardRecentRows(experiments, running) {
-      const runningIds = new Set((running || []).map(exp => exp.id));
-      const unpinnedRunning = (running || []).filter(exp => !state.pinnedExperiments.has(exp.id));
+      const runningRows = dashboardSortedExperiments(running || []);
+      const runningIds = new Set(runningRows.map(exp => exp.id));
       const recentUnpinned = dashboardSortedExperiments((experiments || [])
         .filter(exp => !state.pinnedExperiments.has(exp.id) && !runningIds.has(exp.id)));
-      return [...unpinnedRunning, ...recentUnpinned.slice(0, 8)];
+      return [...runningRows, ...recentUnpinned.slice(0, 8)];
     }
     function dashboardProgressResult(id) {
       return state.dashboardProgress?.[id] || null;
@@ -285,6 +304,69 @@
       renderDashboardStat(box, 'Down', counts.down);
       if (counts.other) renderDashboardStat(box, 'Other', counts.other);
     }
+    function renderDashboardQueue(data = state.queuePayload) {
+      const summary = document.getElementById('dashboard-queue-summary');
+      const box = document.getElementById('dashboard-queue');
+      if (!summary || !box) return;
+      box.innerHTML = '';
+      if (state.queueLoading) {
+        summary.textContent = 'Loading queue...';
+        box.className = 'dashboard-queue panel-body csv-empty';
+        box.textContent = 'Loading Slurm queue...';
+        return;
+      }
+      if (state.queueError) {
+        summary.textContent = 'Queue refresh failed.';
+        box.className = 'dashboard-queue panel-body csv-empty status-bad';
+        box.textContent = state.queueError;
+        return;
+      }
+      if (!data) {
+        summary.textContent = 'No queue loaded.';
+        box.className = 'dashboard-queue panel-body csv-empty';
+        box.textContent = 'Slurm queue loads when the dashboard opens.';
+        return;
+      }
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      summary.textContent = `${dashboardCountText(rows.length, 'job')} from ${data.source || 'squeue'}; refreshed ${data.generated_at || 'now'}.`;
+      if (!rows.length) {
+        box.className = 'dashboard-queue panel-body csv-empty';
+        box.textContent = 'No queued or running Slurm jobs.';
+        return;
+      }
+      box.className = 'dashboard-queue panel-body';
+      const limit = 6;
+      for (const row of rows.slice(0, limit)) {
+        const item = document.createElement('div');
+        item.className = 'dashboard-queue-row';
+        item.title = [row.partition, row.time, row.nodes ? `${row.nodes} node${row.nodes === '1' ? '' : 's'}` : '', row.nodelist]
+          .filter(Boolean)
+          .join(' | ');
+        const job = document.createElement('div');
+        job.className = 'dashboard-queue-id';
+        job.textContent = row.job_id || '';
+        const name = document.createElement('div');
+        name.className = 'dashboard-queue-name';
+        name.textContent = row.name || '';
+        const stateText = document.createElement('div');
+        stateText.className = `dashboard-queue-state ${queueStateClass(row.state)}`;
+        stateText.textContent = row.state || '';
+        const user = document.createElement('div');
+        user.className = 'dashboard-queue-user';
+        user.textContent = row.user || '';
+        item.appendChild(job);
+        item.appendChild(name);
+        item.appendChild(stateText);
+        item.appendChild(user);
+        box.appendChild(item);
+      }
+      if (rows.length > limit) {
+        const more = document.createElement('div');
+        more.className = 'dashboard-queue-more';
+        more.textContent = `${dashboardCountText(rows.length - limit, 'more job')} in the full queue dialog.`;
+        box.appendChild(more);
+      }
+    }
     function renderDashboard() {
       const summary = document.getElementById('dashboard-summary');
       if (!summary) return;
@@ -304,7 +386,6 @@
       }
       summary.innerHTML = '';
       renderDashboardStat(summary, 'Experiments', experiments.length);
-      renderDashboardStat(summary, 'Pinned', pinned.length);
       renderDashboardStat(summary, 'Running', running.length);
       renderDashboardStat(summary, 'Results', withResults);
       renderDashboardStat(summary, 'Plots', withPlots);
@@ -315,16 +396,17 @@
 
       const recentSummary = document.getElementById('dashboard-recent-summary');
       if (recentSummary) {
-        const runningUnpinned = recent.filter(exp => exp.submit_lock?.locked).length;
-        const newest = recent.length - runningUnpinned;
+        const submitted = recent.filter(exp => exp.submit_lock?.locked).length;
+        const newest = recent.length - submitted;
         if (!recent.length) recentSummary.textContent = 'No recent experiments.';
-        else if (runningUnpinned && newest) recentSummary.textContent = `${dashboardCountText(runningUnpinned, 'running experiment')} plus ${dashboardCountText(newest, 'recent experiment')}.`;
-        else if (runningUnpinned) recentSummary.textContent = dashboardCountText(runningUnpinned, 'running experiment');
+        else if (submitted && newest) recentSummary.textContent = `${dashboardCountText(submitted, 'submitted experiment')} plus ${dashboardCountText(newest, 'recent experiment')}.`;
+        else if (submitted) recentSummary.textContent = dashboardCountText(submitted, 'submitted experiment');
         else recentSummary.textContent = `Newest ${dashboardCountText(newest, 'experiment')}.`;
       }
       renderDashboardExperimentList(document.getElementById('dashboard-recent'), recent, 'Create an experiment to start filling this workspace.', { label: 'id' });
 
       renderDashboardCluster();
+      renderDashboardQueue();
     }
     async function loadDashboardRunningProgress(options = {}) {
       if (state.shared) return;
@@ -1028,11 +1110,7 @@
     }
     function renderArchivePaneState() {
       document.querySelector('.app')?.classList.toggle('archive-mode', Boolean(state.archivePaneOpen));
-      const button = document.getElementById('archive-open');
-      if (button) {
-        button.classList.toggle('active', Boolean(state.archivePaneOpen));
-        button.setAttribute('aria-expanded', state.archivePaneOpen ? 'true' : 'false');
-      }
+      renderSidebarNavState();
     }
     function renderArchivedExperimentTree(container, node, prefix = '') {
       const folders = Array.from(node.folders.entries()).sort((left, right) => left[0].localeCompare(right[0]));
@@ -1199,6 +1277,7 @@
       renderDashboard();
       if (state.activeView === 'dashboard-view') {
         loadDashboardRunningProgress({ force: options.force }).catch(err => out(String(err)));
+        loadQueue().catch(err => out(String(err)));
       }
       if (options.selectMostRecent && !state.selected && state.experiments.length) {
         const latest = mostRecentExperiment(state.experiments);

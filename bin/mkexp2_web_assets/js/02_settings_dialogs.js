@@ -171,7 +171,10 @@
       const summary = document.getElementById('queue-summary');
       const output = document.getElementById('queue-output');
       const rows = data.rows || [];
+      state.queuePayload = data;
+      state.queueError = '';
       state.queueServerUser = data.server_user || '';
+      if (typeof renderDashboardQueue === 'function') renderDashboardQueue(data);
       const cancelAllButton = document.getElementById('queue-cancel-all');
       if (cancelAllButton) {
         cancelAllButton.disabled = !state.queueServerUser;
@@ -227,14 +230,26 @@
       output.appendChild(table);
     }
     async function loadQueue() {
+      state.queueLoading = true;
+      state.queueError = '';
+      if (typeof renderDashboardQueue === 'function') renderDashboardQueue();
       const output = document.getElementById('queue-output');
       output.className = 'csv-empty';
       output.textContent = 'Loading Slurm queue...';
       const cancelAllButton = document.getElementById('queue-cancel-all');
       if (cancelAllButton) cancelAllButton.disabled = true;
-      const data = await api('/api/status/squeue');
-      renderQueue(data);
-      return data;
+      try {
+        const data = await api('/api/status/squeue');
+        renderQueue(data);
+        return data;
+      } catch (err) {
+        state.queueError = firstLines(err?.message || String(err), 2);
+        if (typeof renderDashboardQueue === 'function') renderDashboardQueue();
+        throw err;
+      } finally {
+        state.queueLoading = false;
+        if (typeof renderDashboardQueue === 'function') renderDashboardQueue();
+      }
     }
     async function openQueueDialog() {
       document.getElementById('queue-modal').classList.remove('hidden');

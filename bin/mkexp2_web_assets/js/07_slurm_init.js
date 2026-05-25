@@ -90,6 +90,7 @@
     document.getElementById('dashboard-refresh').onclick = () => withBusyButton('dashboard-refresh', 'Refreshing...', () => refreshExperiments({ force: true, selectMostRecent: false })).catch(err => out(String(err)));
     document.getElementById('dashboard-archive').onclick = () => withBusyButton('dashboard-archive', 'Loading...', openArchivePane).catch(err => out(String(err)));
     document.getElementById('dashboard-git').onclick = () => withBusyButton('dashboard-git', 'Loading...', openGitDialog).catch(err => out(String(err)));
+    document.getElementById('dashboard-queue-refresh').onclick = () => withBusyButton('dashboard-queue-refresh', '', loadQueue).catch(err => out(String(err)));
     document.getElementById('create-close').onclick = closeCreateDialog;
     document.getElementById('create-cancel').onclick = closeCreateDialog;
     document.getElementById('create-submit').onclick = createExperiment;
