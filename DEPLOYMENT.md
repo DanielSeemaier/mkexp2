@@ -31,16 +31,15 @@ the login node.
 Run this from the local checkout after committing and pushing `main`:
 
 ```zsh
-ssh seemaier@login.ae.iti.kit.edu 'zsh -lc "
-  set -e
-  cd ~/mkexp2
-  git fetch origin main
-  git checkout main
-  git pull --ff-only origin main
-  zsh -ic '\''tmux kill-session -t mkexp2-web 2>/dev/null || true
-  tmux new-session -d -s mkexp2-web \"cd ~/mkexp2 && MKEXP2_WEB_PUBLIC_HOST=login.ae.iti.kit.edu ./bin/mkexp2 web --repo ~/i10-experiments --host 127.0.0.1 --port 8765\"'\''
-  tmux ls | grep mkexp2-web
-"'
+ssh seemaier@login.ae.iti.kit.edu 'zsh -s' <<'REMOTE'
+set -e
+cd ~/mkexp2
+git fetch origin main
+git checkout main
+git pull --ff-only origin main
+zsh -ic 'tmux kill-session -t mkexp2-web 2>/dev/null || true; tmux new-session -d -s mkexp2-web "cd ~/mkexp2 && MKEXP2_WEB_PUBLIC_HOST=login.ae.iti.kit.edu ./bin/mkexp2 web --repo ~/i10-experiments --host 127.0.0.1 --port 8765"'
+tmux ls | grep mkexp2-web
+REMOTE
 ```
 
 Starting tmux through interactive zsh is intentional: the login node shell

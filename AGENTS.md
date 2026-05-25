@@ -181,3 +181,4 @@ There is no linting configuration or CI setup.
 ## Instructions for Codex
 
 - **Always update `AGENTS.md`** after completing any non-trivial task — add new commands, modules, conventions, or environmental notes so the file stays accurate.
+- **Always push and redeploy after completed prompts.** Once work for a user prompt is done in this repo, commit it, push it to `origin/main`, redeploy the login-node `mkexp2-web` tmux session using `DEPLOYMENT.md`, and mention the pushed commit plus redeploy status in the final response.
