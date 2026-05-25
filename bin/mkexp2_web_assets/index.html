@@ -32,6 +32,12 @@ __MKEXP2_STYLES__
           </button>
         </div>
       </div>
+      <nav class="sidebar-nav" aria-label="Workspace navigation">
+        <button id="dashboard-open" class="sidebar-nav-button active" type="button" data-view="dashboard-view" aria-label="Open dashboard" title="Dashboard">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="8" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="15" width="7" height="6" rx="1"/></svg>
+          <span>Dashboard</span>
+        </button>
+      </nav>
       <div id="experiments" class="experiment-list"></div>
       <div class="archive-nav">
         <button id="archive-open" class="archive-nav-button" aria-label="Show archived experiments">Archive</button>
@@ -548,7 +554,6 @@ __MKEXP2_STYLES__
         </div>
       </section>
       <div class="view-tabs">
-        <button class="view-tab active" data-view="dashboard-view">Dashboard</button>
         <button class="view-tab" data-view="experiment-view">Experiment</button>
         <button class="view-tab" data-view="results-view">Results</button>
         <button class="view-tab" data-view="logs-view">Logs</button>
@@ -597,18 +602,8 @@ __MKEXP2_STYLES__
             </div>
           </div>
           <section id="dashboard-summary" class="dashboard-summary" aria-label="Experiment summary"></section>
-          <section id="dashboard-selected" class="panel dashboard-selected-panel hidden"></section>
           <section class="dashboard-grid">
             <div class="dashboard-column">
-              <section class="panel dashboard-panel">
-                <div class="panel-header">
-                  <div>
-                    <div class="panel-title">Running Now</div>
-                    <div id="dashboard-running-summary" class="csv-summary">No submit locks loaded.</div>
-                  </div>
-                </div>
-                <div id="dashboard-running" class="dashboard-list panel-body"></div>
-              </section>
               <section class="panel dashboard-panel">
                 <div class="panel-header">
                   <div>
@@ -618,17 +613,6 @@ __MKEXP2_STYLES__
                 </div>
                 <div id="dashboard-pinned" class="dashboard-list panel-body"></div>
               </section>
-            </div>
-            <div class="dashboard-column">
-              <section class="panel dashboard-panel">
-                <div class="panel-header">
-                  <div>
-                    <div class="panel-title">Recent Experiments</div>
-                    <div id="dashboard-recent-summary" class="csv-summary">No experiments loaded.</div>
-                  </div>
-                </div>
-                <div id="dashboard-recent" class="dashboard-list panel-body"></div>
-              </section>
               <section class="panel dashboard-panel">
                 <div class="panel-header">
                   <div>
@@ -637,6 +621,17 @@ __MKEXP2_STYLES__
                   </div>
                 </div>
                 <div id="dashboard-cluster" class="dashboard-cluster panel-body"></div>
+              </section>
+            </div>
+            <div class="dashboard-column">
+              <section class="panel dashboard-panel">
+                <div class="panel-header">
+                  <div>
+                    <div class="panel-title">Recent & Running</div>
+                    <div id="dashboard-recent-summary" class="csv-summary">No experiments loaded.</div>
+                  </div>
+                </div>
+                <div id="dashboard-recent" class="dashboard-list panel-body"></div>
               </section>
             </div>
           </section>

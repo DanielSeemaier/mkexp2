@@ -268,6 +268,7 @@
     .app.share-mode .danger-zone,
     .app.share-mode [data-view="dashboard-view"],
     .app.share-mode #dashboard-view,
+    .app.share-mode #dashboard-open,
     .app.share-mode #check,
     .app.share-mode #copy-experiment,
     .app.share-mode #share-experiment,
@@ -340,10 +341,40 @@
       line-height: 1.1;
       letter-spacing: 0;
     }
+    .sidebar-nav {
+      display: grid;
+      gap: 6px;
+      margin: 0 0 14px;
+    }
+    .sidebar-nav-button {
+      width: 100%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 8px;
+      text-align: left;
+      font-weight: 800;
+    }
+    .sidebar-nav-button svg {
+      width: 16px;
+      height: 16px;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+      flex: 0 0 auto;
+    }
+    .sidebar-nav-button.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--text);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
     .experiment-list {
       display: grid;
       gap: 6px;
-      margin-top: 14px;
+      margin-top: 0;
     }
     .archive-nav {
       margin-top: 14px;
@@ -1309,10 +1340,6 @@
       border-radius: 8px;
       background: var(--surface);
     }
-    .dashboard-exp-row.selected {
-      border-color: var(--accent);
-      box-shadow: inset 3px 0 0 var(--accent);
-    }
     .dashboard-exp-row.locked {
       background: var(--danger-soft);
       border-color: var(--danger-border);
@@ -1391,6 +1418,16 @@
     .dashboard-badge.muted {
       color: var(--muted);
       background: var(--surface-2);
+    }
+    .dashboard-row-progress {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    .dashboard-row-progress-text {
+      color: var(--muted);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
     }
     .dashboard-open {
       min-width: 58px;

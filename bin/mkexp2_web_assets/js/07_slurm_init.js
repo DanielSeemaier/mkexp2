@@ -11,9 +11,8 @@
     }
     function nodeStateClass(state) {
       const raw = String(state ?? '').trim().toLowerCase();
-      const normalized = raw.replace(/[+*$]+$/g, '');
+      const normalized = raw.replace(/[~+*$]+$/g, '');
       if (normalized.startsWith('down')) return 'node-state-down';
-      if (raw.startsWith('idle~')) return 'node-state-idle-reserved';
       if (normalized === 'idle') return 'node-state-idle';
       if (normalized.startsWith('allocated') || normalized.includes('alloc')) return 'node-state-allocated';
       return '';
@@ -85,6 +84,7 @@
     document.getElementById('queue-close').onclick = closeQueueDialog;
     document.getElementById('queue-refresh').onclick = () => withBusyButton('queue-refresh', '', loadQueue).catch(err => out(String(err)));
     document.getElementById('queue-cancel-all').onclick = () => cancelAllQueueJobs(document.getElementById('queue-cancel-all')).catch(err => out(String(err)));
+    document.getElementById('dashboard-open').onclick = () => withBusyButton('dashboard-open', '', () => setView('dashboard-view')).catch(err => out(String(err)));
     document.getElementById('create-open').onclick = () => withBusyButton('create-open', '', openCreateDialog).catch(err => out(String(err)));
     document.getElementById('dashboard-create').onclick = () => withBusyButton('dashboard-create', 'Opening...', openCreateDialog).catch(err => out(String(err)));
     document.getElementById('dashboard-refresh').onclick = () => withBusyButton('dashboard-refresh', 'Refreshing...', () => refreshExperiments({ force: true, selectMostRecent: false })).catch(err => out(String(err)));

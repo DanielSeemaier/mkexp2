@@ -1,14 +1,25 @@
     async function setView(viewId) {
       state.activeView = viewId;
+      const previousSidebarFocus = state.sidebarFocus;
+      if (viewId === 'dashboard-view') state.sidebarFocus = 'dashboard';
+      else if (state.sidebarFocus === 'dashboard' && state.selected && !state.selectedArchived) state.sidebarFocus = 'experiments';
       document.querySelectorAll('.view-tab').forEach(button => {
         button.classList.toggle('active', button.dataset.view === viewId);
       });
+      const dashboardButton = document.getElementById('dashboard-open');
+      if (dashboardButton) {
+        const active = viewId === 'dashboard-view';
+        dashboardButton.classList.toggle('active', active);
+        if (active) dashboardButton.setAttribute('aria-current', 'page');
+        else dashboardButton.removeAttribute('aria-current');
+      }
       document.querySelectorAll('.view-panel').forEach(panel => {
         panel.classList.toggle('active', panel.id === viewId);
       });
+      if (state.sidebarFocus !== previousSidebarFocus) renderExperimentsList();
       if (viewId === 'dashboard-view') {
         renderDashboard();
-        await loadDashboardSelectedProgress();
+        await loadDashboardRunningProgress();
       }
       if (viewId === 'results-view') {
         await activateCsvView(viewId);
@@ -85,6 +96,38 @@
     function dashboardSortedExperiments(experiments) {
       return Array.from(experiments || []).sort(compareExperimentsByCreatedDesc);
     }
+    function dashboardRunningExperiments(experiments = state.experiments) {
+      return dashboardSortedExperiments((experiments || []).filter(exp => exp.submit_lock?.locked));
+    }
+    function dashboardRecentRows(experiments, running) {
+      const runningIds = new Set((running || []).map(exp => exp.id));
+      const unpinnedRunning = (running || []).filter(exp => !state.pinnedExperiments.has(exp.id));
+      const recentUnpinned = dashboardSortedExperiments((experiments || [])
+        .filter(exp => !state.pinnedExperiments.has(exp.id) && !runningIds.has(exp.id)));
+      return [...unpinnedRunning, ...recentUnpinned.slice(0, 8)];
+    }
+    function dashboardProgressResult(id) {
+      return state.dashboardProgress?.[id] || null;
+    }
+    function dashboardProgressIsLoading(id) {
+      return Boolean(state.dashboardProgressLoading?.[id]);
+    }
+    function clearDashboardProgressFor(id) {
+      if (!id) return;
+      if (state.dashboardProgress) delete state.dashboardProgress[id];
+      if (state.dashboardProgressLoading) delete state.dashboardProgressLoading[id];
+      if (state.dashboardProgressRequests) delete state.dashboardProgressRequests[id];
+      if (state.dashboardProgressErrors) delete state.dashboardProgressErrors[id];
+    }
+    function pruneDashboardProgressCache(runningIds) {
+      const keep = new Set(runningIds || []);
+      for (const bucketName of ['dashboardProgress', 'dashboardProgressLoading', 'dashboardProgressRequests', 'dashboardProgressErrors']) {
+        const bucket = state[bucketName] || {};
+        for (const id of Object.keys(bucket)) {
+          if (!keep.has(id)) delete bucket[id];
+        }
+      }
+    }
     function renderDashboardStat(container, label, value, detail = '') {
       const item = document.createElement('div');
       item.className = 'dashboard-stat';
@@ -125,10 +168,38 @@
     function dashboardOpenExperiment(id, button = null) {
       return withBusyButton(button, 'Opening...', () => selectExperiment(id));
     }
+    function renderDashboardRowProgress(container, exp) {
+      if (!exp?.submit_lock?.locked) return;
+      const progressWrap = document.createElement('div');
+      progressWrap.className = 'dashboard-row-progress';
+      const cached = dashboardProgressResult(exp.id);
+      const progress = cached?.progress_json || null;
+      const error = state.dashboardProgressErrors?.[exp.id] || '';
+      if (progress) {
+        const bar = document.createElement('div');
+        bar.className = 'progress-bar dashboard-mini-progress';
+        const fill = document.createElement('div');
+        fill.className = 'progress-bar-fill';
+        fill.style.width = `${Math.max(0, Math.min(100, Number(progress.percent) || 0))}%`;
+        bar.appendChild(fill);
+        progressWrap.appendChild(bar);
+        const count = document.createElement('div');
+        count.className = 'dashboard-row-progress-text';
+        count.textContent = `${progress.done || 0}/${progress.total || 0} logs`;
+        progressWrap.appendChild(count);
+      } else {
+        const message = document.createElement('div');
+        message.className = 'dashboard-row-progress-text';
+        if (dashboardProgressIsLoading(exp.id)) message.textContent = 'Loading progress...';
+        else if (error) message.textContent = `Progress failed: ${error}`;
+        else message.textContent = 'Progress not loaded yet.';
+        progressWrap.appendChild(message);
+      }
+      container.appendChild(progressWrap);
+    }
     function renderDashboardExperimentRow(container, exp, options = {}) {
       const row = document.createElement('article');
       row.className = 'dashboard-exp-row'
-        + (exp.id === state.selected ? ' selected' : '')
         + (exp?.submit_lock?.locked ? ' locked' : '');
       const pinned = state.pinnedExperiments.has(exp.id);
       const pin = document.createElement('button');
@@ -156,6 +227,7 @@
       main.appendChild(title);
       main.appendChild(meta);
       main.appendChild(badges);
+      renderDashboardRowProgress(main, exp);
       row.appendChild(main);
 
       const action = document.createElement('button');
@@ -182,11 +254,10 @@
       }
     }
     function dashboardClusterCounts(nodes) {
-      const counts = { total: nodes.length, idle: 0, reserved: 0, allocated: 0, down: 0, other: 0 };
+      const counts = { total: nodes.length, idle: 0, allocated: 0, down: 0, other: 0 };
       for (const node of nodes) {
         const stateClass = nodeStateClass(node.state || node.availability || '');
-        if (stateClass === 'node-state-idle') counts.idle += 1;
-        else if (stateClass === 'node-state-idle-reserved') counts.reserved += 1;
+        if (stateClass === 'node-state-idle' || stateClass === 'node-state-idle-reserved') counts.idle += 1;
         else if (stateClass === 'node-state-allocated') counts.allocated += 1;
         else if (stateClass === 'node-state-down') counts.down += 1;
         else counts.other += 1;
@@ -208,98 +279,10 @@
       const counts = dashboardClusterCounts(nodes);
       summary.textContent = dashboardCountText(counts.total, 'node');
       box.className = 'dashboard-cluster panel-body';
-      renderDashboardStat(box, 'Idle', counts.idle, counts.reserved ? `${counts.reserved} reserved` : '');
+      renderDashboardStat(box, 'Idle', counts.idle);
       renderDashboardStat(box, 'Allocated', counts.allocated);
       renderDashboardStat(box, 'Down', counts.down);
       if (counts.other) renderDashboardStat(box, 'Other', counts.other);
-    }
-    function renderDashboardSelectedProgress(panel, exp) {
-      const progressWrap = document.createElement('div');
-      progressWrap.className = 'dashboard-selected-progress';
-      const header = document.createElement('div');
-      header.className = 'dashboard-selected-progress-header';
-      const title = document.createElement('div');
-      title.className = 'dashboard-selected-progress-title';
-      title.textContent = 'Progress';
-      const refresh = document.createElement('button');
-      refresh.type = 'button';
-      refresh.className = 'icon-button';
-      refresh.title = 'Refresh selected progress';
-      refresh.setAttribute('aria-label', 'Refresh selected progress');
-      refresh.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>';
-      refresh.onclick = () => withBusyButton(refresh, '', () => loadDashboardSelectedProgress({ force: true })).catch(err => out(String(err)));
-      header.appendChild(title);
-      header.appendChild(refresh);
-      progressWrap.appendChild(header);
-
-      const progress = state.dashboardProgressFor === exp.id ? state.dashboardProgress?.progress_json : null;
-      if (state.dashboardProgressLoading && state.dashboardProgressFor === exp.id) {
-        const loading = document.createElement('div');
-        loading.className = 'csv-summary';
-        loading.textContent = 'Loading selected progress...';
-        progressWrap.appendChild(loading);
-      } else if (progress) {
-        const bar = document.createElement('div');
-        bar.className = 'progress-bar dashboard-mini-progress';
-        const fill = document.createElement('div');
-        fill.className = 'progress-bar-fill';
-        fill.style.width = `${Math.max(0, Math.min(100, Number(progress.percent) || 0))}%`;
-        bar.appendChild(fill);
-        const count = document.createElement('div');
-        count.className = 'progress-count';
-        count.textContent = `${progress.done || 0}/${progress.total || 0}`;
-        progressWrap.appendChild(bar);
-        progressWrap.appendChild(count);
-      } else {
-        const empty = document.createElement('div');
-        empty.className = 'csv-summary';
-        empty.textContent = exp.submit_lock?.locked ? 'Progress has not been loaded yet.' : 'No generated progress metadata loaded.';
-        progressWrap.appendChild(empty);
-      }
-      panel.appendChild(progressWrap);
-    }
-    function renderDashboardSelected() {
-      const panel = document.getElementById('dashboard-selected');
-      if (!panel) return;
-      const exp = dashboardExperimentById(state.selected);
-      if (!exp) {
-        panel.className = 'panel dashboard-selected-panel hidden';
-        panel.innerHTML = '';
-        return;
-      }
-      panel.className = 'panel dashboard-selected-panel';
-      panel.innerHTML = '';
-      const header = document.createElement('div');
-      header.className = 'panel-header dashboard-selected-header';
-      const heading = document.createElement('div');
-      const title = document.createElement('div');
-      title.className = 'panel-title';
-      title.textContent = exp.id;
-      const meta = document.createElement('div');
-      meta.className = 'csv-summary';
-      meta.textContent = [formatExperimentDate(exp), submitLockText(exp.submit_lock)].filter(Boolean).join(' | ') || 'Selected experiment';
-      const badges = document.createElement('div');
-      badges.className = 'dashboard-badges';
-      renderDashboardBadges(badges, exp);
-      heading.appendChild(title);
-      heading.appendChild(meta);
-      heading.appendChild(badges);
-      const links = document.createElement('div');
-      links.className = 'dashboard-quick-links';
-      for (const [view, label] of [['experiment-view', 'Experiment'], ['results-view', 'Results'], ['logs-view', 'Logs'], ['plots-view', 'Plots']]) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.textContent = label;
-        button.onclick = () => setView(view).catch(err => out(String(err)));
-        links.appendChild(button);
-      }
-      header.appendChild(heading);
-      header.appendChild(links);
-      panel.appendChild(header);
-      const body = document.createElement('div');
-      body.className = 'panel-body';
-      renderDashboardSelectedProgress(body, exp);
-      panel.appendChild(body);
     }
     function renderDashboard() {
       const summary = document.getElementById('dashboard-summary');
@@ -308,8 +291,8 @@
       const pinned = Array.from(state.pinnedExperiments || [])
         .map(id => dashboardExperimentById(id))
         .filter(Boolean);
-      const running = dashboardSortedExperiments(experiments.filter(exp => exp.submit_lock?.locked));
-      const recent = dashboardSortedExperiments(experiments.filter(exp => !state.pinnedExperiments.has(exp.id))).slice(0, 8);
+      const running = dashboardRunningExperiments(experiments);
+      const recent = dashboardRecentRows(experiments, running);
       const withResults = experiments.filter(experimentHasResults).length;
       const withPlots = experiments.filter(experimentHasPlots).length;
       const subtitle = document.getElementById('dashboard-subtitle');
@@ -325,49 +308,60 @@
       renderDashboardStat(summary, 'Results', withResults);
       renderDashboardStat(summary, 'Plots', withPlots);
 
-      const runningSummary = document.getElementById('dashboard-running-summary');
-      if (runningSummary) runningSummary.textContent = running.length ? dashboardCountText(running.length, 'submit lock') : 'No running submissions.';
-      renderDashboardExperimentList(document.getElementById('dashboard-running'), running, 'No experiments are submit-locked right now.', { label: 'id', limit: 8 });
-
       const pinnedSummary = document.getElementById('dashboard-pinned-summary');
       if (pinnedSummary) pinnedSummary.textContent = pinned.length ? dashboardCountText(pinned.length, 'pinned experiment') : 'No pinned experiments.';
       renderDashboardExperimentList(document.getElementById('dashboard-pinned'), pinned, 'Pin experiments from the sidebar or dashboard to keep them here.', { label: 'id' });
 
       const recentSummary = document.getElementById('dashboard-recent-summary');
-      if (recentSummary) recentSummary.textContent = recent.length ? `Newest ${recent.length} unpinned experiment${recent.length === 1 ? '' : 's'}.` : 'No recent experiments.';
-      renderDashboardExperimentList(document.getElementById('dashboard-recent'), recent, 'Create an experiment to start filling this workspace.', { label: 'id', limit: 8 });
+      if (recentSummary) {
+        const runningUnpinned = recent.filter(exp => exp.submit_lock?.locked).length;
+        const newest = recent.length - runningUnpinned;
+        if (!recent.length) recentSummary.textContent = 'No recent experiments.';
+        else if (runningUnpinned && newest) recentSummary.textContent = `${dashboardCountText(runningUnpinned, 'running experiment')} plus ${dashboardCountText(newest, 'recent experiment')}.`;
+        else if (runningUnpinned) recentSummary.textContent = dashboardCountText(runningUnpinned, 'running experiment');
+        else recentSummary.textContent = `Newest ${dashboardCountText(newest, 'experiment')}.`;
+      }
+      renderDashboardExperimentList(document.getElementById('dashboard-recent'), recent, 'Create an experiment to start filling this workspace.', { label: 'id' });
 
-      renderDashboardSelected();
       renderDashboardCluster();
     }
-    async function loadDashboardSelectedProgress(options = {}) {
-      if (state.shared || !state.selected || state.selectedArchived) {
-        state.dashboardProgress = null;
-        state.dashboardProgressFor = '';
-        state.dashboardProgressLoading = false;
+    async function loadDashboardRunningProgress(options = {}) {
+      if (state.shared) return;
+      const runningIds = dashboardRunningExperiments().map(exp => exp.id);
+      pruneDashboardProgressCache(runningIds);
+      if (!runningIds.length) {
         renderDashboard();
         return;
       }
-      const experimentId = state.selected;
-      if (!options.force && state.dashboardProgressFor === experimentId && state.dashboardProgress) {
-        renderDashboard();
-        return;
+      const loads = [];
+      for (const id of runningIds) {
+        if (!options.force && (dashboardProgressResult(id) || dashboardProgressIsLoading(id))) continue;
+        const requestId = ++state.dashboardProgressLoadSeq;
+        state.dashboardProgressRequests[id] = requestId;
+        state.dashboardProgressLoading[id] = true;
+        delete state.dashboardProgressErrors[id];
+        loads.push((async () => {
+          try {
+            const result = await api(`/api/experiments/${encodeURIComponent(id)}/progress`);
+            if (state.dashboardProgressRequests[id] !== requestId) return;
+            const experiment = dashboardExperimentById(id);
+            if (!experiment?.submit_lock?.locked) return;
+            state.dashboardProgress[id] = result;
+            if (id === state.selected && result?.submit_lock) renderSubmitLock(result.submit_lock);
+          } catch (err) {
+            if (state.dashboardProgressRequests[id] === requestId) {
+              state.dashboardProgressErrors[id] = firstLines(err?.message || String(err), 2);
+            }
+          } finally {
+            if (state.dashboardProgressRequests[id] === requestId) {
+              delete state.dashboardProgressLoading[id];
+              renderDashboard();
+            }
+          }
+        })());
       }
-      const loadId = ++state.dashboardProgressLoadSeq;
-      state.dashboardProgressFor = experimentId;
-      state.dashboardProgressLoading = true;
-      renderDashboard();
-      try {
-        const result = await api(`/api/experiments/${encodeURIComponent(experimentId)}/progress`);
-        if (state.dashboardProgressLoadSeq !== loadId || state.selected !== experimentId) return;
-        state.dashboardProgress = result;
-        if (result?.submit_lock) renderSubmitLock(result.submit_lock);
-      } finally {
-        if (state.dashboardProgressLoadSeq === loadId) {
-          state.dashboardProgressLoading = false;
-          renderDashboard();
-        }
-      }
+      if (loads.length) renderDashboard();
+      await Promise.all(loads);
     }
     function experimentTree(experiments) {
       const root = treeNode();
@@ -1000,8 +994,12 @@
         fields: lock?.fields || {},
         modified_at: lock?.modified_at || ''
       };
+      if (!experiment.submit_lock.locked) clearDashboardProgressFor(state.selected);
       renderExperimentsList();
       renderDashboard();
+      if (state.activeView === 'dashboard-view') {
+        loadDashboardRunningProgress().catch(err => out(String(err)));
+      }
     }
     function renderPinnedExperiments(container) {
       const order = Array.from(state.pinnedExperiments);
@@ -1176,6 +1174,9 @@
       } finally {
         renderExperimentsList();
         renderDashboard();
+        if (state.activeView === 'dashboard-view') {
+          loadDashboardRunningProgress().catch(err => out(String(err)));
+        }
       }
     }
     async function refreshExperiments(options = {}) {
@@ -1195,6 +1196,9 @@
       renderTagSelect();
       renderExperimentsList();
       renderDashboard();
+      if (state.activeView === 'dashboard-view') {
+        loadDashboardRunningProgress({ force: options.force }).catch(err => out(String(err)));
+      }
       if (options.selectMostRecent && !state.selected && state.experiments.length) {
         const latest = mostRecentExperiment(state.experiments);
         if (latest) await selectExperiment(latest.id);
@@ -1932,10 +1936,6 @@
       state.plotLabelTouched = false;
       state.plotGenerationRunning = false;
       state.progressLoadSeq += 1;
-      state.dashboardProgress = null;
-      state.dashboardProgressFor = '';
-      state.dashboardProgressLoading = false;
-      state.dashboardProgressLoadSeq += 1;
       clearPlotPdfUrl();
       setView('dashboard-view').catch(err => out(String(err)));
       setSelectedExperimentMetadata('Experiment');
@@ -2455,9 +2455,9 @@
         throw err;
       }
       if (state.selected !== experimentId || state.progressLoadSeq !== loadId) return;
-      state.dashboardProgress = result;
-      state.dashboardProgressFor = experimentId;
-      state.dashboardProgressLoading = false;
+      if (result?.submit_lock?.locked) state.dashboardProgress[experimentId] = result;
+      else clearDashboardProgressFor(experimentId);
+      renderDashboard();
       renderSubmitLock(result.submit_lock);
       renderProgress(result);
     }
@@ -2503,10 +2503,6 @@
       state.selectedPlotArtifact = '';
       state.plotLabelTouched = false;
       state.plotGenerationRunning = false;
-      state.dashboardProgress = null;
-      state.dashboardProgressFor = id;
-      state.dashboardProgressLoading = false;
-      state.dashboardProgressLoadSeq += 1;
       clearPlotPdfUrl();
       editor.readOnly = Boolean(state.shared);
       setView('experiment-view').catch(err => out(String(err)));
@@ -2581,10 +2577,7 @@
       state.plotLabelTouched = false;
       state.plotGenerationRunning = false;
       state.progressLoadSeq += 1;
-      state.dashboardProgress = null;
-      state.dashboardProgressFor = id;
-      state.dashboardProgressLoading = false;
-      state.dashboardProgressLoadSeq += 1;
+      clearDashboardProgressFor(id);
       clearPlotPdfUrl();
       editor.readOnly = true;
       setView('experiment-view').catch(err => out(String(err)));
