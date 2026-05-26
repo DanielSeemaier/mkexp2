@@ -1688,13 +1688,13 @@ class WebBackendTest(unittest.TestCase):
 
         def fake_run_command(argv, cwd=None, timeout=60):
             calls.append((list(argv), timeout))
-            if argv == ["squeue", "-h", "-o", mkexp2_web.SQUEUE_NODE_FORMAT]:
+            if argv == ["squeue", "-h", "-r", "-o", mkexp2_web.SQUEUE_NODE_FORMAT]:
                 return {
                     "returncode": 0,
                     "stdout": "123_0|node[01-02]|owner|exp|RUNNING|2026-05-26T10:00:00|0:10\n",
                     "stderr": "",
                 }
-            if argv and argv[0] == "ssh":
+            if argv and argv[0] == "srun":
                 return {
                     "returncode": 0,
                     "stdout": "\n".join(
@@ -1739,9 +1739,11 @@ class WebBackendTest(unittest.TestCase):
             self.assertEqual(result["probes"][0]["metrics"]["cpu"]["cores_used"], 32.0)
             self.assertEqual(result["probes"][0]["metrics"]["memory"]["used_percent"], 75.0)
 
-        self.assertIn((["squeue", "-h", "-o", mkexp2_web.SQUEUE_NODE_FORMAT], 8), calls)
-        self.assertTrue(any(call[0][0] == "ssh" and "node01" in call[0] for call in calls))
-        self.assertTrue(any("StrictHostKeyChecking=accept-new" in call[0] for call in calls if call[0][0] == "ssh"))
+        self.assertIn((["squeue", "-h", "-r", "-o", mkexp2_web.SQUEUE_NODE_FORMAT], 8), calls)
+        srun_calls = [call for call in calls if call[0] and call[0][0] == "srun"]
+        self.assertTrue(any("--jobid=123_0" in call[0] and "--nodelist=node01" in call[0] for call in srun_calls))
+        self.assertTrue(all("--overlap" in call[0] for call in srun_calls))
+        self.assertFalse(any(call[0] and call[0][0] == "ssh" for call in calls))
 
     def test_job_details_probes_local_submit_lock(self):
         calls = []

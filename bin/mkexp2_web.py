@@ -406,6 +406,10 @@ def _node_name_is_safe(value):
     return bool(re.fullmatch(r"[A-Za-z0-9_.-]+", str(value or "")))
 
 
+def _slurm_job_id_is_safe(value):
+    return bool(re.fullmatch(r"[A-Za-z0-9_.\-\[\]%]+", str(value or "")))
+
+
 def slurm_cancel_job_id(job_id):
     text = str(job_id or "").strip()
     return re.sub(r"%[A-Za-z0-9_.+\-]+(?=\])", "", text)
@@ -475,30 +479,36 @@ def parse_node_probe(text):
     }
 
 
-def run_node_probe(node_name=None):
+def run_node_probe(node_name=None, slurm_job_id=None):
     local_names = {
         "localhost",
         socket.gethostname(),
         socket.getfqdn(),
     }
     node = str(node_name or "").strip()
+    job_id = str(slurm_job_id or "").strip()
     if node and not _node_name_is_safe(node):
         raise ValueError("invalid node name")
-    if node and node not in local_names:
+    if job_id and not _slurm_job_id_is_safe(job_id):
+        raise ValueError("invalid Slurm job id")
+    if job_id:
+        if not node:
+            raise ValueError("node name required for Slurm probe")
         command = [
-            "ssh",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            "ConnectTimeout=4",
-            "-o",
-            "ConnectionAttempts=1",
-            node,
-            f"sh -lc {shlex.quote(NODE_PROBE_SCRIPT)}",
+            "srun",
+            f"--jobid={job_id}",
+            "--overlap",
+            "--nodes=1",
+            "--ntasks=1",
+            "--cpus-per-task=1",
+            f"--nodelist={node}",
+            "sh",
+            "-lc",
+            NODE_PROBE_SCRIPT,
         ]
-        source = f"ssh {node}"
+        source = f"srun job {job_id} on {node}"
+    elif node and node not in local_names:
+        raise ValueError("Slurm job id required for remote node probe")
     else:
         command = ["sh", "-lc", NODE_PROBE_SCRIPT]
         source = "local"
@@ -2339,9 +2349,10 @@ class Mkexp2WebApp:
         jobs = []
         missing = []
         nodes = []
+        node_probe_jobs = {}
         squeue = None
         if slurm_job_ids:
-            squeue = run_command(["squeue", "-h", "-o", SQUEUE_NODE_FORMAT], timeout=8)
+            squeue = run_command(["squeue", "-h", "-r", "-o", SQUEUE_NODE_FORMAT], timeout=8)
             squeue_rows = parse_squeue_jobs(squeue["stdout"]) if squeue["returncode"] == 0 else []
             for job_id in slurm_job_ids:
                 matched = [job for job in squeue_rows if slurm_job_matches(job.get("job_id"), job_id)]
@@ -2350,7 +2361,10 @@ class Mkexp2WebApp:
                     continue
                 jobs.extend(matched)
                 for job in matched:
-                    nodes.extend(job.get("node_names") or [])
+                    row_job_id = job.get("job_id") or job_id
+                    for node_name in job.get("node_names") or []:
+                        nodes.append(node_name)
+                        node_probe_jobs.setdefault(node_name, row_job_id)
 
         if not slurm_job_ids and (not systems or "local" in systems):
             nodes.append(socket.gethostname())
@@ -2360,7 +2374,7 @@ class Mkexp2WebApp:
         probes = []
         for node_name in nodes[:max_nodes]:
             try:
-                probes.append(run_node_probe(node_name if slurm_job_ids else None))
+                probes.append(run_node_probe(node_name if slurm_job_ids else None, node_probe_jobs.get(node_name)))
             except ValueError as exc:
                 probes.append(
                     {
