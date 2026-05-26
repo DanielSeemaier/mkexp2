@@ -859,11 +859,12 @@ class WebBackendTest(unittest.TestCase):
             mkexp2_web.HTML.index('id="stats-output"'),
             mkexp2_web.HTML.index('class="csv-tools"'),
         )
-        self.assertIn("Run Quality", mkexp2_web.HTML)
-        self.assertIn("Cut Quality", mkexp2_web.HTML)
-        self.assertIn("Comparison Matrices", mkexp2_web.HTML)
-        self.assertIn("Matrix cells show row algorithm / column algorithm", mkexp2_web.HTML)
-        self.assertIn("Fair balanced", mkexp2_web.HTML)
+        self.assertNotIn("Run Quality", mkexp2_web.HTML)
+        self.assertNotIn("Cut Quality", mkexp2_web.HTML)
+        self.assertNotIn("Runtime", mkexp2_web.HTML)
+        self.assertIn("Stats Matrices", mkexp2_web.HTML)
+        self.assertIn("Include imbalanced", mkexp2_web.HTML)
+        self.assertIn("statsMatrixIncludeImbalanced", mkexp2_web.HTML)
         self.assertNotIn("async function ensureStatsLoaded", mkexp2_web.HTML)
         self.assertNotIn("Measured n", mkexp2_web.HTML)
         self.assertIn("function renderStatsWorkspace", mkexp2_web.HTML)

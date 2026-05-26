@@ -52,6 +52,7 @@
       resultsFor: null,
       stats: null,
       statsFor: null,
+      statsMatrixIncludeImbalanced: { time: false, cut: false },
       selectedResults: [],
       compareColumnModes: {},
       columnVisibility: {},

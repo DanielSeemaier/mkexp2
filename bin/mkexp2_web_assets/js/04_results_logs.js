@@ -629,78 +629,9 @@
       const parsed = Number(value);
       return Number.isFinite(parsed) ? parsed.toLocaleString() : '0';
     }
-    function statMetric(metric) {
-      return metric || { count: 0, gmean: null, mean: null, min: null, max: null };
-    }
-    function metricField(metric, field) {
-      if (field === 'count') return formatStatCount(statMetric(metric).count);
-      return formatStatNumber(statMetric(metric)[field]);
-    }
     function formatStatRatio(value) {
       const parsed = Number(value);
       return Number.isFinite(parsed) ? `${formatStatNumber(parsed)}x` : 'n/a';
-    }
-    function appendStatsCards(box, cards) {
-      const wrap = document.createElement('div');
-      wrap.className = 'stats-cards';
-      for (const card of cards) {
-        const item = document.createElement('div');
-        item.className = 'stat-card';
-        const label = document.createElement('div');
-        label.className = 'stat-card-label';
-        label.textContent = card.label;
-        const value = document.createElement('div');
-        value.className = 'stat-card-value';
-        value.textContent = card.value;
-        item.appendChild(label);
-        item.appendChild(value);
-        wrap.appendChild(item);
-      }
-      box.appendChild(wrap);
-    }
-    function appendStatsNote(box, text) {
-      const note = document.createElement('div');
-      note.className = 'stats-note';
-      note.textContent = text;
-      box.appendChild(note);
-    }
-    function appendStatsTable(box, title, headers, rows) {
-      const section = document.createElement('section');
-      section.className = 'stats-section';
-      const heading = document.createElement('div');
-      heading.className = 'stats-section-title';
-      heading.textContent = title;
-      section.appendChild(heading);
-      const tableWrap = document.createElement('div');
-      tableWrap.className = 'csv-table-wrap';
-      const table = document.createElement('table');
-      table.className = 'stats-table';
-      const thead = document.createElement('thead');
-      const head = document.createElement('tr');
-      for (const label of headers) {
-        const th = document.createElement('th');
-        th.textContent = label;
-        head.appendChild(th);
-      }
-      thead.appendChild(head);
-      table.appendChild(thead);
-      const tbody = document.createElement('tbody');
-      for (const row of rows) {
-        const tr = document.createElement('tr');
-        for (const cell of row) {
-          const td = document.createElement('td');
-          const value = cell && typeof cell === 'object' ? cell.text : cell;
-          td.textContent = value == null ? '' : String(value);
-          td.title = td.textContent;
-          if (cell && typeof cell === 'object' && cell.className) td.className = cell.className;
-          tr.appendChild(td);
-        }
-        tbody.appendChild(tr);
-      }
-      table.appendChild(tbody);
-      tableWrap.appendChild(table);
-      section.appendChild(tableWrap);
-      box.appendChild(section);
     }
     function statsComparisonCell(matrix, rowAlgorithm, columnAlgorithm) {
       const cells = Array.isArray(matrix?.cells) ? matrix.cells : [];
@@ -712,63 +643,98 @@
       if (Math.abs(parsed - 1) < 1e-9) return 'stats-matrix-equal';
       return parsed < 1 ? 'stats-matrix-better' : 'stats-matrix-worse';
     }
+    function comparisonMatrixById(matrices, id) {
+      if (!Array.isArray(matrices)) return null;
+      return matrices.find(matrix => matrix?.id === id) || null;
+    }
+    function appendStatsComparisonMatrixTable(panel, matrix) {
+      const algorithms = Array.isArray(matrix?.algorithms) ? matrix.algorithms : [];
+      if (!matrix || !algorithms.length) {
+        const empty = document.createElement('div');
+        empty.className = 'csv-empty stats-matrix-empty-message';
+        empty.textContent = 'No matrix data.';
+        panel.appendChild(empty);
+        return;
+      }
+      const tableWrap = document.createElement('div');
+      tableWrap.className = 'stats-matrix-wrap';
+      const table = document.createElement('table');
+      table.className = 'stats-table stats-matrix';
+      const thead = document.createElement('thead');
+      const head = document.createElement('tr');
+      head.appendChild(document.createElement('th'));
+      for (const algorithm of algorithms) {
+        const th = document.createElement('th');
+        th.textContent = algorithm;
+        th.title = algorithm;
+        head.appendChild(th);
+      }
+      thead.appendChild(head);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      for (const rowAlgorithm of algorithms) {
+        const tr = document.createElement('tr');
+        const label = document.createElement('th');
+        label.textContent = rowAlgorithm;
+        label.title = rowAlgorithm;
+        tr.appendChild(label);
+        for (const columnAlgorithm of algorithms) {
+          const cell = statsComparisonCell(matrix, rowAlgorithm, columnAlgorithm);
+          const td = document.createElement('td');
+          td.textContent = formatStatRatio(cell?.ratio);
+          td.className = ratioCellClass(cell?.ratio);
+          const count = formatStatCount(cell?.count);
+          td.title = `${rowAlgorithm} / ${columnAlgorithm}; ${count} shared row(s)`;
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+      panel.appendChild(tableWrap);
+    }
     function appendStatsComparisonMatrices(box, matrices) {
-      if (!Array.isArray(matrices) || !matrices.length) return;
       const section = document.createElement('section');
       section.className = 'stats-section stats-comparison-section';
       const heading = document.createElement('div');
       heading.className = 'stats-section-title';
-      heading.textContent = 'Comparison Matrices';
+      heading.textContent = 'Stats Matrices';
       section.appendChild(heading);
 
       const row = document.createElement('div');
       row.className = 'stats-matrix-row';
-      for (const matrix of matrices) {
-        const algorithms = Array.isArray(matrix.algorithms) ? matrix.algorithms : [];
+      const specs = [
+        { metric: 'time', title: 'Time', allId: 'time_all', balancedId: 'time_balanced' },
+        { metric: 'cut', title: 'Cut', allId: 'cut_all', balancedId: 'cut_balanced' },
+      ];
+      for (const spec of specs) {
+        const includeImbalanced = Boolean(state.statsMatrixIncludeImbalanced?.[spec.metric]);
+        const matrix = comparisonMatrixById(matrices, includeImbalanced ? spec.allId : spec.balancedId);
         const panel = document.createElement('div');
         panel.className = 'stats-matrix-panel';
+        const header = document.createElement('div');
+        header.className = 'stats-matrix-panel-header';
         const title = document.createElement('div');
         title.className = 'stats-matrix-title';
-        title.textContent = matrix.title || matrix.id || 'Comparison';
-        panel.appendChild(title);
-
-        const tableWrap = document.createElement('div');
-        tableWrap.className = 'stats-matrix-wrap';
-        const table = document.createElement('table');
-        table.className = 'stats-table stats-matrix';
-        const thead = document.createElement('thead');
-        const head = document.createElement('tr');
-        head.appendChild(document.createElement('th'));
-        for (const algorithm of algorithms) {
-          const th = document.createElement('th');
-          th.textContent = algorithm;
-          th.title = algorithm;
-          head.appendChild(th);
-        }
-        thead.appendChild(head);
-        table.appendChild(thead);
-
-        const tbody = document.createElement('tbody');
-        for (const rowAlgorithm of algorithms) {
-          const tr = document.createElement('tr');
-          const label = document.createElement('th');
-          label.textContent = rowAlgorithm;
-          label.title = rowAlgorithm;
-          tr.appendChild(label);
-          for (const columnAlgorithm of algorithms) {
-            const cell = statsComparisonCell(matrix, rowAlgorithm, columnAlgorithm);
-            const td = document.createElement('td');
-            td.textContent = formatStatRatio(cell?.ratio);
-            td.className = ratioCellClass(cell?.ratio);
-            const count = formatStatCount(cell?.count);
-            td.title = `${rowAlgorithm} / ${columnAlgorithm}; ${count} shared row(s)`;
-            tr.appendChild(td);
-          }
-          tbody.appendChild(tr);
-        }
-        table.appendChild(tbody);
-        tableWrap.appendChild(table);
-        panel.appendChild(tableWrap);
+        title.textContent = spec.title;
+        header.appendChild(title);
+        const toggle = document.createElement('label');
+        toggle.className = 'stats-matrix-toggle';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = includeImbalanced;
+        checkbox.onchange = () => {
+          state.statsMatrixIncludeImbalanced[spec.metric] = checkbox.checked;
+          renderStatsWorkspace();
+        };
+        const label = document.createElement('span');
+        label.textContent = 'Include imbalanced';
+        toggle.appendChild(checkbox);
+        toggle.appendChild(label);
+        header.appendChild(toggle);
+        panel.appendChild(header);
+        appendStatsComparisonMatrixTable(panel, matrix);
         row.appendChild(panel);
       }
       section.appendChild(row);
@@ -798,101 +764,10 @@
         return;
       }
       const totals = stats.summary || {};
-      const common = stats.common || {};
-      const keyColumns = Array.isArray(stats.key_columns) && stats.key_columns.length
-        ? stats.key_columns.join(', ')
-        : 'row identity';
       summary.textContent = `${algorithms.length} algorithm(s), ${formatStatCount(totals.rows ?? algorithms.reduce((sum, item) => sum + Number(item.rows || 0), 0))} row(s)`;
       box.className = 'stats-workspace';
       box.innerHTML = '';
-      appendStatsCards(box, [
-        { label: 'Algorithms', value: formatStatCount(totals.algorithms ?? algorithms.length) },
-        { label: 'Rows', value: formatStatCount(totals.rows) },
-        { label: 'Completed', value: formatStatCount(totals.completed) },
-        { label: 'Failed', value: formatStatCount(totals.failed) },
-        { label: 'Timeouts', value: formatStatCount(totals.timeouts) },
-        { label: 'Crashes', value: formatStatCount(totals.crashes) },
-        { label: 'Imbalanced', value: formatStatCount(totals.imbalanced) },
-        { label: 'Fair all cuts', value: formatStatCount(common.cut_keys) },
-        { label: 'Fair balanced cuts', value: formatStatCount(common.balanced_cut_keys) },
-        { label: 'Fair runtimes', value: formatStatCount(common.time_keys) },
-      ]);
-      appendStatsNote(
-        box,
-        `Matrix cells show row algorithm / column algorithm geometric means on each pair's working subset, matched by ${keyColumns}. Balanced matrices exclude failed, timed-out, and imbalanced runs.`
-      );
       appendStatsComparisonMatrices(box, stats.comparisons || []);
-
-      appendStatsTable(
-        box,
-        'Run Quality',
-        ['Algorithm', 'Rows', 'Completed', 'Failed', 'Timeouts', 'Crashes', 'Imbalanced', 'Missing Cut', 'Missing Time', 'Files'],
-        algorithms.map(item => {
-          const quality = item.quality || item;
-          return [
-            item.algorithm || '',
-            formatStatCount(quality.rows ?? item.rows),
-            formatStatCount(quality.completed ?? item.completed),
-            formatStatCount(quality.failed ?? item.failed),
-            formatStatCount(quality.timeouts ?? item.timeouts),
-            formatStatCount(quality.crashes ?? item.crashes),
-            formatStatCount(quality.imbalanced ?? item.imbalanced),
-            formatStatCount(quality.missing_cut ?? item.missing_cut),
-            formatStatCount(quality.missing_time ?? item.missing_time),
-            { text: (item.files || []).map(csvLabel).join(', '), className: 'stats-files' },
-          ];
-        })
-      );
-
-      appendStatsTable(
-        box,
-        'Cut Quality',
-        ['Algorithm', 'Balanced n', 'Balanced gmean', 'Balanced mean', 'Balanced min', 'Balanced max', 'Fair balanced n', 'Fair balanced gmean', 'All-cut n', 'All-cut gmean', 'Fair all-cut gmean'],
-        algorithms.map(item => {
-          const cuts = item.cuts || {};
-          const balanced = statMetric(cuts.balanced);
-          const commonBalanced = statMetric(cuts.common_balanced);
-          const allSuccessful = statMetric(cuts.all_successful || { count: item.cut_count, gmean: item.avg_cut });
-          const commonAll = statMetric(cuts.common_all_successful);
-          return [
-            item.algorithm || '',
-            metricField(balanced, 'count'),
-            metricField(balanced, 'gmean'),
-            metricField(balanced, 'mean'),
-            metricField(balanced, 'min'),
-            metricField(balanced, 'max'),
-            metricField(commonBalanced, 'count'),
-            metricField(commonBalanced, 'gmean'),
-            metricField(allSuccessful, 'count'),
-            metricField(allSuccessful, 'gmean'),
-            metricField(commonAll, 'gmean'),
-          ];
-        })
-      );
-
-      appendStatsTable(
-        box,
-        'Runtime',
-        ['Algorithm', 'Successful n', 'Time gmean', 'Time mean', 'Time min', 'Time max', 'Fair n', 'Fair gmean', 'Fair mean', 'Fair min', 'Fair max'],
-        algorithms.map(item => {
-          const times = item.times || {};
-          const successful = statMetric(times.successful || { count: item.time_count, gmean: item.avg_time });
-          const commonSuccessful = statMetric(times.common_successful);
-          return [
-            item.algorithm || '',
-            metricField(successful, 'count'),
-            metricField(successful, 'gmean'),
-            metricField(successful, 'mean'),
-            metricField(successful, 'min'),
-            metricField(successful, 'max'),
-            metricField(commonSuccessful, 'count'),
-            metricField(commonSuccessful, 'gmean'),
-            metricField(commonSuccessful, 'mean'),
-            metricField(commonSuccessful, 'min'),
-            metricField(commonSuccessful, 'max'),
-          ];
-        })
-      );
 
     }
     function formatBytes(value) {
