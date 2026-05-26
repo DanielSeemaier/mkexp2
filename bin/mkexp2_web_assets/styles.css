@@ -1271,23 +1271,23 @@
       letter-spacing: 0;
     }
     .dashboard-workspace-control {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex: 0 1 360px;
-      min-width: 220px;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 750;
-      text-transform: uppercase;
+      display: block;
+      flex: 0 1 420px;
+      min-width: 320px;
     }
     .dashboard-workspace-control select {
       min-width: 0;
       width: 100%;
-      max-width: 280px;
+      max-width: 380px;
+      height: 40px;
+      padding: 0 14px;
+      border-radius: 6px;
+      background: var(--panel);
+      box-shadow: var(--shadow-soft);
       text-transform: none;
-      font-size: 13px;
-      font-weight: 650;
+      font-size: 14px;
+      font-weight: 750;
+      cursor: pointer;
     }
     .dashboard-summary {
       display: grid;
