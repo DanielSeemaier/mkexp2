@@ -118,6 +118,9 @@ EOF
     if ! grep -q '^#SBATCH --error=slurm/slurm-%j.out$' jobs/install__*.sh; then
       fail "generated slurm install job writes errors under slurm directory"
     fi
+    if ! grep -q 'MKEXP2_SLURM_INSTALL_LOGIN_ENV=1' jobs/install__*.sh; then
+      fail "generated slurm install job reloads login shell environment"
+    fi
     if ! grep -q '^#SBATCH --output=slurm/slurm-%j.out$' jobs/parse__*.sh; then
       fail "generated slurm parse job writes output under slurm directory"
     fi

@@ -789,6 +789,11 @@ SCRIPT
   fi
 
   cat >> "$MKEXP2_SLURM_INSTALL_JOB_SCRIPT" <<SCRIPT
+if [[ -z "\${MKEXP2_SLURM_INSTALL_LOGIN_ENV:-}" ]]; then
+  export MKEXP2_SLURM_INSTALL_LOGIN_ENV=1
+  exec zsh -lic "zsh ${(qqq)MKEXP2_SLURM_INSTALL_JOB_SCRIPT}"
+fi
+
 set -euo pipefail
 
 cd "$PWD"
