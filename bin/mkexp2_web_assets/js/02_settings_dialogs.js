@@ -168,7 +168,6 @@
       return 'queue-state-other';
     }
     function renderQueue(data) {
-      const summary = document.getElementById('queue-summary');
       const output = document.getElementById('queue-output');
       const rows = data.rows || [];
       state.queuePayload = data;
@@ -182,7 +181,6 @@
           ? `Cancel all Slurm jobs owned by ${state.queueServerUser}`
           : 'Load the queue before canceling jobs.';
       }
-      summary.textContent = `${rows.length} job${rows.length === 1 ? '' : 's'} from ${data.source || 'squeue'}; refreshed ${data.generated_at || 'now'}.`;
       if (!rows.length) {
         output.className = 'csv-empty';
         output.textContent = 'No queued or running Slurm jobs.';

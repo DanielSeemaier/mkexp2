@@ -204,6 +204,7 @@
       loadUiSettings().catch(err => out(String(err)));
       refreshConfig().catch(err => out(String(err)));
       refreshPresets().catch(err => out(String(err)));
+      loadWorkspaces().catch(err => out(String(err)));
       refreshExperiments({ selectMostRecent: options.selectMostRecent === true }).catch(err => out(String(err)));
       refreshStatus().catch(err => out(String(err)));
     }

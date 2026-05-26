@@ -305,30 +305,27 @@
       if (counts.other) renderDashboardStat(box, 'Other', counts.other);
     }
     function renderDashboardQueue(data = state.queuePayload) {
-      const summary = document.getElementById('dashboard-queue-summary');
       const box = document.getElementById('dashboard-queue');
-      if (!summary || !box) return;
+      if (!box) return;
       box.innerHTML = '';
+      box.title = '';
       if (state.queueLoading) {
-        summary.textContent = 'Loading queue...';
         box.className = 'dashboard-queue panel-body csv-empty';
         box.textContent = 'Loading Slurm queue...';
         return;
       }
       if (state.queueError) {
-        summary.textContent = 'Queue refresh failed.';
         box.className = 'dashboard-queue panel-body csv-empty status-bad';
         box.textContent = state.queueError;
         return;
       }
       if (!data) {
-        summary.textContent = 'No queue loaded.';
         box.className = 'dashboard-queue panel-body csv-empty';
         box.textContent = 'Slurm queue loads when the dashboard opens.';
         return;
       }
       const rows = Array.isArray(data.rows) ? data.rows : [];
-      summary.textContent = `${dashboardCountText(rows.length, 'job')} from ${data.source || 'squeue'}; refreshed ${data.generated_at || 'now'}.`;
+      box.title = `${dashboardCountText(rows.length, 'job')} from ${data.source || 'squeue'}; refreshed ${data.generated_at || 'now'}.`;
       if (!rows.length) {
         box.className = 'dashboard-queue panel-body csv-empty';
         box.textContent = 'No queued or running Slurm jobs.';
@@ -796,6 +793,51 @@
       if (!workspace.directory) return 'Not a directory';
       return workspace.error || 'Not a Git repository';
     }
+    function renderDashboardWorkspaceSelector() {
+      const select = document.getElementById('dashboard-workspace-select');
+      const control = select?.closest('.dashboard-workspace-control');
+      if (!select) return;
+      if (control) control.hidden = Boolean(state.shared);
+      select.innerHTML = '';
+      if (state.shared) return;
+      const workspaces = state.workspaces || [];
+      if (!workspaces.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = state.workspacesLoaded ? 'No workspaces' : 'Loading workspaces...';
+        select.appendChild(option);
+        select.disabled = true;
+        select.title = option.textContent;
+        return;
+      }
+      let activePath = '';
+      for (const workspace of workspaces) {
+        const option = document.createElement('option');
+        option.value = workspace.path || '';
+        option.textContent = workspace.name || workspace.path || 'Workspace';
+        option.disabled = !workspace.valid;
+        option.selected = Boolean(workspace.active);
+        option.title = workspace.path || '';
+        if (workspace.active) activePath = workspace.path || '';
+        if (!workspace.valid) option.textContent += ` (${workspaceStatus(workspace)})`;
+        select.appendChild(option);
+      }
+      select.disabled = !workspaces.some(workspace => workspace.valid && !workspace.active);
+      select.title = activePath || 'Switch workspace';
+      select.onchange = () => {
+        const path = select.value || '';
+        const workspace = workspaces.find(item => item.path === path);
+        if (!path || !workspace || workspace.active || !workspace.valid) {
+          renderDashboardWorkspaceSelector();
+          return;
+        }
+        switchWorkspace(path, select).catch(err => {
+          setWorkspaceOutput(String(err), true);
+          out(String(err));
+          renderDashboardWorkspaceSelector();
+        });
+      };
+    }
     function setWorkspaceOutput(message, bad = false) {
       const output = document.getElementById('workspace-output');
       if (!output) return;
@@ -816,12 +858,14 @@
       if (state.shared) {
         container.className = 'workspace-list csv-empty';
         container.textContent = 'Workspace management is disabled for share links.';
+        renderDashboardWorkspaceSelector();
         return;
       }
       const workspaces = state.workspaces || [];
       if (!workspaces.length) {
         container.className = 'workspace-list csv-empty';
         container.textContent = state.workspacesLoaded ? 'No workspaces saved.' : 'No workspaces loaded.';
+        renderDashboardWorkspaceSelector();
         return;
       }
       container.className = 'workspace-list';
@@ -873,6 +917,7 @@
         row.appendChild(actions);
         container.appendChild(row);
       }
+      renderDashboardWorkspaceSelector();
     }
     async function loadWorkspaces() {
       if (state.shared) {

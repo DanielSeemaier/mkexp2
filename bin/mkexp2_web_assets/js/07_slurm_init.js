@@ -86,10 +86,6 @@
     document.getElementById('queue-cancel-all').onclick = () => cancelAllQueueJobs(document.getElementById('queue-cancel-all')).catch(err => out(String(err)));
     document.getElementById('dashboard-open').onclick = () => withBusyButton('dashboard-open', '', () => setView('dashboard-view')).catch(err => out(String(err)));
     document.getElementById('create-open').onclick = () => withBusyButton('create-open', '', openCreateDialog).catch(err => out(String(err)));
-    document.getElementById('dashboard-create').onclick = () => withBusyButton('dashboard-create', 'Opening...', openCreateDialog).catch(err => out(String(err)));
-    document.getElementById('dashboard-refresh').onclick = () => withBusyButton('dashboard-refresh', 'Refreshing...', () => refreshExperiments({ force: true, selectMostRecent: false })).catch(err => out(String(err)));
-    document.getElementById('dashboard-archive').onclick = () => withBusyButton('dashboard-archive', 'Loading...', openArchivePane).catch(err => out(String(err)));
-    document.getElementById('dashboard-git').onclick = () => withBusyButton('dashboard-git', 'Loading...', openGitDialog).catch(err => out(String(err)));
     document.getElementById('dashboard-queue-refresh').onclick = () => withBusyButton('dashboard-queue-refresh', '', loadQueue).catch(err => out(String(err)));
     document.getElementById('create-close').onclick = closeCreateDialog;
     document.getElementById('create-cancel').onclick = closeCreateDialog;

@@ -1270,11 +1270,24 @@
       line-height: 1.15;
       letter-spacing: 0;
     }
-    .dashboard-actions {
+    .dashboard-workspace-control {
       display: flex;
-      flex-wrap: wrap;
-      justify-content: flex-end;
+      align-items: center;
       gap: 8px;
+      flex: 0 1 360px;
+      min-width: 220px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      text-transform: uppercase;
+    }
+    .dashboard-workspace-control select {
+      min-width: 0;
+      width: 100%;
+      max-width: 280px;
+      text-transform: none;
+      font-size: 13px;
+      font-weight: 650;
     }
     .dashboard-summary {
       display: grid;
@@ -3982,8 +3995,12 @@
       .dashboard-header {
         display: grid;
       }
-      .dashboard-actions {
-        justify-content: flex-start;
+      .dashboard-workspace-control {
+        width: 100%;
+        max-width: 100%;
+      }
+      .dashboard-workspace-control select {
+        max-width: none;
       }
       .dashboard-summary {
         grid-template-columns: repeat(2, minmax(0, 1fr));
