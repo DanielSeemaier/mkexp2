@@ -585,13 +585,17 @@ ProbeEmitJobsSection() {
   local use_array=""
   local array_mode_requested=""
   local max_parallel=""
+  local minimal_header=""
+  local call_wrapper=""
   local partition=""
   local sep=""
   local job_key=""
 
   use_array=$(ResolveRunProperty "slurm.use_array" "false")
   array_mode_requested=$(ResolveRunProperty "slurm.array.mode" "auto")
-  max_parallel=$(ResolveRunProperty "slurm.array.max_parallel" "32")
+  max_parallel=$(ResolveRunProperty "slurm.array.max_parallel" "1")
+  minimal_header=$(ResolveRunProperty "slurm.minimal_header" "false")
+  call_wrapper=$(ResolveRunProperty "slurm.call_wrapper" "srun")
   partition=$(ResolveRunProperty "slurm.partition" "default")
 
   printf '{'
@@ -605,9 +609,23 @@ ProbeEmitJobsSection() {
     for job_key in "${EXPAND_JOB_KEYS[@]}"; do
       local array_enabled="false"
       local array_mode="none"
+      local array_effective_parallel="1"
       if [[ "$_system" == "slurm" && "$use_array" == "true" && ${EXPAND_JOB["$job_key::cmd_count"]} -gt 1 ]]; then
         array_enabled="true"
-        if FunctionExists SlurmArrayMode; then
+        if FunctionExists SlurmResolveArrayMode; then
+          SlurmResolveArrayMode \
+            "$partition" \
+            "$array_mode_requested" \
+            "$max_parallel" \
+            "${EXPAND_JOB["$job_key::cmd_count"]}" \
+            "${EXPAND_JOB["$job_key::nodes"]}" \
+            "${EXPAND_JOB["$job_key::mpis"]}" \
+            "${EXPAND_JOB["$job_key::threads"]}" \
+            "$minimal_header" \
+            "$call_wrapper"
+          array_mode="$SLURM_ARRAY_MODE"
+          array_effective_parallel="$SLURM_ARRAY_EFFECTIVE_PARALLEL"
+        elif FunctionExists SlurmArrayMode; then
           array_mode=$(SlurmArrayMode "$partition" "$array_mode_requested")
         else
           array_mode="scheduler"
@@ -629,6 +647,7 @@ ProbeEmitJobsSection() {
       printf '"job_script":%s,' "$(JsonString "${EXPAND_JOB["$job_key::job_script"]}")"
       printf '"array_enabled":%s,' "$array_enabled"
       printf '"array_mode":%s,' "$(JsonString "$array_mode")"
+      printf '"array_effective_parallel":%s,' "$(JsonScalar "$array_effective_parallel")"
       printf '"array_max_parallel":%s' "$(JsonScalar "$max_parallel")"
       printf '}'
       sep=","

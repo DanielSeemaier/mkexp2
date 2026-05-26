@@ -279,6 +279,8 @@ Example:
   - `taskset` expands to `taskset -c 0-<nproc-1> <cmd>`
 - Slurm array execution is configurable:
   - `Property slurm.array.mode auto|scheduler|packed` (default: `auto`)
+  - `Property slurm.array.max_parallel N` caps concurrent array commands
+    (default: `1`)
   - `scheduler` emits a native `#SBATCH --array=...%N` job.
   - `packed` submits one Slurm allocation sized for up to
     `slurm.array.max_parallel` concurrent commands and fans them out inside that
@@ -286,7 +288,9 @@ Example:
     separate array elements cannot share one node.
   - `auto` uses packed mode when `scontrol show partition` reports
     `OverSubscribe=NO` and `SelectTypeParameters=NONE`, otherwise native
-    scheduler arrays.
+    scheduler arrays. When mkexp2 can infer CPUs per node from Slurm partition
+    metadata, packed mode is capped to the number of commands that fit on one
+    node; if only one command fits, `auto` falls back to scheduler arrays.
 - Slurm header controls:
   - `Property slurm.minimal_header true|false` (default: `false`)
   - when `true`, Slurm run jobs only emit `--job-name`, `--partition`, `--output`, and `--error` (plus `--array` if applicable)

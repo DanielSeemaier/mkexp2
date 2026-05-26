@@ -7,7 +7,7 @@ LauncherDefaults_slurm() {
   SetSystemDefault "slurm.constraint" "" "any" "used when slurm.minimal_header=false"
   SetSystemDefault "slurm.use_array" "false" "enum:true|false"
   SetSystemDefault "slurm.array.mode" "auto" "enum:auto|scheduler|packed" "auto packs commands into one allocation on whole-node Slurm partitions"
-  SetSystemDefault "slurm.array.max_parallel" "32" "integer>=1" "used when slurm.use_array=true and command count > 1"
+  SetSystemDefault "slurm.array.max_parallel" "1" "integer>=1" "used when slurm.use_array=true and command count > 1"
   SetSystemDefault "slurm.call_wrapper" "srun" "enum:srun|taskset"
   SetSystemDefault "slurm.minimal_header" "false" "enum:true|false"
 }
@@ -50,25 +50,67 @@ LauncherWrapCommand_slurm() {
 
 SlurmPartitionUsesWholeNodeArrays() {
   local partition="$1"
-  local details=""
+  local details="${2:-}"
 
-  if [[ -z "$partition" ]] || ! command -v scontrol >/dev/null 2>&1; then
+  if [[ -z "$partition" ]]; then
     return 1
   fi
 
-  details=$(scontrol show partition "$partition" 2>/dev/null || true)
+  if [[ -z "$details" ]]; then
+    if ! command -v scontrol >/dev/null 2>&1; then
+      return 1
+    fi
+    details=$(scontrol show partition "$partition" 2>/dev/null || true)
+  fi
   [[ -n "$details" ]] || return 1
 
   [[ "$details" == *"OverSubscribe=NO"* && "$details" == *"SelectTypeParameters=NONE"* ]]
 }
 
+SlurmPartitionCpusPerNode() {
+  local partition="$1"
+  local details="${2:-}"
+  local total_cpus=""
+  local total_nodes=""
+
+  if [[ -z "$partition" ]]; then
+    return 1
+  fi
+
+  if [[ -z "$details" ]]; then
+    if ! command -v scontrol >/dev/null 2>&1; then
+      return 1
+    fi
+    details=$(scontrol show partition "$partition" 2>/dev/null || true)
+  fi
+  [[ -n "$details" ]] || return 1
+
+  if [[ "$details" =~ 'TotalCPUs=([0-9]+)' ]]; then
+    total_cpus="$match[1]"
+  fi
+  if [[ "$details" =~ 'TotalNodes=([0-9]+)' ]]; then
+    total_nodes="$match[1]"
+  fi
+
+  if [[ "$total_cpus" == <-> && "$total_nodes" == <-> ]] && (( total_nodes > 0 )); then
+    echo $((total_cpus / total_nodes))
+    return 0
+  fi
+
+  return 1
+}
+
 SlurmArrayMode() {
   local partition="$1"
   local requested="${2:-auto}"
+  local details=""
 
   case "$requested" in
     auto)
-      if SlurmPartitionUsesWholeNodeArrays "$partition"; then
+      if [[ -n "$partition" ]] && command -v scontrol >/dev/null 2>&1; then
+        details=$(scontrol show partition "$partition" 2>/dev/null || true)
+      fi
+      if SlurmPartitionUsesWholeNodeArrays "$partition" "$details"; then
         echo "packed"
       else
         echo "scheduler"
@@ -97,6 +139,80 @@ SlurmArrayParallelLimit() {
     echo "$cmd_count"
   else
     echo "$max_parallel"
+  fi
+}
+
+SlurmPackedArrayParallelLimit() {
+  local partition="$1"
+  local nodes="$2"
+  local mpis="$3"
+  local threads="$4"
+  local requested_parallel="$5"
+  local effective_parallel="$requested_parallel"
+
+  if (( nodes == 1 )); then
+    local cpus_per_node=""
+    local cpus_per_command=$((mpis * threads))
+    cpus_per_node=$(SlurmPartitionCpusPerNode "$partition" || true)
+    if [[ "$cpus_per_node" == <-> ]] && (( cpus_per_node > 0 && cpus_per_command > 0 )); then
+      local cpu_limited_parallel=$((cpus_per_node / cpus_per_command))
+      if (( cpu_limited_parallel < 1 )); then
+        cpu_limited_parallel=1
+      fi
+      if (( cpu_limited_parallel < effective_parallel )); then
+        effective_parallel="$cpu_limited_parallel"
+      fi
+    fi
+  fi
+
+  echo "$effective_parallel"
+}
+
+SlurmResolveArrayMode() {
+  local partition="$1"
+  local requested="$2"
+  local max_parallel="$3"
+  local cmd_count="$4"
+  local nodes="$5"
+  local mpis="$6"
+  local threads="$7"
+  local minimal_header="$8"
+  local call_wrapper="$9"
+
+  SLURM_ARRAY_MODE="none"
+  SLURM_ARRAY_EFFECTIVE_PARALLEL=1
+
+  if (( cmd_count <= 1 )); then
+    return 0
+  fi
+
+  SLURM_ARRAY_MODE=$(SlurmArrayMode "$partition" "$requested")
+  SLURM_ARRAY_EFFECTIVE_PARALLEL=$(SlurmArrayParallelLimit "$max_parallel" "$cmd_count")
+
+  if [[ "$SLURM_ARRAY_MODE" == "packed" && "$minimal_header" == "true" ]]; then
+    if [[ "$requested" == "auto" ]]; then
+      SLURM_ARRAY_MODE="scheduler"
+    else
+      EchoFatal "slurm.array.mode=packed requires slurm.minimal_header=false so mkexp2 can request enough CPUs"
+      exit 1
+    fi
+  fi
+
+  if [[ "$SLURM_ARRAY_MODE" == "packed" && "$call_wrapper" != "srun" ]]; then
+    if [[ "$requested" == "auto" ]]; then
+      SLURM_ARRAY_MODE="scheduler"
+    else
+      EchoFatal "slurm.array.mode=packed requires slurm.call_wrapper=srun"
+      exit 1
+    fi
+  fi
+
+  if [[ "$SLURM_ARRAY_MODE" == "packed" ]]; then
+    SLURM_ARRAY_EFFECTIVE_PARALLEL=$(SlurmPackedArrayParallelLimit "$partition" "$nodes" "$mpis" "$threads" "$SLURM_ARRAY_EFFECTIVE_PARALLEL")
+    if [[ "$requested" == "auto" ]] && (( SLURM_ARRAY_EFFECTIVE_PARALLEL <= 1 )); then
+      SLURM_ARRAY_MODE="scheduler"
+      SLURM_ARRAY_EFFECTIVE_PARALLEL=1
+    fi
   fi
 }
 
@@ -130,31 +246,14 @@ LauncherWriteJob_slurm() {
   constraint=$(ResolveRunProperty "slurm.constraint" "")
   use_array=$(ResolveRunProperty "slurm.use_array" "false")
   array_mode_requested=$(ResolveRunProperty "slurm.array.mode" "auto")
-  max_parallel=$(ResolveRunProperty "slurm.array.max_parallel" "32")
+  max_parallel=$(ResolveRunProperty "slurm.array.max_parallel" "1")
   minimal_header=$(ResolveRunProperty "slurm.minimal_header" "false")
   call_wrapper=$(ResolveRunProperty "slurm.call_wrapper" "srun")
 
   if [[ "$use_array" == "true" && "$cmd_count" -gt 1 ]]; then
-    array_mode=$(SlurmArrayMode "$partition" "$array_mode_requested")
-    effective_parallel=$(SlurmArrayParallelLimit "$max_parallel" "$cmd_count")
-  fi
-
-  if [[ "$array_mode" == "packed" && "$minimal_header" == "true" ]]; then
-    if [[ "$array_mode_requested" == "auto" ]]; then
-      array_mode="scheduler"
-    else
-      EchoFatal "slurm.array.mode=packed requires slurm.minimal_header=false so mkexp2 can request enough CPUs"
-      exit 1
-    fi
-  fi
-
-  if [[ "$array_mode" == "packed" && "$call_wrapper" != "srun" ]]; then
-    if [[ "$array_mode_requested" == "auto" ]]; then
-      array_mode="scheduler"
-    else
-      EchoFatal "slurm.array.mode=packed requires slurm.call_wrapper=srun"
-      exit 1
-    fi
+    SlurmResolveArrayMode "$partition" "$array_mode_requested" "$max_parallel" "$cmd_count" "$nodes" "$mpis" "$threads" "$minimal_header" "$call_wrapper"
+    array_mode="$SLURM_ARRAY_MODE"
+    effective_parallel="$SLURM_ARRAY_EFFECTIVE_PARALLEL"
   fi
 
   local allocation_nodes="$nodes"

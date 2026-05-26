@@ -183,6 +183,7 @@ EOF
 
     assert_eq "$(json_value probe-jobs.json '.jobs.run_jobs[0].array_enabled')" "true" "probe reports packed array usage"
     assert_eq "$(json_value probe-jobs.json '.jobs.run_jobs[0].array_mode')" "packed" "probe reports packed array mode"
+    assert_eq "$(json_value probe-jobs.json '.jobs.run_jobs[0].array_effective_parallel')" "3" "probe reports packed array fanout"
     assert_file_not_contains jobs/ExperimentPackedArray__1x1x1.sh "#SBATCH --array=" "packed array mode does not emit scheduler array"
     assert_file_contains jobs/ExperimentPackedArray__1x1x1.sh "# mkexp2 array mode: packed (3 concurrent command(s) in one Slurm allocation)" "packed array script documents local fanout"
     assert_file_contains jobs/ExperimentPackedArray__1x1x1.sh "#SBATCH --nodes=1" "packed array requests one liskov node"
@@ -192,6 +193,56 @@ EOF
   )
 
   pass "slurm auto packed array on whole-node partition"
+}
+
+test_probe_slurm_auto_uses_scheduler_array_when_packing_cannot_share_node() {
+  local tmp=""
+  tmp=$(mktemp -d)
+  mkdir -p "$tmp/graphs" "$tmp/fakebin"
+  : > "$tmp/graphs/demo.metis"
+  cat > "$tmp/fakebin/scontrol" <<'EOF'
+#!/usr/bin/env zsh
+cat <<'PARTITION'
+PartitionName=diffie
+   Nodes=diffie OverSubscribe=NO
+   State=UP TotalCPUs=96 TotalNodes=1 SelectTypeParameters=NONE
+PARTITION
+EOF
+  chmod +x "$tmp/fakebin/scontrol"
+
+  cat > "$tmp/Experiment" <<'EOF'
+System slurm
+Property slurm.partition diffie
+Property slurm.use_array true
+
+ExperimentFullNodeArray() {
+  Algorithms TestHarness
+  Graph graphs/demo
+  Ks 2 4
+  Seeds 1
+  Epsilons 0.03
+  Threads 1x1x96
+}
+EOF
+
+  (
+    cd "$tmp"
+    PATH="$PWD/fakebin:$PATH" "$MKEXP2" probe FullNodeArray --jobs > probe-jobs.json
+    PATH="$PWD/fakebin:$PATH" "$MKEXP2" generate >/dev/null
+
+    assert_eq "$(json_value probe-jobs.json '.jobs.run_jobs[0].array_enabled')" "true" "probe reports array usage"
+    assert_eq "$(json_value probe-jobs.json '.jobs.run_jobs[0].array_mode')" "scheduler" "probe falls back to scheduler arrays when one command fills a node"
+    assert_eq "$(json_value probe-jobs.json '.jobs.run_jobs[0].array_max_parallel')" "1" "probe reports default array max parallel"
+    assert_file_contains jobs/ExperimentFullNodeArray__1x1x96.sh "#SBATCH --array=0-1%1" "full-node commands use scheduler array fanout"
+    assert_file_contains jobs/ExperimentFullNodeArray__1x1x96.sh "#SBATCH --output=slurm/slurm-%A_%a.out" "scheduler fallback uses array output files"
+    assert_file_contains jobs/ExperimentFullNodeArray__1x1x96.sh "#SBATCH --nodes=1" "scheduler fallback requests one node"
+    assert_file_contains jobs/ExperimentFullNodeArray__1x1x96.sh "#SBATCH --ntasks=1" "scheduler fallback keeps one task per array element"
+    assert_file_contains jobs/ExperimentFullNodeArray__1x1x96.sh "#SBATCH --ntasks-per-node=1" "scheduler fallback keeps one task per node"
+    assert_file_contains jobs/ExperimentFullNodeArray__1x1x96.sh "#SBATCH --cpus-per-task=96" "scheduler fallback preserves requested thread count"
+    assert_file_not_contains jobs/ExperimentFullNodeArray__1x1x96.sh "# mkexp2 array mode: packed" "scheduler fallback does not emit packed launcher"
+  )
+
+  pass "slurm auto scheduler fallback for full-node array commands"
 }
 
 test_probe_kahip_parhip_alias_generation() {
