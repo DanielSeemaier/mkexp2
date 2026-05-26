@@ -1701,6 +1701,12 @@ class WebBackendTest(unittest.TestCase):
                     "stdout": "123_0|node[01-02]|owner|exp|RUNNING|2026-05-26T10:00:00|0:10\n",
                     "stderr": "",
                 }
+            if argv[:3] == ["scontrol", "show", "job"]:
+                return {
+                    "returncode": 0,
+                    "stdout": f"JobId={argv[3]} JobState=RUNNING\n",
+                    "stderr": "",
+                }
             if argv and argv[0] == "srun":
                 return {
                     "returncode": 0,
@@ -1751,6 +1757,81 @@ class WebBackendTest(unittest.TestCase):
         self.assertTrue(any("--jobid=123_0" in call[0] and "--nodelist=node01" in call[0] for call in srun_calls))
         self.assertTrue(all("--overlap" in call[0] for call in srun_calls))
         self.assertFalse(any(call[0] and call[0][0] == "ssh" for call in calls))
+
+    def test_job_details_resolves_array_task_allocation_before_srun(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            calls.append((list(argv), timeout))
+            if argv == ["squeue", "-h", "-r", "-o", mkexp2_web.SQUEUE_NODE_FORMAT]:
+                return {
+                    "returncode": 0,
+                    "stdout": "\n".join(
+                        [
+                            "75226_170||owner|exp|PENDING|N/A|0:00",
+                            "75226_169|diffie|owner|exp|RUNNING|2026-05-26T15:51:35|0:04",
+                        ]
+                    ),
+                    "stderr": "",
+                }
+            if argv == ["scontrol", "show", "job", "75226_169"]:
+                return {
+                    "returncode": 0,
+                    "stdout": "JobId=75413 ArrayJobId=75226 ArrayTaskId=169 JobState=RUNNING\n",
+                    "stderr": "",
+                }
+            if argv and argv[0] == "srun":
+                if "--jobid=75413" not in argv:
+                    return {"returncode": 99, "stdout": "", "stderr": "wrong job id"}
+                return {
+                    "returncode": 0,
+                    "stdout": "\n".join(
+                        [
+                            "hostname=diffie",
+                            "load_1=1.0",
+                            "load_5=1.0",
+                            "load_15=1.0",
+                            "cores_total=96",
+                            "mem_total_kb=2048",
+                            "mem_available_kb=1024",
+                            "mem_used_kb=1024",
+                            "mem_used_percent=50.0",
+                            "cpu_busy_percent=25.0",
+                            "cores_used=24.0",
+                            "sample_seconds=0.2",
+                        ]
+                    ),
+                    "stderr": "",
+                }
+            return {"returncode": 99, "stdout": "", "stderr": "unexpected"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            (exp / ".mkexp2").mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            (exp / ".mkexp2" / "submit.lock").write_text(
+                f"started_at=now\ncwd={exp}\nsystem=slurm\nslurm_job_id=75226\n",
+                encoding="utf-8",
+            )
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+            mkexp2_web.run_command = fake_run_command
+            try:
+                result = app.job_details("exp")
+            finally:
+                mkexp2_web.run_command = original_run_command
+
+            self.assertEqual(result["nodes"], ["diffie"])
+            self.assertEqual(len(result["probes"]), 1)
+            self.assertTrue(result["probes"][0]["ok"])
+            self.assertIn("(75413)", result["probes"][0]["source"])
+
+        srun_calls = [call for call in calls if call[0] and call[0][0] == "srun"]
+        self.assertEqual(len(srun_calls), 1)
+        self.assertIn("--jobid=75413", srun_calls[0][0])
+        self.assertNotIn("--jobid=75226", srun_calls[0][0])
+        self.assertNotIn("--jobid=75226_169", srun_calls[0][0])
 
     def test_job_details_probes_local_submit_lock(self):
         calls = []

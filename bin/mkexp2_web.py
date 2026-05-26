@@ -479,6 +479,20 @@ def parse_node_probe(text):
     }
 
 
+def parse_scontrol_job_summary(text):
+    summary = {}
+    for token in str(text or "").replace("\n", " ").split():
+        if "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        if key in ("JobId", "JobState"):
+            summary[key] = value
+    return {
+        "job_id": summary.get("JobId", ""),
+        "state": summary.get("JobState", ""),
+    }
+
+
 def run_node_probe(node_name=None, slurm_job_id=None):
     local_names = {
         "localhost",
@@ -494,9 +508,26 @@ def run_node_probe(node_name=None, slurm_job_id=None):
     if job_id:
         if not node:
             raise ValueError("node name required for Slurm probe")
+        resolved_job_id = job_id
+        resolution = run_command(["scontrol", "show", "job", job_id], timeout=4)
+        if resolution["returncode"] == 0:
+            summary = parse_scontrol_job_summary(resolution["stdout"])
+            resolved = summary.get("job_id") or ""
+            job_state = (summary.get("state") or "").upper()
+            if job_state and job_state != "RUNNING":
+                return {
+                    "ok": False,
+                    "node": node,
+                    "source": f"scontrol job {job_id}",
+                    "metrics": None,
+                    "error": f"Slurm job {job_id} is {job_state.lower()}; no running allocation to probe.",
+                    "command": resolution,
+                }
+            if resolved and _slurm_job_id_is_safe(resolved):
+                resolved_job_id = resolved
         command = [
             "srun",
-            f"--jobid={job_id}",
+            f"--jobid={resolved_job_id}",
             "--overlap",
             "--nodes=1",
             "--ntasks=1",
@@ -507,6 +538,8 @@ def run_node_probe(node_name=None, slurm_job_id=None):
             NODE_PROBE_SCRIPT,
         ]
         source = f"srun job {job_id} on {node}"
+        if resolved_job_id != job_id:
+            source = f"srun job {job_id} ({resolved_job_id}) on {node}"
     elif node and node not in local_names:
         raise ValueError("Slurm job id required for remote node probe")
     else:
@@ -2361,6 +2394,8 @@ class Mkexp2WebApp:
                     continue
                 jobs.extend(matched)
                 for job in matched:
+                    if (job.get("state") or "").upper() != "RUNNING":
+                        continue
                     row_job_id = job.get("job_id") or job_id
                     for node_name in job.get("node_names") or []:
                         nodes.append(node_name)
