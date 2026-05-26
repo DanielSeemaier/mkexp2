@@ -619,7 +619,11 @@
       }
       syncCompareScroll(...scrollBoxes);
     }
+    function isMissingStatValue(value) {
+      return value === null || value === undefined || value === '';
+    }
     function formatStatNumber(value) {
+      if (isMissingStatValue(value)) return 'n/a';
       const parsed = Number(value);
       if (!Number.isFinite(parsed)) return 'n/a';
       if (Math.abs(parsed) >= 1000) return parsed.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -630,6 +634,7 @@
       return Number.isFinite(parsed) ? parsed.toLocaleString() : '0';
     }
     function formatStatRatio(value) {
+      if (isMissingStatValue(value)) return 'n/a';
       const parsed = Number(value);
       return Number.isFinite(parsed) ? `${formatStatNumber(parsed)}x` : 'n/a';
     }
@@ -638,6 +643,7 @@
       return cells.find(cell => cell.row_algorithm === rowAlgorithm && cell.column_algorithm === columnAlgorithm) || null;
     }
     function ratioCellClass(ratio) {
+      if (isMissingStatValue(ratio)) return 'stats-matrix-empty';
       const parsed = Number(ratio);
       if (!Number.isFinite(parsed)) return 'stats-matrix-empty';
       if (Math.abs(parsed - 1) < 1e-9) return 'stats-matrix-equal';
@@ -740,6 +746,52 @@
       section.appendChild(row);
       box.appendChild(section);
     }
+    function appendStatsRunCountsTable(box, algorithms) {
+      const section = document.createElement('section');
+      section.className = 'stats-section';
+      const heading = document.createElement('div');
+      heading.className = 'stats-section-title';
+      heading.textContent = 'Run Counts';
+      section.appendChild(heading);
+
+      const tableWrap = document.createElement('div');
+      tableWrap.className = 'csv-table-wrap';
+      const table = document.createElement('table');
+      table.className = 'stats-table';
+      const thead = document.createElement('thead');
+      const head = document.createElement('tr');
+      for (const label of ['Algorithm', 'Success', 'Timeouts', 'Imbalanced', 'Failed']) {
+        const th = document.createElement('th');
+        th.textContent = label;
+        head.appendChild(th);
+      }
+      thead.appendChild(head);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      for (const item of algorithms) {
+        const quality = item.quality || item;
+        const row = document.createElement('tr');
+        const cells = [
+          item.algorithm || '',
+          formatStatCount(quality.completed ?? item.completed),
+          formatStatCount(quality.timeouts ?? item.timeouts),
+          formatStatCount(quality.imbalanced ?? item.imbalanced),
+          formatStatCount(quality.failed ?? item.failed),
+        ];
+        for (const value of cells) {
+          const td = document.createElement('td');
+          td.textContent = value;
+          td.title = value;
+          row.appendChild(td);
+        }
+        tbody.appendChild(row);
+      }
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+      section.appendChild(tableWrap);
+      box.appendChild(section);
+    }
     function renderStatsWorkspace() {
       const summary = document.getElementById('stats-summary');
       const box = document.getElementById('stats-output');
@@ -768,6 +820,7 @@
       box.className = 'stats-workspace';
       box.innerHTML = '';
       appendStatsComparisonMatrices(box, stats.comparisons || []);
+      appendStatsRunCountsTable(box, algorithms);
 
     }
     function formatBytes(value) {
