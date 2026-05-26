@@ -373,8 +373,23 @@
     function guidedAlgorithmDefinition(name) {
       return (state.guidedForm?.algorithm_definitions || []).find(algorithm => algorithm.name === name) || null;
     }
-    function guidedCustomAlgorithmNames() {
-      return new Set((state.guidedForm?.algorithm_definitions || []).map(algorithm => algorithm.name).filter(Boolean));
+    function collectGuidedAlgorithmDefinitions(options = {}) {
+      const requireBase = options.requireBase !== false;
+      const box = document.getElementById('guided-output');
+      const cards = Array.from(box?.querySelectorAll('[data-guided-algorithm]') || []);
+      const source = cards.length
+        ? cards.map(card => ({
+            name: card.querySelector('.guided-algorithm-name')?.value.trim() || '',
+            base: card.querySelector('.guided-algorithm-base')?.value.trim() || '',
+            args: card.querySelector('.guided-algorithm-args')?.value.trim() || '',
+            properties: collectGuidedPropertyRows(card.querySelector('.guided-algorithm-properties') || document.createElement('div')),
+          }))
+        : (state.guidedForm?.algorithm_definitions || []);
+      return source.filter(algorithm => algorithm.name && (!requireBase || algorithm.base));
+    }
+    function guidedCustomAlgorithmNames(algorithms = null) {
+      const source = algorithms || collectGuidedAlgorithmDefinitions({ requireBase: false });
+      return new Set(source.map(algorithm => algorithm.name).filter(Boolean));
     }
     function guidedDefinitionChain(base, seen = new Set()) {
       const value = String(base || '').trim();
@@ -547,6 +562,7 @@
           }
         }
       }
+      for (const name of algorithmMap.keys()) algorithmOptions.delete(name);
       const basePath = model?.settings?.benchmark_base_path || state.settings?.benchmark_base_path || '';
       const formExperiments = experiments.map((experiment, index) => {
         const declared = experiment.declared || {};
@@ -776,7 +792,11 @@
       clearCheckIndicator();
     }
     function removeGuidedCard(button) {
-      button.closest('.guided-card, .guided-row')?.remove();
+      const card = button.closest('.guided-card, .guided-row');
+      const removesAlgorithm = Boolean(card?.matches('[data-guided-algorithm]'));
+      const removedName = removesAlgorithm ? card.querySelector('.guided-algorithm-name')?.value.trim() || '' : '';
+      card?.remove();
+      if (removesAlgorithm) refreshGuidedAlgorithmSelections(removedName, '');
       markGuidedDirty();
     }
     function renderGuidedPropertyRows(container, properties, ownerClass, context = {}) {
@@ -859,17 +879,13 @@
     }
     function renderGuidedAlgorithm(container, algorithm) {
       const card = document.createElement('article');
-      card.className = 'guided-card guided-custom-algorithm-card';
+      card.className = 'guided-card';
       card.dataset.guidedAlgorithm = '1';
       const header = document.createElement('div');
       header.className = 'guided-card-header';
       const title = document.createElement('div');
       title.className = 'guided-card-title';
       title.textContent = algorithm.name || 'Algorithm';
-      const badge = document.createElement('span');
-      badge.className = 'guided-algorithm-badge';
-      badge.textContent = 'Custom';
-      title.appendChild(badge);
       const actions = document.createElement('div');
       actions.className = 'guided-inline-actions';
       const remove = document.createElement('button');
@@ -883,7 +899,17 @@
       grid.className = 'guided-grid';
       const baseCombo = guidedComboInput('guided-algorithm-base', algorithm.base || '', 'KaMinPar or existing algorithm', guidedBaseOptions);
       const baseInput = baseCombo.input;
-      grid.appendChild(guidedField('Name', guidedInput('guided-algorithm-name', algorithm.name || '', 'MyVariant')));
+      const nameInput = guidedInput('guided-algorithm-name', algorithm.name || '', 'MyVariant');
+      nameInput.dataset.previousName = algorithm.name || '';
+      nameInput.addEventListener('input', () => {
+        const oldName = nameInput.dataset.previousName || '';
+        const newName = nameInput.value.trim();
+        title.textContent = newName || 'Algorithm';
+        refreshGuidedAlgorithmSelections(oldName, newName);
+        nameInput.dataset.previousName = newName;
+        updateGuidedBaseSuggestions();
+      });
+      grid.appendChild(guidedField('Name', nameInput));
       grid.appendChild(guidedField('Base / alias', baseCombo.control));
       grid.appendChild(guidedField('CLI arguments', guidedInput('guided-algorithm-args', algorithm.args || '', '-P strong')));
       const propList = document.createElement('div');
@@ -913,6 +939,89 @@
       card.appendChild(propList);
       card.appendChild(addProp);
       container.appendChild(card);
+    }
+    function guidedAlgorithmSelectionGroups(selectedValues = []) {
+      const customDefinitions = collectGuidedAlgorithmDefinitions({ requireBase: false });
+      const customNames = guidedCustomAlgorithmNames(customDefinitions);
+      const hiddenAlgorithms = new Set(state.guidedForm?.hidden_algorithm_options || []);
+      const premadeNames = new Set((state.guidedForm?.algorithm_options || []).filter(name => !customNames.has(name)));
+
+      for (const name of selectedValues || []) {
+        if (!name) continue;
+        if (customNames.has(name)) continue;
+        if (!hiddenAlgorithms.has(name)) premadeNames.add(name);
+      }
+
+      return [
+        {
+          key: 'custom',
+          title: 'Custom algorithms',
+          className: 'custom',
+          names: Array.from(customNames).sort((left, right) => left.localeCompare(right)),
+        },
+        {
+          key: 'premade',
+          title: 'Premade algorithms',
+          className: 'premade',
+          names: Array.from(premadeNames)
+            .filter(name => !hiddenAlgorithms.has(name))
+            .sort((left, right) => left.localeCompare(right)),
+        },
+      ];
+    }
+    function renderGuidedAlgorithmCheck(labelName, selected, isCustom) {
+      const label = document.createElement('label');
+      label.className = `guided-check${isCustom ? ' custom' : ''}`;
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = labelName;
+      checkbox.checked = selected.has(labelName);
+      const text = document.createElement('span');
+      text.textContent = labelName;
+      text.title = labelName;
+      label.appendChild(checkbox);
+      label.appendChild(text);
+      return label;
+    }
+    function renderGuidedAlgorithmSelection(selectedValues = []) {
+      const selected = new Set(selectedValues || []);
+      const wrapper = document.createElement('div');
+      wrapper.className = 'guided-algorithm-selection';
+      const groups = guidedAlgorithmSelectionGroups(selectedValues);
+      for (const group of groups) {
+        if (!group.names.length) continue;
+        const section = document.createElement('section');
+        section.className = `guided-check-group ${group.className}`;
+        const title = document.createElement('div');
+        title.className = 'guided-check-group-title';
+        title.textContent = group.title;
+        const grid = document.createElement('div');
+        grid.className = 'guided-check-grid';
+        for (const name of group.names) {
+          grid.appendChild(renderGuidedAlgorithmCheck(name, selected, group.key === 'custom'));
+        }
+        section.appendChild(title);
+        section.appendChild(grid);
+        wrapper.appendChild(section);
+      }
+      if (!wrapper.children.length) {
+        wrapper.className = 'guided-algorithm-selection csv-empty';
+        wrapper.textContent = 'No algorithms available.';
+      }
+      return wrapper;
+    }
+    function refreshGuidedAlgorithmSelections(oldName = '', newName = '') {
+      const experimentCards = Array.from(document.querySelectorAll('[data-guided-experiment]'));
+      for (const card of experimentCards) {
+        const selected = new Set(Array.from(card.querySelectorAll('.guided-check input:checked')).map(input => input.value));
+        if (oldName && oldName !== newName && selected.has(oldName)) {
+          selected.delete(oldName);
+          if (newName) selected.add(newName);
+        }
+        const field = card.querySelector('[data-guided-algorithm-selection]');
+        const current = field?.querySelector('.guided-algorithm-selection');
+        if (field && current) current.replaceWith(renderGuidedAlgorithmSelection(Array.from(selected)));
+      }
     }
     function normalizeGuidedGraphRows(graphs) {
       const rows = Array.isArray(graphs) ? graphs : [];
@@ -1022,35 +1131,7 @@
       grid.appendChild(guidedField('Epsilons', guidedArgumentList('guided-experiment-epsilons', experiment.epsilons || [], '0.03')));
       grid.appendChild(guidedField('Threads', guidedArgumentList('guided-experiment-topologies', experiment.topologies || [], '1x1x64')));
       grid.appendChild(guidedField('Timelimit', guidedInput('guided-experiment-timelimit', experiment.timelimit || '', 'empty = unlimited time')));
-      const algorithmChecks = document.createElement('div');
-      algorithmChecks.className = 'guided-check-grid';
-      const algorithmNames = new Set(state.guidedForm.algorithm_options || []);
-      const hiddenAlgorithms = new Set(state.guidedForm.hidden_algorithm_options || []);
-      const customAlgorithms = guidedCustomAlgorithmNames();
-      for (const algorithm of state.guidedForm.algorithm_definitions || []) if (algorithm.name) algorithmNames.add(algorithm.name);
-      for (const algorithm of experiment.algorithms || []) if (!hiddenAlgorithms.has(algorithm) || customAlgorithms.has(algorithm)) algorithmNames.add(algorithm);
-      for (const algorithmName of Array.from(algorithmNames).sort((left, right) => left.localeCompare(right))) {
-        if (hiddenAlgorithms.has(algorithmName) && !customAlgorithms.has(algorithmName)) continue;
-        const label = document.createElement('label');
-        const isCustom = customAlgorithms.has(algorithmName);
-        label.className = `guided-check${isCustom ? ' custom' : ''}`;
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.value = algorithmName;
-        checkbox.checked = (experiment.algorithms || []).includes(algorithmName);
-        const text = document.createElement('span');
-        text.textContent = algorithmName;
-        text.title = algorithmName;
-        label.appendChild(checkbox);
-        label.appendChild(text);
-        if (isCustom) {
-          const badge = document.createElement('span');
-          badge.className = 'guided-algorithm-badge';
-          badge.textContent = 'Custom';
-          label.appendChild(badge);
-        }
-        algorithmChecks.appendChild(label);
-      }
+      const algorithmSelection = renderGuidedAlgorithmSelection(experiment.algorithms || []);
       const graphList = document.createElement('div');
       graphList.className = 'guided-row-list guided-graphs';
       renderGuidedGraphRows(graphList, experiment.graphs || []);
@@ -1065,7 +1146,9 @@
       };
       card.appendChild(header);
       card.appendChild(grid);
-      card.appendChild(guidedField('Algorithms', algorithmChecks));
+      const algorithmField = guidedField('Algorithms', algorithmSelection);
+      algorithmField.dataset.guidedAlgorithmSelection = '1';
+      card.appendChild(algorithmField);
       card.appendChild(guidedField('Graphs', graphList));
       card.appendChild(addGraph);
       container.appendChild(card);
@@ -1183,20 +1266,16 @@
     }
     function collectGuidedForm() {
       const box = document.getElementById('guided-output');
+      const algorithmDefinitions = collectGuidedAlgorithmDefinitions();
+      const customNames = new Set(algorithmDefinitions.map(algorithm => algorithm.name).filter(Boolean));
       return {
         system: box.querySelector('.guided-system')?.value || 'slurm',
         properties: collectGuidedPropertyRows(box.querySelector('.guided-global-properties') || document.createElement('div')),
-        algorithm_options: Array.from(new Set([
-          ...(state.guidedForm?.algorithm_options || []),
-          ...Array.from(box.querySelectorAll('[data-guided-algorithm]')).map(card => card.querySelector('.guided-algorithm-name')?.value.trim() || '').filter(Boolean),
-        ])).sort((left, right) => left.localeCompare(right)),
+        algorithm_options: Array.from(new Set(state.guidedForm?.algorithm_options || []))
+          .filter(name => !customNames.has(name))
+          .sort((left, right) => left.localeCompare(right)),
         hidden_algorithm_options: state.guidedForm?.hidden_algorithm_options || [],
-        algorithm_definitions: Array.from(box.querySelectorAll('[data-guided-algorithm]')).map(card => ({
-          name: card.querySelector('.guided-algorithm-name')?.value.trim() || '',
-          base: card.querySelector('.guided-algorithm-base')?.value.trim() || '',
-          args: card.querySelector('.guided-algorithm-args')?.value.trim() || '',
-          properties: collectGuidedPropertyRows(card.querySelector('.guided-algorithm-properties') || document.createElement('div')),
-        })).filter(algorithm => algorithm.name && algorithm.base),
+        algorithm_definitions: algorithmDefinitions,
         experiments: Array.from(box.querySelectorAll('[data-guided-experiment]')).map(card => ({
           function: card.querySelector('.guided-experiment-function')?.value.trim() || '',
           algorithms: Array.from(card.querySelectorAll('.guided-check input:checked')).map(input => input.value),
