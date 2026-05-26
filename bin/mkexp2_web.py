@@ -32,6 +32,92 @@ EXPERIMENT_CACHE_SECONDS = 60
 PLOT_ACTION_TIMEOUT_SECONDS = 7200
 SQUEUE_NODE_FORMAT = "%i|%N|%u|%j|%T|%S|%M"
 SQUEUE_TABLE_FORMAT = "%i|%P|%j|%u|%T|%M|%D|%R"
+NODE_PROBE_SCRIPT = r'''
+host=$(hostname -f 2>/dev/null || hostname 2>/dev/null || printf unknown)
+printf 'hostname=%s\n' "$host"
+
+if [ -r /proc/loadavg ]; then
+  set -- $(cat /proc/loadavg)
+  printf 'load_1=%s\nload_5=%s\nload_15=%s\n' "$1" "$2" "$3"
+else
+  loads=$(uptime 2>/dev/null | sed 's/.*load averages*: //; s/.*load average: //; s/,//g' | awk '{print $1, $2, $3}')
+  set -- $loads
+  printf 'load_1=%s\nload_5=%s\nload_15=%s\n' "${1:-}" "${2:-}" "${3:-}"
+fi
+
+cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || printf 0)
+printf 'cores_total=%s\n' "$cores"
+
+if [ -r /proc/meminfo ]; then
+  awk '
+    /^MemTotal:/ { total=$2 }
+    /^MemAvailable:/ { avail=$2 }
+    /^MemFree:/ { free=$2 }
+    /^Buffers:/ { buffers=$2 }
+    /^Cached:/ { cached=$2 }
+    END {
+      if (!avail) avail=free + buffers + cached
+      used=total - avail
+      pct=(total > 0) ? (used * 100 / total) : 0
+      printf "mem_total_kb=%d\nmem_available_kb=%d\nmem_used_kb=%d\nmem_used_percent=%.1f\n", total, avail, used, pct
+    }
+  ' /proc/meminfo
+else
+  total_bytes=$(sysctl -n hw.memsize 2>/dev/null || printf 0)
+  total_kb=$((total_bytes / 1024))
+  vm=$(vm_stat 2>/dev/null || true)
+  page_size=$(printf '%s\n' "$vm" | sed -n 's/.*page size of \([0-9][0-9]*\).*/\1/p' | head -1)
+  free_pages=$(printf '%s\n' "$vm" | awk '/Pages free:/ {gsub("\\.", "", $3); print $3 + 0}')
+  inactive_pages=$(printf '%s\n' "$vm" | awk '/Pages inactive:/ {gsub("\\.", "", $3); print $3 + 0}')
+  speculative_pages=$(printf '%s\n' "$vm" | awk '/Pages speculative:/ {gsub("\\.", "", $3); print $3 + 0}')
+  if [ "${page_size:-0}" -gt 0 ] 2>/dev/null && [ "$total_kb" -gt 0 ] 2>/dev/null; then
+    available_kb=$(((free_pages + inactive_pages + speculative_pages) * page_size / 1024))
+    used_kb=$((total_kb - available_kb))
+    awk -v total="$total_kb" -v avail="$available_kb" -v used="$used_kb" '
+      BEGIN {
+        if (used < 0) used=0
+        pct=(total > 0) ? (used * 100 / total) : 0
+        printf "mem_total_kb=%d\nmem_available_kb=%d\nmem_used_kb=%d\nmem_used_percent=%.1f\n", total, avail, used, pct
+      }
+    '
+  else
+    printf 'mem_total_kb=%s\nmem_available_kb=\nmem_used_kb=\nmem_used_percent=\n' "$total_kb"
+  fi
+fi
+
+if [ -r /proc/stat ]; then
+  first=$(awk '/^cpu / { total=0; for (i=2; i<=NF; i++) total+=$i; idle=$5+$6; print total, idle; exit }' /proc/stat)
+  sleep 0.2
+  second=$(awk '/^cpu / { total=0; for (i=2; i<=NF; i++) total+=$i; idle=$5+$6; print total, idle; exit }' /proc/stat)
+  set -- $first
+  total_a=${1:-0}
+  idle_a=${2:-0}
+  set -- $second
+  total_b=${1:-0}
+  idle_b=${2:-0}
+  awk -v ta="$total_a" -v ia="$idle_a" -v tb="$total_b" -v ib="$idle_b" -v cores="$cores" '
+    BEGIN {
+      dt=tb-ta
+      di=ib-ia
+      pct=(dt > 0) ? ((dt-di) * 100 / dt) : 0
+      if (pct < 0) pct=0
+      if (pct > 100) pct=100
+      used=cores * pct / 100
+      printf "cpu_busy_percent=%.1f\ncores_used=%.1f\nsample_seconds=0.2\n", pct, used
+    }
+  '
+else
+  ps_pct=$(ps -A -o %cpu= 2>/dev/null | awk '{sum+=$1} END {printf "%.1f", sum+0}')
+  awk -v total="$ps_pct" -v cores="$cores" '
+    BEGIN {
+      used=total / 100
+      pct=(cores > 0) ? (used * 100 / cores) : 0
+      if (pct > 100) pct=100
+      printf "cpu_busy_percent=%.1f\ncores_used=%.1f\nsample_seconds=\n", pct, used
+    }
+  '
+fi
+'''.strip()
 WEB_STATE_DIR = ".mkexp2"
 WEB_PINS_FILE = "web-pins.json"
 WEB_SHARES_FILE = "web-shares.json"
@@ -316,9 +402,112 @@ def unique_ordered(values):
     return out
 
 
+def _node_name_is_safe(value):
+    return bool(re.fullmatch(r"[A-Za-z0-9_.-]+", str(value or "")))
+
+
 def slurm_cancel_job_id(job_id):
     text = str(job_id or "").strip()
     return re.sub(r"%[A-Za-z0-9_.+\-]+(?=\])", "", text)
+
+
+def slurm_job_matches(candidate, wanted):
+    candidate = str(candidate or "")
+    wanted = str(wanted or "")
+    return (
+        candidate == wanted
+        or candidate.startswith(f"{wanted}_")
+        or candidate.startswith(f"{wanted}[")
+    )
+
+
+def submit_lock_slurm_job_ids(lock):
+    slurm_job_ids = []
+    slurm_job_ids.extend(lock_values(lock, "slurm_job_id"))
+    for value in lock_values(lock, "slurm_job"):
+        if ":" in value:
+            slurm_job_ids.append(value.rsplit(":", 1)[1])
+        else:
+            slurm_job_ids.append(value)
+    return unique_ordered(slurm_job_ids)
+
+
+def parse_node_probe(text):
+    raw = {}
+    for line in str(text or "").splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        raw[key.strip()] = value.strip()
+
+    def number(key):
+        value = raw.get(key, "")
+        if value == "":
+            return None
+        try:
+            return float(value)
+        except ValueError:
+            return None
+
+    mem_total_kb = number("mem_total_kb")
+    mem_used_kb = number("mem_used_kb")
+    mem_available_kb = number("mem_available_kb")
+    return {
+        "hostname": raw.get("hostname", ""),
+        "load": {
+            "one": number("load_1"),
+            "five": number("load_5"),
+            "fifteen": number("load_15"),
+        },
+        "memory": {
+            "total_bytes": int(mem_total_kb * 1024) if mem_total_kb is not None else None,
+            "used_bytes": int(mem_used_kb * 1024) if mem_used_kb is not None else None,
+            "available_bytes": int(mem_available_kb * 1024) if mem_available_kb is not None else None,
+            "used_percent": number("mem_used_percent"),
+        },
+        "cpu": {
+            "cores_total": number("cores_total"),
+            "cores_used": number("cores_used"),
+            "busy_percent": number("cpu_busy_percent"),
+            "sample_seconds": number("sample_seconds"),
+        },
+        "raw": raw,
+    }
+
+
+def run_node_probe(node_name=None):
+    local_names = {
+        "localhost",
+        socket.gethostname(),
+        socket.getfqdn(),
+    }
+    node = str(node_name or "").strip()
+    if node and not _node_name_is_safe(node):
+        raise ValueError("invalid node name")
+    if node and node not in local_names:
+        command = [
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=4",
+            "-o",
+            "ConnectionAttempts=1",
+            node,
+            f"sh -lc {shlex.quote(NODE_PROBE_SCRIPT)}",
+        ]
+        source = f"ssh {node}"
+    else:
+        command = ["sh", "-lc", NODE_PROBE_SCRIPT]
+        source = "local"
+    result = run_command(command, timeout=8)
+    return {
+        "ok": result["returncode"] == 0,
+        "node": node or socket.gethostname(),
+        "source": source,
+        "metrics": parse_node_probe(result["stdout"]) if result["returncode"] == 0 else None,
+        "command": result,
+    }
 
 
 def process_exists(pid):
@@ -2131,6 +2320,72 @@ class Mkexp2WebApp:
         path.unlink(missing_ok=True)
         return {"cleared": existed, "submit_lock": self.submit_lock(experiment_id)}
 
+    def job_details(self, experiment_id):
+        lock = self.submit_lock(experiment_id)
+        if not lock.get("locked"):
+            return {
+                "locked": False,
+                "submit_lock": lock,
+                "jobs": [],
+                "nodes": [],
+                "probes": [],
+                "message": "submit is not locked",
+            }
+
+        systems = sorted(set(value.lower() for value in lock_values(lock, "system")))
+        slurm_job_ids = submit_lock_slurm_job_ids(lock)
+        jobs = []
+        missing = []
+        nodes = []
+        squeue = None
+        if slurm_job_ids:
+            squeue = run_command(["squeue", "-h", "-o", SQUEUE_NODE_FORMAT], timeout=8)
+            squeue_rows = parse_squeue_jobs(squeue["stdout"]) if squeue["returncode"] == 0 else []
+            for job_id in slurm_job_ids:
+                matched = [job for job in squeue_rows if slurm_job_matches(job.get("job_id"), job_id)]
+                if not matched:
+                    missing.append(job_id)
+                    continue
+                jobs.extend(matched)
+                for job in matched:
+                    nodes.extend(job.get("node_names") or [])
+
+        if not slurm_job_ids and (not systems or "local" in systems):
+            nodes.append(socket.gethostname())
+
+        nodes = unique_ordered(nodes)
+        max_nodes = 6
+        probes = []
+        for node_name in nodes[:max_nodes]:
+            try:
+                probes.append(run_node_probe(node_name if slurm_job_ids else None))
+            except ValueError as exc:
+                probes.append(
+                    {
+                        "ok": False,
+                        "node": node_name,
+                        "source": "",
+                        "metrics": None,
+                        "error": str(exc),
+                        "command": None,
+                    }
+                )
+
+        return {
+            "locked": True,
+            "submit_lock": lock,
+            "systems": systems,
+            "slurm_job_ids": slurm_job_ids,
+            "jobs": jobs,
+            "missing_job_ids": missing,
+            "nodes": nodes,
+            "node_limit": max_nodes,
+            "nodes_truncated": len(nodes) > max_nodes,
+            "probes": probes,
+            "generated_at": _dt.datetime.now().isoformat(timespec="seconds"),
+            "squeue": squeue,
+        }
+
     def cancel_submit(self, experiment_id, payload):
         confirm_id = str((payload or {}).get("confirm_id") or "").strip()
         if confirm_id != experiment_id:
@@ -2144,14 +2399,7 @@ class Mkexp2WebApp:
             raise ValueError("submit lock cwd does not match experiment directory")
 
         systems = set(value.lower() for value in lock_values(lock, "system"))
-        slurm_job_ids = []
-        slurm_job_ids.extend(lock_values(lock, "slurm_job_id"))
-        for value in lock_values(lock, "slurm_job"):
-            if ":" in value:
-                slurm_job_ids.append(value.rsplit(":", 1)[1])
-            else:
-                slurm_job_ids.append(value)
-        slurm_job_ids = unique_ordered(slurm_job_ids)
+        slurm_job_ids = submit_lock_slurm_job_ids(lock)
 
         slurm_result = None
         local_result = None
@@ -4227,12 +4475,14 @@ def make_handler(app):
                 if match:
                     json_response(self, 200, app.column_visibility(urllib.parse.unquote(match.group(1))))
                     return
-                match = re.match(r"^/api/experiments/([^/]+)/(submit-lock|progress)$", path)
+                match = re.match(r"^/api/experiments/([^/]+)/(submit-lock|job-details|progress)$", path)
                 if match:
                     experiment_id = urllib.parse.unquote(match.group(1))
                     action = match.group(2)
                     if action == "submit-lock":
                         json_response(self, 200, app.submit_lock(experiment_id))
+                    elif action == "job-details":
+                        json_response(self, 200, app.job_details(experiment_id))
                     else:
                         json_response(self, 200, app.progress(experiment_id))
                     return

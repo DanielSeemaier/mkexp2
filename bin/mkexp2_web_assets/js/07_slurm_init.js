@@ -168,7 +168,14 @@
     document.getElementById('submit-preview-open').onclick = () => withBusyButton('submit-preview-open', '', openSubmitPreviewDialog).catch(err => out(String(err)));
     document.getElementById('submit-preview-close').onclick = closeSubmitPreviewDialog;
     document.getElementById('submit').onclick = submitExperiment;
-    document.getElementById('cancel-submit-nav').onclick = () => cancelSubmittedExperiment().catch(err => alert(String(err)));
+    document.getElementById('job-details-nav').onclick = () => withBusyButton('job-details-nav', 'Loading...', openJobDetailsDialog).catch(err => alert(String(err)));
+    document.getElementById('job-details-refresh').onclick = () => {
+      const restore = setIconButtonSpinning('job-details-refresh');
+      loadJobDetails().catch(err => alert(String(err))).finally(restore);
+    };
+    document.getElementById('job-details-close').onclick = closeJobDetailsDialog;
+    document.getElementById('job-details-close-footer').onclick = closeJobDetailsDialog;
+    document.getElementById('job-details-cancel').onclick = () => cancelSubmittedExperiment().catch(err => alert(String(err)));
     document.getElementById('unarchive-nav').onclick = () => unarchiveSelectedExperiment().catch(err => alert(String(err)));
     document.getElementById('clear-submit-lock').onclick = clearSubmitLock;
     document.getElementById('rename-experiment').onclick = renameExperiment;

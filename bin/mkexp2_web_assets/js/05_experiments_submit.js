@@ -1755,6 +1755,10 @@
       updateSelectedExperimentLock(state.submitLock);
       renderDashboard();
       renderSubmitButton();
+      const modal = document.getElementById('job-details-modal');
+      if (!locked && modal && !modal.classList.contains('hidden')) {
+        renderJobDetails({ locked: false, submit_lock: state.submitLock, message: 'Submit lock cleared.' });
+      }
     }
     function submitLockText(lock) {
       if (!lock?.locked) return '';
@@ -1766,17 +1770,172 @@
     function submitLockMessage() {
       return submitLockText(state.submitLock);
     }
+    function closeJobDetailsDialog() {
+      document.getElementById('job-details-modal').classList.add('hidden');
+    }
+    function jobFact(label, value) {
+      const text = value == null || value === '' ? 'n/a' : String(value);
+      return `<div class="job-detail-fact"><div class="job-detail-label">${esc(label)}</div><div class="job-detail-value">${esc(text)}</div></div>`;
+    }
+    function finiteNumber(value) {
+      if (value == null || value === '') return null;
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    }
+    function formatJobNumber(value, digits = 1) {
+      const number = finiteNumber(value);
+      if (number == null) return 'n/a';
+      return number.toFixed(digits).replace(/\.0$/, '');
+    }
+    function formatJobPercent(value) {
+      const number = finiteNumber(value);
+      return number == null ? 'n/a' : `${number.toFixed(1)}%`;
+    }
+    function jobMeter(value) {
+      const number = finiteNumber(value);
+      const width = number == null ? 0 : Math.max(0, Math.min(100, number));
+      return `<div class="job-meter" aria-hidden="true"><span style="width: ${width.toFixed(1)}%"></span></div>`;
+    }
+    function formatJobMemory(memory) {
+      const used = finiteNumber(memory?.used_bytes);
+      const total = finiteNumber(memory?.total_bytes);
+      if (used == null || total == null || total <= 0) return 'n/a';
+      return `${formatBytes(used)} / ${formatBytes(total)}`;
+    }
+    function renderJobProbe(probe) {
+      const command = probe?.command || {};
+      const metrics = probe?.metrics || {};
+      const nodeName = probe?.node || metrics.hostname || 'node';
+      if (!probe?.ok) {
+        const error = probe?.error || command.stderr || command.stdout || 'Node probe failed.';
+        return `
+          <section class="job-node-card">
+            <div class="job-node-header">
+              <div class="job-node-name">${esc(nodeName)}</div>
+              <div class="job-node-source">${esc(probe?.source || '')}</div>
+            </div>
+            <div class="csv-empty">${esc(error)}</div>
+          </section>
+        `;
+      }
+      const load = metrics.load || {};
+      const memory = metrics.memory || {};
+      const cpu = metrics.cpu || {};
+      const loadText = [load.one, load.five, load.fifteen].map(value => formatJobNumber(value, 2)).join(' / ');
+      const usedCores = formatJobNumber(cpu.cores_used, 1);
+      const totalCores = formatJobNumber(cpu.cores_total, 0);
+      const cpuPercent = formatJobPercent(cpu.busy_percent);
+      return `
+        <section class="job-node-card">
+          <div class="job-node-header">
+            <div class="job-node-name">${esc(metrics.hostname || nodeName)}</div>
+            <div class="job-node-source">${esc(probe.source || '')}</div>
+          </div>
+          <div class="job-metrics-grid">
+            <div class="job-metric">
+              <div class="job-metric-label">Load</div>
+              <div class="job-metric-value">${esc(loadText)}</div>
+            </div>
+            <div class="job-metric">
+              <div class="job-metric-label">RAM</div>
+              <div class="job-metric-value">${esc(formatJobMemory(memory))}</div>
+              ${jobMeter(memory.used_percent)}
+            </div>
+            <div class="job-metric">
+              <div class="job-metric-label">Used Cores</div>
+              <div class="job-metric-value">${esc(`${usedCores} / ${totalCores}`)}</div>
+              ${jobMeter(cpu.busy_percent)}
+            </div>
+            <div class="job-metric">
+              <div class="job-metric-label">CPU Busy</div>
+              <div class="job-metric-value">${esc(cpuPercent)}</div>
+              ${jobMeter(cpu.busy_percent)}
+            </div>
+          </div>
+        </section>
+      `;
+    }
+    function renderJobDetails(data) {
+      state.jobDetails = data || null;
+      const summary = document.getElementById('job-details-summary');
+      const lockBox = document.getElementById('job-details-lock');
+      const nodesBox = document.getElementById('job-details-nodes');
+      const cancelButton = document.getElementById('job-details-cancel');
+      const locked = Boolean(data?.locked);
+      if (cancelButton) cancelButton.disabled = !locked || state.selectedArchived || state.shared;
+      if (!locked) {
+        summary.textContent = data?.message || 'No running job selected.';
+        lockBox.innerHTML = '';
+        nodesBox.className = 'job-node-list csv-empty';
+        nodesBox.textContent = 'No running job selected.';
+        return;
+      }
+      const lock = data.submit_lock || state.submitLock || {};
+      const fields = lock.fields || {};
+      const jobIds = (data.slurm_job_ids || []).join(', ');
+      const systems = (data.systems || []).join(', ') || fields.system || 'local';
+      summary.textContent = `${state.selected || 'Experiment'} is running; refreshed ${data.generated_at || 'now'}.`;
+      lockBox.innerHTML = [
+        jobFact('Started', fields.started_at || lock.modified_at || ''),
+        jobFact('System', systems),
+        jobFact('Algorithms', fields.algorithms || 'all'),
+        jobFact('Slurm Jobs', jobIds || 'n/a'),
+      ].join('');
+      const probes = data.probes || [];
+      nodesBox.className = 'job-node-list';
+      if (!probes.length) {
+        const missing = (data.missing_job_ids || []).length ? ` Missing jobs: ${(data.missing_job_ids || []).join(', ')}.` : '';
+        nodesBox.className = 'job-node-list csv-empty';
+        nodesBox.textContent = `No assigned node is available yet.${missing}`;
+        return;
+      }
+      const jobs = (data.jobs || []).slice(0, 6).map(job => (
+        `<div>${esc(job.job_id)} ${esc(job.state || '')} ${esc(job.nodes || '')} ${esc(job.elapsed || '')}</div>`
+      )).join('');
+      const truncated = data.nodes_truncated ? `<div>Showing ${data.node_limit} of ${(data.nodes || []).length} nodes.</div>` : '';
+      nodesBox.innerHTML = [
+        truncated ? `<div class="job-list-compact">${truncated}</div>` : '',
+        jobs ? `<div class="job-list-compact">${jobs}</div>` : '',
+        probes.map(renderJobProbe).join('')
+      ].filter(Boolean).join('');
+    }
+    async function loadJobDetails() {
+      if (!state.selected || state.selectedArchived || state.shared) return;
+      const experimentId = state.selected;
+      const seq = ++state.jobDetailsLoadSeq;
+      const nodesBox = document.getElementById('job-details-nodes');
+      nodesBox.className = 'job-node-list csv-empty';
+      nodesBox.textContent = 'Loading job details...';
+      try {
+        const data = await api(`/api/experiments/${encodeURIComponent(experimentId)}/job-details`);
+        if (state.selected !== experimentId || seq !== state.jobDetailsLoadSeq) return;
+        state.jobDetailsFor = experimentId;
+        renderJobDetails(data);
+      } catch (err) {
+        if (state.selected !== experimentId || seq !== state.jobDetailsLoadSeq) return;
+        nodesBox.className = 'job-node-list csv-empty';
+        nodesBox.textContent = String(err);
+      }
+    }
+    async function openJobDetailsDialog() {
+      if (!state.selected || state.selectedArchived || state.shared || !state.submitLock?.locked) return;
+      const modal = document.getElementById('job-details-modal');
+      document.getElementById('job-details-summary').textContent = submitLockMessage() || 'Running job.';
+      modal.classList.remove('hidden');
+      renderJobDetails({ locked: true, submit_lock: state.submitLock, probes: [] });
+      await loadJobDetails();
+    }
     function renderSubmitButton() {
       const submitButton = document.getElementById('submit');
       if (!submitButton) return;
       const locked = Boolean(state.submitLock?.locked);
       const loadingAlgorithms = Boolean(state.algorithmLoading && state.algorithmLoadingFor === state.selected);
-      const cancelButton = document.getElementById('cancel-submit-nav');
-      if (cancelButton) {
-        const showCancel = locked && Boolean(state.selected) && !state.selectedArchived && !state.shared;
-        cancelButton.classList.toggle('hidden', !showCancel);
-        cancelButton.disabled = !showCancel || cancelButton.dataset.busy === '1';
-        cancelButton.title = showCancel ? submitLockMessage() || 'Cancel submitted jobs for this experiment' : '';
+      const jobButton = document.getElementById('job-details-nav');
+      if (jobButton) {
+        const showDetails = locked && Boolean(state.selected) && !state.selectedArchived && !state.shared;
+        jobButton.classList.toggle('hidden', !showDetails);
+        jobButton.disabled = !showDetails || jobButton.dataset.busy === '1';
+        jobButton.title = showDetails ? submitLockMessage() || 'Show job details' : '';
       }
       const unarchiveButton = document.getElementById('unarchive-nav');
       if (unarchiveButton) {
@@ -2009,12 +2168,13 @@
       const id = state.selected;
       const message = `Cancel submitted jobs for "${id}"?\n\nThis cancels associated Slurm jobs or the local submit process and then removes the submit lock.`;
       if (!confirm(message)) return;
-      await withBusyButton('cancel-submit-nav', 'Cancelling...', async () => {
+      await withBusyButton('job-details-cancel', 'Cancelling...', async () => {
         const result = await api(`/api/experiments/${encodeURIComponent(id)}/cancel-submit`, {
           method: 'POST',
           body: JSON.stringify({ confirm_id: id })
         });
         renderSubmitLock(result.submit_lock);
+        closeJobDetailsDialog();
         await Promise.all([
           refreshExperiments({ force: true }),
           loadProgress({ quiet: true }).catch(() => {})
@@ -2026,6 +2186,8 @@
       state.selectedArchived = false;
       state.editorDirty = false;
       state.submitLock = null;
+      state.jobDetails = null;
+      state.jobDetailsFor = null;
       clearCheckIndicator();
       clearPlotIndicator();
       clearAlgorithmChoices();

@@ -654,6 +654,7 @@
       const modalIds = [
         'plot-source-modal',
         'plot-generate-modal',
+        'job-details-modal',
         'submit-preview-modal',
         'settings-modal',
         'queue-modal',

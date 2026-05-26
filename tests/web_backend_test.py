@@ -956,11 +956,14 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="delete-experiment"', mkexp2_web.HTML)
         self.assertIn('class="view-tabs"', mkexp2_web.HTML)
         self.assertIn('class="view-tabs-spacer"', mkexp2_web.HTML)
-        self.assertIn('id="cancel-submit-nav"', mkexp2_web.HTML)
+        self.assertIn('id="job-details-nav"', mkexp2_web.HTML)
+        self.assertIn('id="job-details-modal"', mkexp2_web.HTML)
+        self.assertIn("openJobDetailsDialog", mkexp2_web.HTML)
+        self.assertIn("/job-details", mkexp2_web.HTML)
         self.assertIn("cancelSubmittedExperiment", mkexp2_web.HTML)
         self.assertIn("/cancel-submit", mkexp2_web.HTML)
-        self.assertIn(':root[data-theme="dark"] .submit-cancel-nav', mkexp2_web.HTML)
-        self.assertIn('background: #dc2626;', mkexp2_web.HTML)
+        self.assertIn(':root[data-theme="dark"] .submit-job-nav', mkexp2_web.HTML)
+        self.assertIn('id="job-details-cancel"', mkexp2_web.HTML)
         self.assertIn('id="unarchive-nav"', mkexp2_web.HTML)
         self.assertIn("unarchiveSelectedExperiment", mkexp2_web.HTML)
         self.assertIn('id="share-experiment" class="icon-button" aria-label="Share experiment"', mkexp2_web.HTML)
@@ -1673,6 +1676,118 @@ class WebBackendTest(unittest.TestCase):
             cleared = app.clear_submit_lock("exp")
             self.assertTrue(cleared["cleared"])
             self.assertFalse(cleared["submit_lock"]["locked"])
+
+    def test_job_details_probes_assigned_slurm_nodes(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            calls.append((list(argv), timeout))
+            if argv == ["squeue", "-h", "-o", mkexp2_web.SQUEUE_NODE_FORMAT]:
+                return {
+                    "returncode": 0,
+                    "stdout": "123_0|node[01-02]|owner|exp|RUNNING|2026-05-26T10:00:00|0:10\n",
+                    "stderr": "",
+                }
+            if argv and argv[0] == "ssh":
+                return {
+                    "returncode": 0,
+                    "stdout": "\n".join(
+                        [
+                            "hostname=node01",
+                            "load_1=2.0",
+                            "load_5=1.5",
+                            "load_15=1.0",
+                            "cores_total=64",
+                            "mem_total_kb=1024",
+                            "mem_available_kb=256",
+                            "mem_used_kb=768",
+                            "mem_used_percent=75.0",
+                            "cpu_busy_percent=50.0",
+                            "cores_used=32.0",
+                            "sample_seconds=0.2",
+                        ]
+                    ),
+                    "stderr": "",
+                }
+            return {"returncode": 99, "stdout": "", "stderr": "unexpected"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            (exp / ".mkexp2").mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            (exp / ".mkexp2" / "submit.lock").write_text(
+                f"started_at=now\ncwd={exp}\nsystem=slurm\nslurm_job_id=123\n",
+                encoding="utf-8",
+            )
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+            mkexp2_web.run_command = fake_run_command
+            try:
+                result = app.job_details("exp")
+            finally:
+                mkexp2_web.run_command = original_run_command
+
+            self.assertTrue(result["locked"])
+            self.assertEqual(result["nodes"], ["node01", "node02"])
+            self.assertEqual(len(result["probes"]), 2)
+            self.assertEqual(result["probes"][0]["metrics"]["cpu"]["cores_used"], 32.0)
+            self.assertEqual(result["probes"][0]["metrics"]["memory"]["used_percent"], 75.0)
+
+        self.assertIn((["squeue", "-h", "-o", mkexp2_web.SQUEUE_NODE_FORMAT], 8), calls)
+        self.assertTrue(any(call[0][0] == "ssh" and "node01" in call[0] for call in calls))
+
+    def test_job_details_probes_local_submit_lock(self):
+        calls = []
+        original_run_command = mkexp2_web.run_command
+
+        def fake_run_command(argv, cwd=None, timeout=60):
+            calls.append((list(argv), timeout))
+            if argv == ["sh", "-lc", mkexp2_web.NODE_PROBE_SCRIPT]:
+                return {
+                    "returncode": 0,
+                    "stdout": "\n".join(
+                        [
+                            "hostname=local",
+                            "load_1=0.1",
+                            "load_5=0.2",
+                            "load_15=0.3",
+                            "cores_total=8",
+                            "mem_total_kb=2048",
+                            "mem_available_kb=1024",
+                            "mem_used_kb=1024",
+                            "mem_used_percent=50.0",
+                            "cpu_busy_percent=25.0",
+                            "cores_used=2.0",
+                            "sample_seconds=0.2",
+                        ]
+                    ),
+                    "stderr": "",
+                }
+            return {"returncode": 99, "stdout": "", "stderr": "unexpected"}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            exp = repo / "exp"
+            (exp / ".mkexp2").mkdir(parents=True)
+            (exp / "Experiment").write_text("ExperimentX() { :; }\n")
+            (exp / ".mkexp2" / "submit.lock").write_text(
+                f"started_at=now\ncwd={exp}\nsystem=local\npid=4242\n",
+                encoding="utf-8",
+            )
+            app = mkexp2_web.Mkexp2WebApp(repo, "/fake/mkexp2", "x-<name>", "token")
+            mkexp2_web.run_command = fake_run_command
+            try:
+                result = app.job_details("exp")
+            finally:
+                mkexp2_web.run_command = original_run_command
+
+            self.assertTrue(result["locked"])
+            self.assertEqual(len(result["probes"]), 1)
+            self.assertEqual(result["probes"][0]["source"], "local")
+            self.assertEqual(result["probes"][0]["metrics"]["load"]["one"], 0.1)
+
+        self.assertIn((["sh", "-lc", mkexp2_web.NODE_PROBE_SCRIPT], 8), calls)
 
     def test_cancel_submit_cancels_slurm_jobs_and_unlocks(self):
         calls = []
