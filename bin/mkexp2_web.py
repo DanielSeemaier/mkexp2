@@ -490,6 +490,8 @@ def run_node_probe(node_name=None):
             "-o",
             "BatchMode=yes",
             "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
             "ConnectTimeout=4",
             "-o",
             "ConnectionAttempts=1",

@@ -1736,6 +1736,7 @@ class WebBackendTest(unittest.TestCase):
 
         self.assertIn((["squeue", "-h", "-o", mkexp2_web.SQUEUE_NODE_FORMAT], 8), calls)
         self.assertTrue(any(call[0][0] == "ssh" and "node01" in call[0] for call in calls))
+        self.assertTrue(any("StrictHostKeyChecking=accept-new" in call[0] for call in calls if call[0][0] == "ssh"))
 
     def test_job_details_probes_local_submit_lock(self):
         calls = []
