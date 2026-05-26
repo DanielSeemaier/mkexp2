@@ -1271,9 +1271,11 @@
       letter-spacing: 0;
     }
     .dashboard-workspace-control {
-      display: block;
+      display: flex;
+      justify-content: flex-end;
       flex: 0 1 420px;
       min-width: 320px;
+      margin-left: auto;
     }
     .dashboard-workspace-control select {
       min-width: 0;

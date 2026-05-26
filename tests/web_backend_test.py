@@ -779,6 +779,8 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn('id="dashboard-workspace-select" aria-label="Workspace"', mkexp2_web.HTML)
         self.assertNotIn('<span>Workspace</span>', mkexp2_web.HTML)
         self.assertIn("min-width: 320px;", mkexp2_web.HTML)
+        self.assertIn("justify-content: flex-end;", mkexp2_web.HTML)
+        self.assertIn("margin-left: auto;", mkexp2_web.HTML)
         self.assertIn("height: 40px;", mkexp2_web.HTML)
         self.assertIn("function renderDashboardWorkspaceSelector", mkexp2_web.HTML)
         self.assertIn("loadWorkspaces().catch(err => out(String(err)))", mkexp2_web.HTML)
