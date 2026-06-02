@@ -605,7 +605,6 @@
     .experiment-row.active {
       border-color: var(--accent);
       background: var(--accent-soft);
-      box-shadow: inset 3px 0 0 var(--accent);
     }
     .experiment-row.tagged {
       border-left: 4px solid var(--experiment-tag-color);
@@ -1084,12 +1083,10 @@
     .guided-check.custom {
       border-color: #14b8a6;
       background: #f0fdfa;
-      box-shadow: inset 3px 0 0 #14b8a6;
     }
     :root[data-theme="dark"] .guided-check.custom {
       border-color: #0f766e;
       background: #102f2d;
-      box-shadow: inset 3px 0 0 #2dd4bf;
     }
     .guided-check span {
       overflow: hidden;
@@ -2361,7 +2358,6 @@
       border-color: var(--accent);
       color: var(--text);
       font-weight: 650;
-      box-shadow: inset 3px 0 0 var(--accent);
     }
     .csv-tools {
       display: grid;
@@ -2756,7 +2752,6 @@
     .plot-artifact-select.active {
       border-color: var(--accent);
       background: var(--accent-soft);
-      box-shadow: inset 3px 0 0 var(--accent);
     }
     .plot-artifact-sidebar .plot-artifact-group-header,
     .plot-artifact-sidebar .plot-artifact-select {
@@ -3391,7 +3386,7 @@
       border-color: var(--tab-active-border);
       color: var(--tab-active-text);
       background: var(--tab-active-bg);
-      box-shadow: inset 3px 0 0 var(--tab-active-border), var(--shadow-soft);
+      box-shadow: var(--shadow-soft);
     }
     .settings-content {
       display: grid;
@@ -3622,7 +3617,7 @@
     .workspace-row.active {
       border-color: var(--tab-active-border);
       background: var(--accent-soft);
-      box-shadow: inset 3px 0 0 var(--tab-active-bg), var(--shadow-soft);
+      box-shadow: var(--shadow-soft);
     }
     .workspace-name {
       font-weight: 750;
@@ -3719,7 +3714,6 @@
     .log-entry.active {
       border-color: var(--accent);
       background: var(--accent-soft);
-      box-shadow: inset 3px 0 0 var(--accent);
     }
     .log-entry:hover .log-entry-icon,
     .log-entry:focus-visible .log-entry-icon,
