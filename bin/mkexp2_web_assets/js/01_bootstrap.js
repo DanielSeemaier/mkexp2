@@ -101,6 +101,10 @@
       nodeStatusPayload: null,
       nodeStatusTimer: null,
       nodeStatusBusyRestore: null,
+      clusterHistoryPayload: null,
+      clusterHistoryLoading: false,
+      clusterHistoryError: '',
+      clusterHistoryTimer: null,
       description: null,
       descriptionFor: null,
       descriptionEditing: false,
@@ -122,6 +126,7 @@
     };
     const PLOT_RELOAD_DELAY_MS = 5000;
     const AUTO_RELOAD_INTERVAL_MS = 15000;
+    const CLUSTER_HISTORY_RELOAD_INTERVAL_MS = 60000;
     const THEME_STORAGE_KEY = 'mkexp2-theme';
     const SIDEBAR_WIDTH_KEY = 'mkexp2-sidebar-width';
     const DEFAULT_SIDEBAR_WIDTH = 320;
@@ -175,6 +180,7 @@
         nodes.textContent = 'Enter a session token to load node status.';
       }
       if (typeof stopNodeStatusPolling === 'function') stopNodeStatusPolling();
+      if (typeof stopClusterHistoryPolling === 'function') stopClusterHistoryPolling();
       if (authTokenInput) {
         authTokenInput.value = token();
         window.setTimeout(() => authTokenInput.focus(), 0);
@@ -211,6 +217,7 @@
       loadWorkspaces().catch(err => out(String(err)));
       refreshExperiments({ selectMostRecent: options.selectMostRecent === true }).catch(err => out(String(err)));
       refreshStatus().catch(err => out(String(err)));
+      refreshClusterHistory().catch(err => out(String(err)));
     }
     function apiPath(path) {
       if (!state.shared) return path;

@@ -26,6 +26,7 @@
       } else if (state.sidebarFocus === 'dashboard' && state.selected) {
         state.sidebarFocus = state.selectedArchived ? 'archive' : 'experiments';
       }
+      if (viewId !== 'dashboard-view' && typeof stopClusterHistoryPolling === 'function') stopClusterHistoryPolling();
       document.querySelectorAll('.view-tab').forEach(button => {
         button.classList.toggle('active', button.dataset.view === viewId);
       });
@@ -38,7 +39,8 @@
         renderDashboard();
         await Promise.all([
           loadDashboardRunningProgress(),
-          loadQueue().catch(err => out(String(err)))
+          loadQueue().catch(err => out(String(err))),
+          refreshClusterHistory({ quiet: true }).catch(err => out(String(err)))
         ]);
       }
       if (viewId === 'results-view') {
@@ -112,6 +114,21 @@
     }
     function dashboardCountText(count, singular, plural = `${singular}s`) {
       return `${count} ${count === 1 ? singular : plural}`;
+    }
+    function normalizedSlurmStateText(value) {
+      const raw = String(value ?? '').trim().toLowerCase();
+      if (!raw) return '';
+      const normalized = raw.split(/[~+*#$%@!]+/, 1)[0].trim();
+      return normalized || raw;
+    }
+    function slurmStateBucket(value) {
+      const normalized = normalizedSlurmStateText(value);
+      if (!normalized) return 'other';
+      if (normalized === 'used' || normalized === 'r' || normalized === 'running') return 'allocated';
+      if (normalized.startsWith('idle')) return 'idle';
+      if (normalized.includes('alloc') || normalized.startsWith('mix')) return 'allocated';
+      if (normalized.startsWith('down') || normalized.startsWith('drain') || normalized.startsWith('fail')) return 'down';
+      return 'other';
     }
     function dashboardSortedExperiments(experiments) {
       return Array.from(experiments || []).sort(compareExperimentsByCreatedDesc);
@@ -276,13 +293,168 @@
     function dashboardClusterCounts(nodes) {
       const counts = { total: nodes.length, idle: 0, allocated: 0, down: 0, other: 0 };
       for (const node of nodes) {
-        const stateClass = nodeStateClass(node.state || node.availability || '');
-        if (stateClass === 'node-state-idle' || stateClass === 'node-state-idle-reserved') counts.idle += 1;
-        else if (stateClass === 'node-state-allocated') counts.allocated += 1;
-        else if (stateClass === 'node-state-down') counts.down += 1;
+        const bucket = slurmStateBucket(node.state || node.availability || '');
+        if (bucket === 'idle') counts.idle += 1;
+        else if (bucket === 'allocated') counts.allocated += 1;
+        else if (bucket === 'down') counts.down += 1;
         else counts.other += 1;
       }
+      counts.allocated_percent = counts.total ? Math.round((counts.allocated / counts.total) * 1000) / 10 : 0;
       return counts;
+    }
+    function dashboardNormalizedCounts() {
+      const raw = state.nodeStatusPayload?.counts || null;
+      if (raw && Number.isFinite(Number(raw.total))) {
+        return {
+          total: Number(raw.total) || 0,
+          idle: Number(raw.idle) || 0,
+          allocated: Number(raw.allocated) || 0,
+          down: Number(raw.down) || 0,
+          other: Number(raw.other) || 0,
+          allocated_percent: Number(raw.allocated_percent) || 0,
+        };
+      }
+      const nodes = Array.isArray(state.nodeStatusPayload?.nodes) ? state.nodeStatusPayload.nodes : [];
+      return dashboardClusterCounts(nodes);
+    }
+    function clusterHistoryCounts(sample) {
+      const counts = sample?.counts || {};
+      const total = Number(counts.total) || 0;
+      const allocated = Number(counts.allocated) || 0;
+      const idle = Number(counts.idle) || 0;
+      const down = Number(counts.down) || 0;
+      const other = Number(counts.other) || 0;
+      return { total, allocated, idle, down, other };
+    }
+    function clusterHistoryTime(value) {
+      const date = new Date(value || '');
+      if (Number.isNaN(date.getTime())) return '';
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    function createClusterHistorySvg(samples) {
+      const svgNs = 'http://www.w3.org/2000/svg';
+      const width = 720;
+      const height = 180;
+      const pad = { top: 12, right: 12, bottom: 26, left: 34 };
+      const plotWidth = width - pad.left - pad.right;
+      const plotHeight = height - pad.top - pad.bottom;
+      const counts = samples.map(clusterHistoryCounts);
+      const maxTotal = Math.max(1, ...counts.map(item => item.total || item.allocated + item.idle + item.down + item.other));
+      const svg = document.createElementNS(svgNs, 'svg');
+      svg.setAttribute('class', 'cluster-history-chart');
+      svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+      svg.setAttribute('role', 'img');
+      svg.setAttribute('aria-label', 'Cluster utilization over time');
+
+      for (const ratio of [0, 0.5, 1]) {
+        const y = pad.top + plotHeight - plotHeight * ratio;
+        const line = document.createElementNS(svgNs, 'line');
+        line.setAttribute('class', 'cluster-history-grid');
+        line.setAttribute('x1', pad.left);
+        line.setAttribute('x2', width - pad.right);
+        line.setAttribute('y1', y);
+        line.setAttribute('y2', y);
+        svg.appendChild(line);
+        const label = document.createElementNS(svgNs, 'text');
+        label.setAttribute('class', 'cluster-history-axis');
+        label.setAttribute('x', pad.left - 8);
+        label.setAttribute('y', y + 4);
+        label.setAttribute('text-anchor', 'end');
+        label.textContent = String(Math.round(maxTotal * ratio));
+        svg.appendChild(label);
+      }
+
+      const sampleCount = Math.max(1, samples.length);
+      const step = sampleCount > 1 ? plotWidth / sampleCount : plotWidth;
+      const barWidth = Math.max(2, Math.min(18, step * 0.72));
+      samples.forEach((sample, index) => {
+        const item = counts[index];
+        const x = pad.left + (sampleCount > 1 ? index * step + (step - barWidth) / 2 : (plotWidth - barWidth) / 2);
+        let yBottom = pad.top + plotHeight;
+        for (const key of ['allocated', 'idle', 'down', 'other']) {
+          const value = Math.max(0, Number(item[key]) || 0);
+          if (!value) continue;
+          const segmentHeight = Math.max(1, (value / maxTotal) * plotHeight);
+          const rect = document.createElementNS(svgNs, 'rect');
+          rect.setAttribute('class', `cluster-history-segment ${key}`);
+          rect.setAttribute('x', x);
+          rect.setAttribute('y', yBottom - segmentHeight);
+          rect.setAttribute('width', barWidth);
+          rect.setAttribute('height', segmentHeight);
+          const title = document.createElementNS(svgNs, 'title');
+          title.textContent = `${clusterHistoryTime(sample.sampled_at)}: ${item.allocated} allocated, ${item.idle} idle, ${item.down} down${item.other ? `, ${item.other} other` : ''}`;
+          rect.appendChild(title);
+          svg.appendChild(rect);
+          yBottom -= segmentHeight;
+        }
+      });
+
+      const first = samples[0];
+      const last = samples[samples.length - 1];
+      for (const [text, x, anchor] of [
+        [clusterHistoryTime(first?.sampled_at), pad.left, 'start'],
+        [clusterHistoryTime(last?.sampled_at), width - pad.right, 'end'],
+      ]) {
+        const label = document.createElementNS(svgNs, 'text');
+        label.setAttribute('class', 'cluster-history-axis');
+        label.setAttribute('x', x);
+        label.setAttribute('y', height - 6);
+        label.setAttribute('text-anchor', anchor);
+        label.textContent = text;
+        svg.appendChild(label);
+      }
+      return svg;
+    }
+    function renderClusterHistory(container) {
+      const section = document.createElement('section');
+      section.className = 'cluster-history';
+      const header = document.createElement('div');
+      header.className = 'cluster-history-header';
+      const title = document.createElement('div');
+      title.className = 'cluster-history-title';
+      title.textContent = 'Utilization';
+      const meta = document.createElement('div');
+      meta.className = 'cluster-history-meta';
+      header.appendChild(title);
+      header.appendChild(meta);
+      section.appendChild(header);
+
+      if (state.clusterHistoryLoading) {
+        meta.textContent = 'Loading...';
+      }
+      if (state.clusterHistoryError) {
+        const error = document.createElement('div');
+        error.className = 'csv-empty status-bad';
+        error.textContent = state.clusterHistoryError;
+        section.appendChild(error);
+        container.appendChild(section);
+        return;
+      }
+      const samples = Array.isArray(state.clusterHistoryPayload?.samples) ? state.clusterHistoryPayload.samples : [];
+      if (!samples.length) {
+        if (!state.clusterHistoryLoading) meta.textContent = state.clusterHistoryPayload ? 'No samples yet.' : 'Waiting for samples.';
+        const empty = document.createElement('div');
+        empty.className = 'csv-empty';
+        empty.textContent = 'Cluster history starts with the next server sample.';
+        section.appendChild(empty);
+        container.appendChild(section);
+        return;
+      }
+      const latest = clusterHistoryCounts(samples[samples.length - 1]);
+      const percent = latest.total ? Math.round((latest.allocated / latest.total) * 1000) / 10 : 0;
+      meta.textContent = `${dashboardCountText(samples.length, 'sample')}; latest ${percent}% allocated.`;
+      section.appendChild(createClusterHistorySvg(samples));
+      const legend = document.createElement('div');
+      legend.className = 'cluster-history-legend';
+      for (const [key, label] of [['allocated', 'Allocated'], ['idle', 'Idle'], ['down', 'Down'], ['other', 'Other']]) {
+        if (key === 'other' && !samples.some(sample => clusterHistoryCounts(sample).other)) continue;
+        const item = document.createElement('span');
+        item.className = `cluster-history-legend-item ${key}`;
+        item.textContent = label;
+        legend.appendChild(item);
+      }
+      section.appendChild(legend);
+      container.appendChild(section);
     }
     function renderDashboardCluster() {
       const summary = document.getElementById('dashboard-cluster-summary');
@@ -293,16 +465,21 @@
       if (!nodes.length) {
         summary.textContent = 'No node status loaded.';
         box.className = 'dashboard-cluster panel-body csv-empty';
-        box.textContent = 'Node status loads alongside the sidebar status panel.';
+        renderClusterHistory(box);
+        if (!box.childElementCount) box.textContent = 'Node status loads alongside the sidebar status panel.';
         return;
       }
-      const counts = dashboardClusterCounts(nodes);
-      summary.textContent = dashboardCountText(counts.total, 'node');
+      const counts = dashboardNormalizedCounts();
+      summary.textContent = `${dashboardCountText(counts.total, 'node')}; ${counts.allocated_percent}% allocated`;
       box.className = 'dashboard-cluster panel-body';
-      renderDashboardStat(box, 'Idle', counts.idle);
-      renderDashboardStat(box, 'Allocated', counts.allocated);
-      renderDashboardStat(box, 'Down', counts.down);
-      if (counts.other) renderDashboardStat(box, 'Other', counts.other);
+      const stats = document.createElement('div');
+      stats.className = 'dashboard-cluster-stats';
+      renderDashboardStat(stats, 'Idle', counts.idle);
+      renderDashboardStat(stats, 'Allocated', counts.allocated);
+      renderDashboardStat(stats, 'Down', counts.down);
+      if (counts.other) renderDashboardStat(stats, 'Other', counts.other);
+      box.appendChild(stats);
+      renderClusterHistory(box);
     }
     function renderDashboardQueue(data = state.queuePayload) {
       const box = document.getElementById('dashboard-queue');
@@ -404,6 +581,39 @@
 
       renderDashboardCluster();
       renderDashboardQueue();
+    }
+    function startClusterHistoryPolling() {
+      if (state.clusterHistoryTimer || state.shared || !(token() || allowEmptyToken) || state.activeView !== 'dashboard-view') return;
+      state.clusterHistoryTimer = setTimeout(() => {
+        state.clusterHistoryTimer = null;
+        refreshClusterHistory({ auto: true, quiet: true }).catch(() => {});
+      }, CLUSTER_HISTORY_RELOAD_INTERVAL_MS);
+    }
+    function stopClusterHistoryPolling() {
+      if (state.clusterHistoryTimer) {
+        clearTimeout(state.clusterHistoryTimer);
+        state.clusterHistoryTimer = null;
+      }
+    }
+    async function refreshClusterHistory(options = {}) {
+      stopClusterHistoryPolling();
+      if (state.shared || !(token() || allowEmptyToken)) return null;
+      state.clusterHistoryLoading = true;
+      state.clusterHistoryError = '';
+      if (!options.quiet) renderDashboardCluster();
+      try {
+        const data = await api('/api/status/slurm/history');
+        state.clusterHistoryPayload = data;
+        state.clusterHistoryError = '';
+        return data;
+      } catch (err) {
+        state.clusterHistoryError = firstLines(err?.message || String(err), 2);
+        throw err;
+      } finally {
+        state.clusterHistoryLoading = false;
+        renderDashboardCluster();
+        startClusterHistoryPolling();
+      }
     }
     async function loadDashboardRunningProgress(options = {}) {
       if (state.shared) return;

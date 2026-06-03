@@ -2833,6 +2833,53 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
         self.assertEqual(long_sinfo["feigenbaum"]["features"], "gpu")
         self.assertEqual(long_sinfo["hamming"]["reason"], "ResumeTimeout reache")
 
+    def test_slurm_state_counts_normalize_node_suffixes(self):
+        nodes = mkexp2_web.parse_sinfo_long_nodes(
+            """NODELIST    NODES PARTITION       STATE CPUS    S:C:T MEMORY TMP_DISK WEIGHT AVAIL_FE REASON
+node01          1      all*       idle% 64     1:32:2 515390        0      1   (null) none
+node02          1      all*       idle# 64     1:32:2 515390        0      1   (null) none
+node03          1      all*   allocated* 64    1:32:2 515390        0      1   (null) none
+node04          1      all*       mixed+ 64    1:32:2 515390        0      1   (null) none
+node05          1      all*       down# 64     1:32:2 515390        0      1   (null) hardware
+node06          1      all*       drain% 64    1:32:2 515390        0      1   (null) drain
+node07          1      all*       future 64    1:32:2 515390        0      1   (null) none
+"""
+        )
+
+        counts = mkexp2_web.slurm_node_counts(nodes.values())
+
+        self.assertEqual(nodes["node01"]["availability"], "idle")
+        self.assertEqual(nodes["node03"]["availability"], "used")
+        self.assertEqual(nodes["node05"]["availability"], "down")
+        self.assertEqual(counts["total"], 7)
+        self.assertEqual(counts["idle"], 2)
+        self.assertEqual(counts["allocated"], 2)
+        self.assertEqual(counts["down"], 2)
+        self.assertEqual(counts["other"], 1)
+
+    def test_slurm_history_records_bounded_count_samples(self):
+        status = mkexp2_web.SlurmStatus()
+        payload = {
+            "ok": True,
+            "generated_at": "2026-05-16T16:00:00",
+            "source": "test",
+            "nodes": [
+                {"name": "node01", "state": "allocated"},
+                {"name": "node02", "state": "idle%"},
+                {"name": "node03", "state": "down#"},
+            ],
+        }
+
+        sample = status.record_history_sample(payload)
+        history = status.history()
+
+        self.assertEqual(sample["counts"]["allocated"], 1)
+        self.assertEqual(sample["counts"]["idle"], 1)
+        self.assertEqual(sample["counts"]["down"], 1)
+        self.assertEqual(sample["counts"]["allocated_percent"], 33.3)
+        self.assertEqual(len(history["samples"]), 1)
+        self.assertEqual(history["sample_seconds"], mkexp2_web.SLURM_HISTORY_SAMPLE_SECONDS)
+
     def test_slurm_status_falls_back_when_sinfo_is_missing(self):
         calls = []
         original_run_command = mkexp2_web.run_command
@@ -2858,6 +2905,9 @@ NodeName=node02 Arch=x86_64 CPUTot=64 RealMemory=257000 State=IDLE
         self.assertIn(["sinfo", "-lN", "-p", "all"], calls)
         self.assertEqual(status["source"], "fallback sample: sinfo not installed")
         self.assertEqual(len(status["nodes"]), 17)
+        self.assertEqual(status["counts"]["allocated"], 3)
+        self.assertEqual(status["counts"]["idle"], 12)
+        self.assertEqual(status["counts"]["down"], 2)
         backus = next(node for node in status["nodes"] if node["name"] == "backus")
         self.assertEqual(backus["jobs"][0]["user"], "alice")
         self.assertEqual(backus["jobs"][0]["start_time"], "2026-05-16T15:00:00")

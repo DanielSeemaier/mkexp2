@@ -28,6 +28,8 @@ from pathlib import Path
 MAX_TEXT_RESPONSE = 1024 * 1024
 MAX_LOG_LIST_ENTRIES = 500
 SLURM_CACHE_SECONDS = 15
+SLURM_HISTORY_SAMPLE_SECONDS = 5 * 60
+SLURM_HISTORY_MAX_SAMPLES = 7 * 24 * 60 // 5
 EXPERIMENT_CACHE_SECONDS = 60
 PLOT_ACTION_TIMEOUT_SECONDS = 7200
 SQUEUE_NODE_FORMAT = "%i|%N|%u|%j|%T|%S|%M"
@@ -132,6 +134,7 @@ EXPERIMENT_SKIP_DIRS = {".git", ".mkexp2", "jobs", "logs", "plots", "results", "
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 TAG_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$")
 TAG_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+SLURM_STATE_FLAG_RE = re.compile(r"[~+*#$%@!]+")
 TAG_COLOR_PALETTE = [
     {"name": "Blue", "color": "#2563eb"},
     {"name": "Teal", "color": "#0f766e"},
@@ -683,15 +686,44 @@ def _clean_slurm_null(value):
     return value
 
 
-def _node_availability(state):
-    normalized = state.rstrip("~*").lower()
+def _normalized_slurm_state_text(state):
+    raw = str(state or "").strip().lower()
+    if not raw:
+        return ""
+    normalized = SLURM_STATE_FLAG_RE.split(raw, 1)[0].strip()
+    return normalized or raw
+
+
+def slurm_node_state_bucket(state):
+    normalized = _normalized_slurm_state_text(state)
+    if not normalized:
+        return "other"
     if normalized.startswith("idle"):
         return "idle"
-    if "alloc" in normalized or normalized.startswith("mix"):
-        return "used"
-    if normalized.startswith("down") or normalized.startswith("drain"):
+    if normalized in ("used", "r", "running") or "alloc" in normalized or normalized.startswith("mix"):
+        return "allocated"
+    if normalized.startswith("down") or normalized.startswith("drain") or normalized.startswith("fail"):
         return "down"
-    return normalized or "unknown"
+    return "other"
+
+
+def _node_availability(state):
+    normalized = _normalized_slurm_state_text(state)
+    return {"idle": "idle", "allocated": "used", "down": "down"}.get(
+        slurm_node_state_bucket(state), normalized or "unknown"
+    )
+
+
+def slurm_node_counts(nodes):
+    counts = {"total": 0, "allocated": 0, "idle": 0, "down": 0, "other": 0}
+    for node in nodes or []:
+        state = node.get("state") or node.get("availability") or "" if isinstance(node, dict) else getattr(node, "state", "")
+        bucket = slurm_node_state_bucket(state)
+        counts["total"] += 1
+        counts[bucket if bucket in ("allocated", "idle", "down") else "other"] += 1
+    total = counts["total"]
+    counts["allocated_percent"] = round((counts["allocated"] / total) * 100, 1) if total else 0.0
+    return counts
 
 
 def parse_sinfo_long_nodes(text):
@@ -718,7 +750,7 @@ def parse_sinfo_long_nodes(text):
                 "partition": partition.rstrip("*"),
                 "partition_raw": partition,
                 "state": state,
-                "state_normalized": state.rstrip("~*").lower(),
+                "state_normalized": _normalized_slurm_state_text(state),
                 "availability": _node_availability(state),
                 "cpus": cpus,
                 "cpu_topology": cpu_topology,
@@ -864,16 +896,66 @@ class SlurmStatus:
         self._cache_until = 0
         self._cache = None
         self._lock = threading.Lock()
+        self._history = []
+        self._history_thread = None
+        self._history_stop = threading.Event()
 
-    def get(self):
+    def get(self, force=False):
         with self._lock:
             now = time.time()
-            if self._cache and now < self._cache_until:
+            if not force and self._cache and now < self._cache_until:
                 return self._cache
             payload = self._collect()
             self._cache = payload
             self._cache_until = now + SLURM_CACHE_SECONDS
             return payload
+
+    def start_history_sampler(self):
+        with self._lock:
+            if self._history_thread and self._history_thread.is_alive():
+                return {"running": True, "sample_seconds": SLURM_HISTORY_SAMPLE_SECONDS}
+            self._history_stop.clear()
+            self._history_thread = threading.Thread(target=self._history_loop, name="mkexp2-slurm-history", daemon=True)
+            self._history_thread.start()
+            return {"running": True, "sample_seconds": SLURM_HISTORY_SAMPLE_SECONDS}
+
+    def _history_loop(self):
+        while not self._history_stop.is_set():
+            try:
+                self.record_history_sample(self.get(force=True))
+            except Exception as exc:
+                self.record_history_sample({"ok": False, "source": "sinfo -lN -p all", "nodes": [], "error": str(exc)})
+            self._history_stop.wait(SLURM_HISTORY_SAMPLE_SECONDS)
+
+    def record_history_sample(self, payload=None):
+        payload = payload or self.get(force=True)
+        now = time.time()
+        sample = {
+            "sampled_at": _dt.datetime.fromtimestamp(now).isoformat(timespec="seconds"),
+            "sampled_at_epoch": now,
+            "generated_at": payload.get("generated_at") or "",
+            "source": payload.get("source") or "sinfo -lN -p all",
+            "ok": bool(payload.get("ok")),
+            "counts": slurm_node_counts(payload.get("nodes") or []),
+        }
+        if payload.get("error"):
+            sample["error"] = payload.get("error")
+        self._append_history_sample(sample)
+        return sample
+
+    def _append_history_sample(self, sample):
+        with self._lock:
+            self._history.append(sample)
+            if len(self._history) > SLURM_HISTORY_MAX_SAMPLES:
+                self._history = self._history[-SLURM_HISTORY_MAX_SAMPLES:]
+
+    def history(self):
+        with self._lock:
+            samples = list(self._history)
+            running = bool(self._history_thread and self._history_thread.is_alive())
+        return {"ok": True, "generated_at": _dt.datetime.now().isoformat(timespec="seconds"),
+                "sample_seconds": SLURM_HISTORY_SAMPLE_SECONDS, "max_samples": SLURM_HISTORY_MAX_SAMPLES,
+                "running": running, "samples": samples}
 
     def _collect(self):
         commands = {}
@@ -925,6 +1007,7 @@ class SlurmStatus:
             "generated_at": _dt.datetime.now().isoformat(timespec="seconds"),
             "source": source,
             "nodes": node_list,
+            "counts": slurm_node_counts(node_list),
             "commands": commands,
         }
 
@@ -4437,6 +4520,9 @@ def make_handler(app):
                 if path == "/api/status/slurm":
                     json_response(self, 200, app.slurm.get())
                     return
+                if path == "/api/status/slurm/history":
+                    json_response(self, 200, app.slurm.history())
+                    return
                 if path == "/api/status/squeue":
                     json_response(self, 200, app.slurm.queue())
                     return
@@ -4903,6 +4989,7 @@ def main():
         print("empty token bypass: enabled", flush=True)
     print(f"ssh tunnel: ssh -L {args.port}:{args.host}:{args.port} <user>@<cluster-login>", flush=True)
     print(f"spack R library cache warmup action: {app.warm_spack_plot_cache()}", flush=True)
+    print(f"slurm history sampler: {app.slurm.start_history_sampler()}", flush=True)
     server.serve_forever()
 
 

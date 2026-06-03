@@ -10,11 +10,10 @@
       return `${text} cores`;
     }
     function nodeStateClass(state) {
-      const raw = String(state ?? '').trim().toLowerCase();
-      const normalized = raw.replace(/[~+*$]+$/g, '');
-      if (normalized.startsWith('down')) return 'node-state-down';
-      if (normalized === 'idle') return 'node-state-idle';
-      if (normalized.startsWith('allocated') || normalized.includes('alloc')) return 'node-state-allocated';
+      const bucket = slurmStateBucket(state);
+      if (bucket === 'down') return 'node-state-down';
+      if (bucket === 'idle') return 'node-state-idle';
+      if (bucket === 'allocated') return 'node-state-allocated';
       return '';
     }
     function setNodeStatusLoading(active) {
