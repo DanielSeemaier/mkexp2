@@ -562,7 +562,7 @@ _GeneratePlotsWithDocker() {
 
   EchoStep "Generating plots with Docker"
   if ! _DockerCompose -f "$compose_file" run --rm plot \
-      Rscript /work/mkplots.R "${PLOT_R_ARGS[@]}"; then
+      Rscript /work/mkexp.R plot "${PLOT_R_ARGS[@]}"; then
     EchoFatal "plot generation failed"
     return 1
   fi
@@ -589,7 +589,7 @@ _GeneratePlotsWithNativeR() {
   fi
 
   EchoStep "Generating plots with native R"
-  if ! _RunNativeRscript "$plots_dir" "$results_dir" "$plots_dir/mkplots.R" "${PLOT_R_ARGS[@]}"; then
+  if ! _RunNativeRscript "$plots_dir" "$results_dir" "$plots_dir/mkexp.R" plot "${PLOT_R_ARGS[@]}"; then
     EchoFatal "native plot generation failed"
     return 1
   fi
@@ -603,7 +603,7 @@ GeneratePlots() {
 
   # ── Validate prerequisites ──────────────────────────────────────────────────
 
-  if [[ ! -f "$plots_dir/mkplots.R" || ! -f "$plots_dir/R/common.R" ]]; then
+  if [[ ! -f "$plots_dir/mkexp.R" || ! -f "$plots_dir/R/common.R" ]]; then
     EchoFatal "plots submodule not initialized at $plots_dir"
     EchoFatal "Run: git submodule update --init plots"
     return 1

@@ -9,14 +9,14 @@ set -euo pipefail
 . "$ROOT/tests/plot_compose_test.zsh"
 
 ensure_plots_submodule() {
-  if [[ -f "$ROOT/plots/stats.R" ]]; then
+  if [[ -f "$ROOT/plots/mkexp.R" && -f "$ROOT/plots/R/stats.R" ]]; then
     return
   fi
   if [[ -f "$ROOT/.gitmodules" ]] && git -C "$ROOT" config --file .gitmodules --get submodule.plots.path >/dev/null 2>&1; then
     git -C "$ROOT" submodule update --init plots
   fi
-  if [[ ! -f "$ROOT/plots/stats.R" ]]; then
-    fail "plots submodule is unavailable; expected $ROOT/plots/stats.R"
+  if [[ ! -f "$ROOT/plots/mkexp.R" || ! -f "$ROOT/plots/R/stats.R" ]]; then
+    fail "plots submodule is unavailable; expected $ROOT/plots/mkexp.R and $ROOT/plots/R/stats.R"
   fi
 }
 

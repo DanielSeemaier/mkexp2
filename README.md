@@ -369,9 +369,10 @@ Example:
 
 `mkexp2 plot` prefers Docker when the Docker daemon and Docker Compose are
 available. If Docker is not available, it falls back to native `Rscript` on the
-host. The native path runs the same `plots/install.R` and `plots/mkplots.R`
-entrypoints, but passes host paths through environment variables instead of
-using the container's `/data`, `/cache`, and `/output` mounts.
+host. The native path runs the same `plots/install.R` installer and
+`plots/mkexp.R plot` entrypoint, but passes host paths through environment
+variables instead of using the container's `/data`, `/cache`, and `/output`
+mounts.
 
 Native R fallback requires `Rscript` on `PATH`. Missing R packages are installed
 into `plots/.r-libs-native`, and native plot cache files go to

@@ -7,7 +7,7 @@ StatsCommand() {
     return 1
   fi
 
-  local stats_script="$home/plots/stats.R"
+  local stats_script="$home/plots/mkexp.R"
   if [[ ! -f "$stats_script" ]]; then
     EchoFatal "stats backend not found: $stats_script"
     return 1
@@ -24,5 +24,5 @@ StatsCommand() {
     args+=(--json)
   fi
 
-  env -u R_HOME Rscript "$stats_script" "${args[@]}"
+  env -u R_HOME Rscript "$stats_script" stats "${args[@]}"
 }
