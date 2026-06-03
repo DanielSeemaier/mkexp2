@@ -2355,6 +2355,25 @@
       padding: 4px 7px;
       font-size: 12px;
     }
+    .submit-algorithm-list {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 4px;
+      min-width: 0;
+    }
+    .submit-algorithm-choice {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      min-height: 30px;
+      padding: 4px 2px;
+    }
+    .submit-algorithm-name {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      line-height: 1.25;
+    }
     .submit-header-actions {
       display: flex;
       align-items: center;

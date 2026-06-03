@@ -2221,6 +2221,7 @@
       state.algorithmGroups = [];
       state.algorithmLoading = true;
       state.algorithmLoadingFor = experimentId || '';
+      state.submitSelectionTouched = false;
       const list = document.getElementById('algorithm-list');
       list.className = 'chips';
       list.innerHTML = '';
@@ -2256,19 +2257,61 @@
         .map(item => item.algorithm);
       return new Set(values);
     }
+    function progressCompleteAlgorithmSet(experimentId = state.selected) {
+      if (!experimentId || state.progressFor !== experimentId) return new Set();
+      const progress = state.progressResult?.progress_json || null;
+      const complete = new Set();
+      for (const experiment of progress?.experiments || []) {
+        const functionName = experiment.function || experiment.name || 'Experiment';
+        for (const algorithm of experiment.algorithms || []) {
+          const name = algorithm.name || '';
+          const total = Number(algorithm.total || 0);
+          const done = Number(algorithm.done || 0);
+          const percent = Number(algorithm.percent || 0);
+          if (name && (algorithm.complete || (total > 0 && done >= total) || percent >= 100)) {
+            complete.add(`${functionName}\u0000${name}`);
+          }
+        }
+      }
+      return complete;
+    }
+    function submitSelectionKey(groupFunction, algorithmName) {
+      return `${groupFunction}\u0000${algorithmName}`;
+    }
     function setSubmitGroupChecked(groupFunction, checked) {
+      state.submitSelectionTouched = true;
       document.querySelectorAll('#algorithm-list input[data-experiment]').forEach(input => {
         if (input.dataset.experiment === groupFunction) input.checked = checked;
       });
+    }
+    function markSubmitSelectionTouched() {
+      state.submitSelectionTouched = true;
+    }
+    function applyCompletedAlgorithmDefaults(experimentId = state.selected) {
+      if (state.submitSelectionTouched || state.algorithmLoading || state.algorithmLoadingFor) return;
+      if (!experimentId || state.progressFor !== experimentId) return;
+      const complete = progressCompleteAlgorithmSet(experimentId);
+      if (!complete.size) return;
+      let changed = false;
+      document.querySelectorAll('#algorithm-list input[data-experiment]').forEach(input => {
+        const key = submitSelectionKey(input.dataset.experiment || '', input.dataset.algorithm || input.value || '');
+        if (complete.has(key) && input.checked) {
+          input.checked = false;
+          changed = true;
+        }
+      });
+      if (changed) renderSubmitButton();
     }
     function renderAlgorithmChoices(groups, selectedSelections = null) {
       state.algorithmGroups = Array.isArray(groups) ? groups : [];
       state.algorithms = Array.from(new Set(state.algorithmGroups.flatMap(group => group.algorithms))).sort();
       state.algorithmLoading = false;
       state.algorithmLoadingFor = '';
+      state.submitSelectionTouched = Array.isArray(selectedSelections);
       const list = document.getElementById('algorithm-list');
       list.className = 'submit-choice-list';
       list.innerHTML = '';
+      const completedDefaults = selectedSelections ? new Set() : progressCompleteAlgorithmSet();
       for (const group of state.algorithmGroups) {
         const groupSelected = selectionSetForGroup(selectedSelections, group);
         const section = document.createElement('section');
@@ -2297,26 +2340,29 @@
         header.appendChild(actions);
         section.appendChild(header);
 
-        const chips = document.createElement('div');
-        chips.className = 'chips';
+        const choices = document.createElement('div');
+        choices.className = 'submit-algorithm-list';
         for (const name of group.algorithms) {
           const label = document.createElement('label');
-          label.className = 'chip';
+          label.className = 'submit-algorithm-choice';
           const checkbox = document.createElement('input');
           checkbox.type = 'checkbox';
-          checkbox.checked = groupSelected ? groupSelected.has(name) : true;
+          checkbox.checked = groupSelected
+            ? groupSelected.has(name)
+            : !completedDefaults.has(submitSelectionKey(group.function, name));
           checkbox.value = name;
           checkbox.dataset.experiment = group.function;
           checkbox.dataset.algorithm = name;
+          checkbox.addEventListener('change', markSubmitSelectionTouched);
           const text = document.createElement('span');
-          text.className = 'chip-label';
+          text.className = 'submit-algorithm-name';
           text.textContent = name;
           text.title = name;
           label.appendChild(checkbox);
           label.appendChild(text);
-          chips.appendChild(label);
+          choices.appendChild(label);
         }
-        section.appendChild(chips);
+        section.appendChild(choices);
         list.appendChild(section);
       }
       if (!state.algorithmGroups.length) {
@@ -2333,6 +2379,7 @@
       state.algorithmLoading = false;
       state.algorithmLoadingFor = '';
       state.algorithmLoadSeq += 1;
+      state.submitSelectionTouched = false;
       document.getElementById('algorithm-list').innerHTML = '';
       renderSubmitButton();
     }
@@ -2854,6 +2901,8 @@
       const command = result?.progress || result;
       const progress = result?.progress_json || null;
       if (!state.selected) {
+        state.progressResult = null;
+        state.progressFor = '';
         stopProgressPolling();
         setProgressLoading(false);
         box.className = 'csv-empty';
@@ -2861,6 +2910,8 @@
         return;
       }
       if (!result) {
+        state.progressResult = null;
+        state.progressFor = '';
         stopProgressPolling();
         setProgressLoading(false);
         box.className = 'csv-empty';
@@ -2952,11 +3003,14 @@
         throw err;
       }
       if (state.selected !== experimentId || state.progressLoadSeq !== loadId) return;
+      state.progressResult = result;
+      state.progressFor = experimentId;
       if (result?.submit_lock?.locked) state.dashboardProgress[experimentId] = result;
       else clearDashboardProgressFor(experimentId);
       renderDashboard();
       renderSubmitLock(result.submit_lock);
       renderProgress(result);
+      applyCompletedAlgorithmDefaults(experimentId);
     }
     async function selectExperiment(id, options = {}) {
       const selectionId = ++state.selectionSeq;
@@ -2965,6 +3019,9 @@
       state.archivePaneOpen = Boolean(options.keepArchivePane);
       state.sidebarFocus = 'experiments';
       state.algorithmLoadSeq += 1;
+      state.submitSelectionTouched = false;
+      state.progressResult = null;
+      state.progressFor = '';
       state.editorDirty = false;
       clearCheckIndicator();
       clearPlotIndicator();
@@ -3037,6 +3094,9 @@
       state.selectedArchived = true;
       state.sidebarFocus = 'archive';
       state.algorithmLoadSeq += 1;
+      state.submitSelectionTouched = false;
+      state.progressResult = null;
+      state.progressFor = '';
       state.editorDirty = false;
       clearCheckIndicator();
       clearPlotIndicator();
@@ -3121,6 +3181,9 @@
       state.selectedArchived = false;
       state.selectionSeq += 1;
       state.algorithmLoadSeq += 1;
+      state.submitSelectionTouched = false;
+      state.progressResult = null;
+      state.progressFor = '';
       clearAlgorithmChoices();
       resetGuidedState();
       setView('experiment-view').catch(err => out(String(err)));
