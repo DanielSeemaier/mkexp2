@@ -603,7 +603,7 @@ GeneratePlots() {
 
   # ── Validate prerequisites ──────────────────────────────────────────────────
 
-  if [[ ! -f "$plots_dir/common.R" ]]; then
+  if [[ ! -f "$plots_dir/mkplots.R" || ! -f "$plots_dir/R/common.R" ]]; then
     EchoFatal "plots submodule not initialized at $plots_dir"
     EchoFatal "Run: git submodule update --init plots"
     return 1
