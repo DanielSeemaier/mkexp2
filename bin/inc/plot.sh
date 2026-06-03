@@ -167,7 +167,10 @@ PrintPlotCatalog() {
     args+=(--json)
   fi
 
-  Rscript "$mkexp_script" "${args[@]}"
+  (
+    unset R_HOME
+    Rscript "$mkexp_script" "${args[@]}"
+  )
 }
 
 _BuildPlotRArgs() {

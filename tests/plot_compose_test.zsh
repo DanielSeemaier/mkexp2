@@ -49,7 +49,7 @@ test_plot_catalog_json() {
   local tmp=""
   tmp=$(mktemp)
 
-  "$MKEXP2" plot --list --json > "$tmp"
+  R_HOME=/mkexp2/test/invalid-r-home "$MKEXP2" plot --list --json > "$tmp"
 
   assert_eq "$(json_value "$tmp" '.plots | length')" "6" "plot catalog lists initial plot types"
   assert_eq "$(json_value "$tmp" '.plots[] | select(.id == "speedup") | .min_sources')" "1" "speedup plot has minimum source count"
