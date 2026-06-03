@@ -754,6 +754,13 @@
       background: var(--surface);
       min-height: 56px;
     }
+    .panel-header-actions {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      min-width: 0;
+    }
     .experiment-editor-header {
       align-items: flex-start;
       flex-wrap: nowrap;
@@ -2605,6 +2612,7 @@
     }
     .plot-generate-footer {
       align-items: center;
+      justify-content: flex-end;
     }
     .modal-footer-actions {
       display: inline-flex;
@@ -2754,6 +2762,10 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+    }
+    .plot-source-add-button {
+      width: 100%;
+      justify-self: stretch;
     }
     .plot-source-alias {
       height: 30px;

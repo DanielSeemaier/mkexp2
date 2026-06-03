@@ -139,8 +139,8 @@
         meta.className = 'plot-source-meta';
         const sourceFile = source.file || `${source.name}.csv`;
         meta.textContent = source.kind === 'algorithm'
-          ? `${sourceFile}, ${formatBytes(source.size)}`
-          : `${source.experiment_id}/${source.file}, ${formatBytes(source.size)}`;
+          ? sourceFile
+          : `${source.experiment_id}/${source.file}`;
         body.appendChild(title);
         body.appendChild(meta);
         if (source.kind === 'csv') {
@@ -586,7 +586,10 @@
         button.className = 'small-button';
         button.textContent = csvLabel(file.file);
         button.title = `${experiment.id}/${file.file}`;
-        button.onclick = () => addExternalPlotSource(experiment, file);
+        button.onclick = () => {
+          addExternalPlotSource(experiment, file);
+          closePlotSourceDialog();
+        };
         files.appendChild(button);
       }
       section.appendChild(files);

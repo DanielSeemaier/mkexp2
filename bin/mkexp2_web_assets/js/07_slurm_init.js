@@ -186,7 +186,6 @@
     document.getElementById('parse-results').onclick = parseExperiment;
     document.getElementById('plot-add-open').onclick = () => withBusyButton('plot-add-open', 'Loading...', openPlotGenerateDialog).catch(err => out(String(err)));
     document.getElementById('plot-generate-close').onclick = closePlotGenerateDialog;
-    document.getElementById('plot-generate-cancel').onclick = closePlotGenerateDialog;
     document.getElementById('plot-results').onclick = () => plotExperiment().catch(err => out(String(err)));
     document.getElementById('add-plot-source').onclick = () => withBusyButton('add-plot-source', 'Loading...', openPlotSourceDialog).catch(err => out(String(err)));
     document.getElementById('plot-source-close').onclick = closePlotSourceDialog;

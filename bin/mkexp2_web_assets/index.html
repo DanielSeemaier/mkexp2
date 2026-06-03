@@ -477,8 +477,7 @@ __MKEXP2_STYLES__
       <div class="modal plot-generate-modal">
         <div class="modal-header">
           <div>
-            <div id="plot-generate-modal-title" class="modal-title">Add Plot Artifacts</div>
-            <div class="csv-summary">Choose plot types, data sources, and an artifact label.</div>
+            <div id="plot-generate-modal-title" class="modal-title">Create Plot Artifacts</div>
           </div>
           <button id="plot-generate-close" class="icon-button" aria-label="Close plot generation dialog" title="Close">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -491,11 +490,9 @@ __MKEXP2_STYLES__
               <div id="plot-catalog" class="csv-empty">Loading plot types...</div>
             </section>
             <section class="plot-box">
-              <div class="plot-source-actions">
-                <div class="plot-box-title">Sources</div>
-                <button id="add-plot-source" class="small-button">Add CSV</button>
-              </div>
+              <div class="plot-box-title">Sources</div>
               <div id="plot-sources" class="csv-empty">Loading sources...</div>
+              <button id="add-plot-source" class="small-button plot-source-add-button">Add CSV</button>
             </section>
           </div>
           <label>
@@ -504,12 +501,11 @@ __MKEXP2_STYLES__
           </label>
         </div>
         <div class="modal-footer plot-generate-footer">
-          <label class="plot-option" id="plot-no-docker-label" title="Use host R instead of Docker">
-            <input id="plot-no-docker" type="checkbox">
-            <span>No docker</span>
-          </label>
           <div class="modal-footer-actions">
-            <button id="plot-generate-cancel">Cancel</button>
+            <label class="plot-option" id="plot-no-docker-label" title="Use host R instead of Docker">
+              <input id="plot-no-docker" type="checkbox">
+              <span>No docker</span>
+            </label>
             <button id="plot-results" class="primary">Generate</button>
           </div>
         </div>
@@ -747,10 +743,10 @@ __MKEXP2_STYLES__
               <div class="panel-title">Reference</div>
             </div>
             <div class="panel-header-actions">
+              <button id="describe-toggle">Load Reference</button>
               <button id="describe-refresh" class="icon-button" aria-label="Refresh Reference" title="Refresh Reference">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
               </button>
-              <button id="describe-toggle">Load Reference</button>
             </div>
           </div>
           <div id="describe-body" class="panel-body hidden">
@@ -775,10 +771,10 @@ __MKEXP2_STYLES__
               <div class="panel-title">Probe</div>
             </div>
             <div class="panel-header-actions">
+              <button id="probe-toggle">Load Probe</button>
               <button id="probe-refresh" class="icon-button" aria-label="Refresh Probe" title="Refresh Probe">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M16 8h5V3"/></svg>
               </button>
-              <button id="probe-toggle">Load Probe</button>
             </div>
           </div>
           <div id="probe-body" class="panel-body hidden">

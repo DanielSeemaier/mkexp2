@@ -184,6 +184,10 @@ There is no linting configuration or CI setup.
 
 - **Web Job Details modal.** Keep the modal focused on useful running-job state: hide pending-only Slurm job rows from the compact job list, render node probe sections without an outer card border, use German-style `DD.MM.YYYY HH:mm` datetimes, and rely on the header X for closing instead of adding a duplicate footer Close button.
 
+- **Web plot artifact modal.** The plot artifact modal title is `Create Plot Artifacts` with no explanatory subtitle. Keep `Add CSV` as a narrow full-column button below the Sources list; selecting a CSV in the picker should add it and close the picker immediately. Source subtitles should show file identity/path, not file sizes. The footer has no Cancel button; place `No docker` on the right immediately before `Generate`.
+
+- **Web Reference/Probe controls.** Collapsed Reference and Probe actions are labeled `Load Reference` and `Load Probe`. Each panel also has an icon-only refresh button aligned with, and placed to the right of, its Load button.
+
 ## Instructions for Codex
 
 - **Always update `AGENTS.md`** after completing any non-trivial task — add new commands, modules, conventions, or environmental notes so the file stays accurate.
