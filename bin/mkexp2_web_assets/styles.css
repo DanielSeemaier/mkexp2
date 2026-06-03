@@ -2707,6 +2707,10 @@
     .plot-source-row {
       grid-template-columns: auto minmax(0, 1fr) auto;
     }
+    .plot-source-row.compact {
+      align-items: center;
+      padding: 6px 8px;
+    }
     .plot-source-row.external {
       border-color: #bfdbfe;
       background: var(--surface);

@@ -117,6 +117,7 @@
         row.className = [
           'plot-source-row',
           state.selectedPlotSources.has(key) ? 'selected' : '',
+          source.kind === 'algorithm' ? 'compact' : '',
           source.kind === 'csv' ? 'external' : ''
         ].filter(Boolean).join(' ');
         const checkLabel = document.createElement('label');
@@ -135,15 +136,12 @@
         const title = document.createElement('div');
         title.className = 'plot-source-title';
         title.textContent = source.alias || source.name || source.file;
-        const meta = document.createElement('div');
-        meta.className = 'plot-source-meta';
-        const sourceFile = source.file || `${source.name}.csv`;
-        meta.textContent = source.kind === 'algorithm'
-          ? sourceFile
-          : `${source.experiment_id}/${source.file}`;
         body.appendChild(title);
-        body.appendChild(meta);
         if (source.kind === 'csv') {
+          const meta = document.createElement('div');
+          meta.className = 'plot-source-meta';
+          meta.textContent = `${source.experiment_id}/${source.file}`;
+          body.appendChild(meta);
           const alias = document.createElement('input');
           alias.className = 'plot-source-alias';
           alias.value = source.alias || '';

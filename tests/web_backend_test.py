@@ -947,6 +947,8 @@ class WebBackendTest(unittest.TestCase):
         self.assertIn("plotSourceOpenDirs", mkexp2_web.HTML)
         self.assertIn("closePlotSourceDialog();", mkexp2_web.HTML)
         self.assertNotIn("`${sourceFile}, ${formatBytes(source.size)}`", mkexp2_web.HTML)
+        self.assertIn("source.kind === 'algorithm' ? 'compact' : ''", mkexp2_web.HTML)
+        self.assertNotIn("const sourceFile = source.file || `${source.name}.csv`", mkexp2_web.HTML)
         self.assertIn("renderPlotSourceTree", mkexp2_web.HTML)
         self.assertIn("selectedPlotSourceObjects", mkexp2_web.HTML)
         self.assertIn("removeExternalPlotSource", mkexp2_web.HTML)
