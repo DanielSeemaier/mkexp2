@@ -182,6 +182,8 @@ There is no linting configuration or CI setup.
 
 - **Web sidebar pinned order.** In the main sidebar, render pinned experiment rows above the `Experiments` heading, followed immediately by the normal experiment tree. Do not put a divider line between the pinned block and the Experiments heading.
 
+- **Web Job Details modal.** Keep the modal focused on useful running-job state: hide pending-only Slurm job rows from the compact job list, render node probe sections without an outer card border, use German-style `DD.MM.YYYY HH:mm` datetimes, and rely on the header X for closing instead of adding a duplicate footer Close button.
+
 ## Instructions for Codex
 
 - **Always update `AGENTS.md`** after completing any non-trivial task — add new commands, modules, conventions, or environmental notes so the file stays accurate.

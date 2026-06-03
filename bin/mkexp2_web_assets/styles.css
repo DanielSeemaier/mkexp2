@@ -3077,6 +3077,7 @@
     .modal-footer {
       border-top: 1px solid var(--border);
       border-bottom: 0;
+      justify-content: flex-end;
     }
     .modal-title {
       font-weight: 750;
@@ -3131,10 +3132,9 @@
     .job-node-card {
       display: grid;
       gap: 10px;
-      padding: 12px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--panel);
+      padding: 0;
+      border: 0;
+      background: transparent;
     }
     .job-node-header {
       display: flex;

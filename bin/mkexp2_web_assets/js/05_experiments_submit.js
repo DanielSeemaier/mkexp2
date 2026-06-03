@@ -79,13 +79,21 @@
       }
       return 0;
     }
+    function padDatePart(value) {
+      return String(value).padStart(2, '0');
+    }
+    function formatGermanDateTimeValue(value) {
+      if (!value) return '';
+      const timestamp = typeof value === 'number' ? value : Date.parse(String(value));
+      if (!Number.isFinite(timestamp)) return String(value);
+      const date = new Date(timestamp);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return `${padDatePart(date.getDate())}.${padDatePart(date.getMonth() + 1)}.${date.getFullYear()} ${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}`;
+    }
     function formatExperimentDate(exp) {
       const timestamp = experimentCreationKey(exp);
       if (!timestamp) return '';
-      const date = new Date(timestamp);
-      if (Number.isNaN(date.getTime())) return '';
-      const pad = value => String(value).padStart(2, '0');
-      return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+      return formatGermanDateTimeValue(timestamp);
     }
     function selectedDateText(exp) {
       return formatExperimentDate(exp || {});
@@ -1855,7 +1863,7 @@
       const body = document.getElementById('describe-body');
       const button = document.getElementById('describe-toggle');
       body.classList.toggle('hidden', !state.describeOpen);
-      button.textContent = state.describeOpen ? 'Hide Reference' : 'Show Reference';
+      button.textContent = state.describeOpen ? 'Hide Reference' : 'Load Reference';
       renderDescribeFilters();
       const box = document.getElementById('describe-output');
       if (!state.describeOpen || !state.describeLoaded || !state.describeCatalog) return;
@@ -1907,18 +1915,25 @@
         renderDescribeCatalog();
       }
     }
+    async function refreshDescribePanel() {
+      state.describeOpen = true;
+      state.describeLoaded = false;
+      renderDescribeCatalog();
+      await withBusyButton('describe-refresh', '', loadDescribeCatalog);
+      renderDescribeCatalog();
+    }
     function resetProbePanel() {
       state.probeOpen = false;
       state.probeLoaded = false;
       state.probeFor = null;
-      document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Show Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
+      document.getElementById('probe-output').innerHTML = '<div class="probe-placeholder">Load Probe to inspect enabled algorithms, branch settings, CLI arguments, and resolved properties.</div>';
       renderProbePanel();
     }
     function renderProbePanel() {
       const body = document.getElementById('probe-body');
       const button = document.getElementById('probe-toggle');
       if (body) body.classList.toggle('hidden', !state.probeOpen);
-      if (button) button.textContent = state.probeOpen ? 'Hide Probe' : 'Show Probe';
+      if (button) button.textContent = state.probeOpen ? 'Hide Probe' : 'Load Probe';
     }
     async function toggleProbePanel() {
       state.probeOpen = !state.probeOpen;
@@ -1927,6 +1942,15 @@
         await withBusyButton('probe-toggle', 'Loading...', probeExperiment);
         renderProbePanel();
       }
+    }
+    async function refreshProbePanel() {
+      if (!state.selected || state.selectedArchived) return;
+      state.probeOpen = true;
+      state.probeLoaded = false;
+      state.probeFor = null;
+      renderProbePanel();
+      await withBusyButton('probe-refresh', '', probeExperiment);
+      renderProbePanel();
     }
     async function openCreateDialog() {
       document.getElementById('create-modal').classList.remove('hidden');
@@ -2088,9 +2112,9 @@
       const fields = lock.fields || {};
       const jobIds = (data.slurm_job_ids || []).join(', ');
       const systems = (data.systems || []).join(', ') || fields.system || 'local';
-      summary.textContent = `${state.selected || 'Experiment'} is running; refreshed ${data.generated_at || 'now'}.`;
+      summary.textContent = `${state.selected || 'Experiment'} is running; refreshed ${formatGermanDateTimeValue(data.generated_at) || 'now'}.`;
       lockBox.innerHTML = [
-        jobFact('Started', fields.started_at || lock.modified_at || ''),
+        jobFact('Started', formatGermanDateTimeValue(fields.started_at || lock.modified_at || '')),
         jobFact('System', systems),
         jobFact('Algorithms', fields.algorithms || 'all'),
         jobFact('Slurm Jobs', jobIds || 'n/a'),
@@ -2103,7 +2127,11 @@
         nodesBox.textContent = `No assigned node is available yet.${missing}`;
         return;
       }
-      const jobs = (data.jobs || []).slice(0, 6).map(job => (
+      const activeJobs = (data.jobs || []).filter(job => {
+        const stateText = String(job.state || '').toUpperCase();
+        return stateText !== 'PENDING' && stateText !== 'PD';
+      });
+      const jobs = activeJobs.slice(0, 6).map(job => (
         `<div>${esc(job.job_id)} ${esc(job.state || '')} ${esc(job.nodes || '')} ${esc(job.elapsed || '')}</div>`
       )).join('');
       const truncated = data.nodes_truncated ? `<div>Showing ${data.node_limit} of ${(data.nodes || []).length} nodes.</div>` : '';

@@ -150,6 +150,7 @@
     document.getElementById('editor-mode-guided').onclick = () => withBusyButton('editor-mode-guided', 'Loading...', () => switchEditorMode('guided')).catch(err => out(String(err)));
     document.getElementById('check').onclick = checkExperiment;
     document.getElementById('describe-toggle').onclick = () => toggleDescribePanel().catch(err => out(String(err)));
+    document.getElementById('describe-refresh').onclick = () => refreshDescribePanel().catch(err => out(String(err)));
     document.getElementById('describe-search').oninput = event => {
       state.describeQuery = event.target.value || '';
       renderDescribeCatalog();
@@ -161,6 +162,7 @@
       };
     });
     document.getElementById('probe-toggle').onclick = () => toggleProbePanel().catch(err => out(String(err)));
+    document.getElementById('probe-refresh').onclick = () => refreshProbePanel().catch(err => out(String(err)));
     document.getElementById('description-edit').onclick = editDescription;
     document.getElementById('description-cancel').onclick = cancelDescriptionEdit;
     document.getElementById('description-save').onclick = saveDescription;
@@ -173,7 +175,6 @@
       loadJobDetails().catch(err => alert(String(err))).finally(restore);
     };
     document.getElementById('job-details-close').onclick = closeJobDetailsDialog;
-    document.getElementById('job-details-close-footer').onclick = closeJobDetailsDialog;
     document.getElementById('job-details-cancel').onclick = () => cancelSubmittedExperiment().catch(err => alert(String(err)));
     document.getElementById('unarchive-nav').onclick = () => unarchiveSelectedExperiment().catch(err => alert(String(err)));
     document.getElementById('clear-submit-lock').onclick = clearSubmitLock;
