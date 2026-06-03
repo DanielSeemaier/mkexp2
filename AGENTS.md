@@ -180,6 +180,8 @@ There is no linting configuration or CI setup.
 
 - **Web dashboard navigation.** The dashboard is repo/workspace-level navigation and belongs in the sidebar, beside Archive, not in the experiment-scoped top tab bar. Dashboard, active experiment rows, and Archive share one sidebar focus state so only one navigation target appears active. Hide the experiment tab/action strip while the dashboard is active, and keep the dashboard header to an unlabeled, button-sized workspace selector rather than adding duplicate top-right action buttons. Keep dashboard progress lightweight by loading progress only for all submit-locked experiments and rendering it inline on those rows; do not reintroduce a selected-experiment-only dashboard progress card, a Pinned summary counter, or a separate Running Now panel. The dashboard should also render a compact Slurm queue from the existing `/api/status/squeue` path without a separate queue-summary subcaption.
 
+- **Web sidebar pinned order.** In the main sidebar, render pinned experiment rows above the `Experiments` heading, followed immediately by the normal experiment tree. Do not put a divider line between the pinned block and the Experiments heading.
+
 ## Instructions for Codex
 
 - **Always update `AGENTS.md`** after completing any non-trivial task — add new commands, modules, conventions, or environmental notes so the file stays accurate.

@@ -1359,6 +1359,10 @@
       const list = document.getElementById('experiments');
       list.innerHTML = '';
       renderPinnedExperiments(list);
+      const title = document.createElement('div');
+      title.className = 'sidebar-section-title experiment-list-title';
+      title.textContent = 'Experiments';
+      list.appendChild(title);
       const unpinned = state.experiments.filter(exp => !state.pinnedExperiments.has(exp.id));
       renderExperimentTree(list, experimentTree(unpinned));
       renderArchivePaneState();

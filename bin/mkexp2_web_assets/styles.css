@@ -403,9 +403,7 @@
     .pinned-experiments {
       display: grid;
       gap: 6px;
-      margin-bottom: 10px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid var(--border);
+      margin-bottom: 6px;
     }
     .pinned-title {
       color: var(--muted);
@@ -413,6 +411,9 @@
       font-weight: 750;
       letter-spacing: 0;
       text-transform: uppercase;
+    }
+    .experiment-list-title {
+      margin-top: 2px;
     }
     .archive-list {
       display: grid;
