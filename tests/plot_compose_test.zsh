@@ -51,9 +51,11 @@ test_plot_catalog_json() {
 
   R_HOME=/mkexp2/test/invalid-r-home "$MKEXP2" plot --list --json > "$tmp"
 
-  assert_eq "$(json_value "$tmp" '.plots | length')" "6" "plot catalog lists initial plot types"
+  assert_eq "$(json_value "$tmp" '.plots | length')" "7" "plot catalog lists managed plot types"
   assert_eq "$(json_value "$tmp" '.plots[] | select(.id == "speedup") | .min_sources')" "1" "speedup plot has minimum source count"
   assert_eq "$(json_value "$tmp" '.plots[] | select(.id == "speedup") | .max_sources')" "1" "speedup plot has maximum source count"
+  assert_eq "$(json_value "$tmp" '.plots[] | select(.id == "imbalance") | .min_sources')" "1" "imbalance plot has minimum source count"
+  assert_eq "$(json_value "$tmp" '.plots[] | select(.id == "imbalance") | .default_selected')" "false" "imbalance plot is opt-in by default"
   assert_eq "$(json_value "$tmp" '.plots[] | select(.id == "relative-cut-graph-grid") | .expensive')" "true" "graph-grid plot is marked expensive"
 
   pass "plot catalog JSON"

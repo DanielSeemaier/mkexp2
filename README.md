@@ -405,6 +405,7 @@ and accepts one or more data sources:
 ```bash
 mkexp2 plot --plot running-time-box --output plots/box.pdf KaMinPar-FM KaMinPar-LP
 mkexp2 plot --plot speedup --output plots/speedup.pdf KaMinPar-FM
+mkexp2 plot --plot imbalance --output plots/imbalance.pdf KaMinPar-FM KaMinPar-LP
 mkexp2 plot --plot performance-profile --output plots/profile.pdf \
   Current=results/KaMinPar-FM.csv Other=/path/to/other/results/KaMinPar-FM.csv
 ```
@@ -412,9 +413,11 @@ mkexp2 plot --plot performance-profile --output plots/profile.pdf \
 Source tokens can be an algorithm name, an absolute or experiment-relative CSV
 path, or `Alias=/path/to/file.csv`. External CSVs are staged into
 `.mkexp2/plot-inputs/<run-id>/` before plotting so Docker and native R consume
-the same resolved inputs. The managed speedup plot takes exactly one source, uses
-the smallest available `Cores` value as the baseline, and plots geometric mean
-speedup curves for larger core counts over baseline running-time thresholds.
+the same resolved inputs. The managed imbalance plot shows rows whose observed
+imbalance exceeds the requested epsilon. The managed speedup plot takes exactly
+one source, uses the smallest available `Cores` value as the baseline, and plots
+geometric mean speedup curves for larger core counts over baseline running-time
+thresholds.
 
 The web UI exposes managed artifacts first in the Plots tab. Use the Plots tab's
 Add button to open the generation dialog, choose plot types, sources, label, and
