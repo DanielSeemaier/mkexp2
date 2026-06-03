@@ -149,91 +149,25 @@ typeset -a PLOT_SOURCE_ARGS_NATIVE=()
 typeset -a PLOT_SOURCE_ARGS_DOCKER=()
 typeset -gi _PLOT_SPACK_PACKAGES_LOADED=0
 
-_PrintPlotCatalogJsonEntry() {
-  local id="$1"
-  local name="$2"
-  local description="$3"
-  local min_sources="$4"
-  local max_sources="$5"
-  local default_selected="$6"
-  local expensive="$7"
-  shift 7
-  local -a legacy_flags=("$@")
-  local sep=""
-  local flag=""
-
-  printf '{'
-  printf '"id":%s,' "$(JsonString "$id")"
-  printf '"name":%s,' "$(JsonString "$name")"
-  printf '"description":%s,' "$(JsonString "$description")"
-  printf '"min_sources":%s,' "$min_sources"
-  if [[ "$max_sources" == "null" ]]; then
-    printf '"max_sources":null,'
-  else
-    printf '"max_sources":%s,' "$max_sources"
-  fi
-  printf '"default_selected":%s,' "$default_selected"
-  printf '"expensive":%s,' "$expensive"
-  printf '"legacy_flags":['
-  for flag in "${legacy_flags[@]}"; do
-    printf '%s%s' "$sep" "$(JsonString "$flag")"
-    sep=","
-  done
-  printf ']}'
-}
-
 PrintPlotCatalog() {
   local json="${1:-0}"
+  local plots_dir="$MKEXP2_HOME/plots"
+  local mkexp_script="$plots_dir/mkexp.R"
+  local -a args=(plot --list)
+
+  if [[ ! -f "$mkexp_script" ]]; then
+    EchoFatal "plots catalog entrypoint not found: $mkexp_script"
+    return 1
+  fi
+  if ! command -v Rscript >/dev/null 2>&1; then
+    EchoFatal "Rscript not found; mkexp2 plot --list requires the plots R entrypoint"
+    return 1
+  fi
   if (( json )); then
-    printf '{"plots":['
-    _PrintPlotCatalogJsonEntry \
-      "performance-profile" \
-      "Performance Profile" \
-      "Compares algorithms by the fraction of instances solved within a cut or running-time ratio." \
-      2 null true false "--performance-profile"
-    printf ','
-    _PrintPlotCatalogJsonEntry \
-      "running-time-box" \
-      "Running Time Box Plot" \
-      "Shows running-time distributions for the selected algorithms." \
-      1 null true false "--running-time"
-    printf ','
-    _PrintPlotCatalogJsonEntry \
-      "running-time-by-core" \
-      "Running Time by Core" \
-      "Shows running-time distributions grouped by available core counts." \
-      1 null true false "--running-time"
-    printf ','
-    _PrintPlotCatalogJsonEntry \
-      "relative-cut-graph-grid" \
-      "Relative Cut Graph Grid" \
-      "Shows relative cut per graph and core count against the first selected source." \
-      2 null false true "--running-time"
-    printf ','
-    _PrintPlotCatalogJsonEntry \
-      "relative-time-graph-grid" \
-      "Relative Running Time Graph Grid" \
-      "Shows relative running time per graph and core count against the first selected source." \
-      2 null false true "--running-time"
-    printf ','
-    _PrintPlotCatalogJsonEntry \
-      "speedup" \
-      "Speedup" \
-      "For one algorithm, uses the smallest available core count as baseline and plots geometric-mean speedup curves for larger core counts." \
-      1 1 false false "--plot" "speedup"
-    printf ']}\n'
-    return 0
+    args+=(--json)
   fi
 
-  cat <<'EOF'
-Supported plot types:
-  performance-profile        Performance Profile
-  running-time-box           Running Time Box Plot
-  running-time-by-core       Running Time by Core
-  relative-cut-graph-grid    Relative Cut Graph Grid
-  relative-time-graph-grid   Relative Running Time Graph Grid
-  speedup                    Speedup
-EOF
+  Rscript "$mkexp_script" "${args[@]}"
 }
 
 _BuildPlotRArgs() {
@@ -671,17 +605,6 @@ GeneratePlots() {
     do_speedup=1
     do_rt=1
   fi
-
-  local plot_type=""
-  for plot_type in "${MKEXP2_PLOT_TYPES[@]}"; do
-    case "$plot_type" in
-      performance-profile|running-time-box|running-time-by-core|relative-cut-graph-grid|relative-time-graph-grid|speedup) ;;
-      *)
-        EchoFatal "unknown plot type '$plot_type' (run mkexp2 plot --list --json)"
-        return 1
-        ;;
-    esac
-  done
 
   _PreparePlotSources "$experiment_dir" "${active_algos[@]}" || return 1
 
