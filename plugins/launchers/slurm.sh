@@ -18,10 +18,15 @@ LauncherWrapCommand_slurm() {
   local mpis="$3"
   local threads="$4"
   local _distributed="$5"
-  local _use_openmp_env="$6"
+  local use_openmp_env="$6"
 
   local call_wrapper=""
-  call_wrapper=$(ResolveRunProperty "slurm.call_wrapper" "srun")
+  if [[ -n "$LAUNCHER_SLURM_CALL_WRAPPER_CACHE" ]]; then
+    call_wrapper="$LAUNCHER_SLURM_CALL_WRAPPER_CACHE"
+  else
+    call_wrapper=$(ResolveRunProperty "slurm.call_wrapper" "srun")
+    LAUNCHER_SLURM_CALL_WRAPPER_CACHE="$call_wrapper"
+  fi
 
   case "$call_wrapper" in
     srun)

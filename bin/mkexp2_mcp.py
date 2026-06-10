@@ -34,6 +34,8 @@ Experiment file basics:
 - Inside an `Experiment...()` function, use directives such as `Algorithms`,
   `Graphs`, `Ks`, `Seeds`, `Epsilons`, `Threads`, and `Property`.
 - `DefineAlgorithm Child Base [extra CLI args...]` creates a named variant.
+  Extra CLI args may use per-run placeholders such as `{{graph}}`, `{{graph_name}}`,
+  `{{k}}`, `{{seed}}`, `{{epsilon}}`, `{{threads}}`, and `{{topology}}`.
 - `AlgorithmProperty Child repo_ref origin/my-branch` selects a Git branch/ref.
 - Algorithm names submitted through `mkexp2_submit_experiment` must exactly match
   resolved names reported by `mkexp2_probe_experiment`. For multi-function

@@ -38,6 +38,42 @@ EOF
   pass "local generation parity"
 }
 
+test_define_algorithm_cli_arg_placeholders() {
+  local tmp=""
+  tmp=$(mktemp -d)
+  mkdir -p "$tmp/graphs"
+  : > "$tmp/graphs/alpha.metis"
+  cat > "$tmp/Experiment" <<'EOF'
+System local
+Property local.call_wrapper none
+DefineAlgorithm HarnessPlaceholders TestHarness --seen-algorithm={{algorithm}} --seen-base={{base}} --seen-graph={{graph}} --seen-name={{graph_name}} --seen-k={{k}} --seen-seed={{seed}} --seen-eps={{epsilon}} --seen-topology={{topology}} --seen-nodes={{nodes}} --seen-mpis={{mpis}} --seen-threads={{threads}} --seen-cores={{cores}} --seen-instance={{instance_id}}
+
+ExperimentPlaceholders() {
+  Algorithms HarnessPlaceholders
+  Graph graphs/alpha
+  Ks 8
+  Seeds 13
+  Epsilons 0.05
+  Threads 1x1x4
+}
+EOF
+
+  (
+    cd "$tmp"
+    "$MKEXP2" probe Placeholders --algorithms > algorithms.json
+    assert_eq "$(json_value algorithms.json '.resolved.algorithms[0].args')" "--seen-algorithm={{algorithm}} --seen-base={{base}} --seen-graph={{graph}} --seen-name={{graph_name}} --seen-k={{k}} --seen-seed={{seed}} --seen-eps={{epsilon}} --seen-topology={{topology}} --seen-nodes={{nodes}} --seen-mpis={{mpis}} --seen-threads={{threads}} --seen-cores={{cores}} --seen-instance={{instance_id}}" "resolved algorithm metadata keeps placeholder templates"
+
+    "$MKEXP2" probe Placeholders --calls > calls.json
+    local expected_args="--seen-algorithm=HarnessPlaceholders --seen-base=TestHarness --seen-graph=graphs/alpha --seen-name=alpha --seen-k=8 --seen-seed=13 --seen-eps=0.05 --seen-topology=1x1x4 --seen-nodes=1 --seen-mpis=1 --seen-threads=4 --seen-cores=4 --seen-instance=alpha___k8_seed13_eps0.05_P1x1x4"
+    assert_contains "$(json_value calls.json '.calls[0].final_command')" "$expected_args" "probe call command resolves DefineAlgorithm placeholders"
+
+    "$MKEXP2" generate >/dev/null
+    assert_file_contains jobs/ExperimentPlaceholders__1x1x4.cmds "$expected_args" "generated command resolves DefineAlgorithm placeholders"
+  )
+
+  pass "DefineAlgorithm CLI arg placeholders"
+}
+
 test_probe_slurm_generation_parity() {
   local tmp=""
   tmp=$(mktemp -d)

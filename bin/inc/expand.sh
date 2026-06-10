@@ -198,24 +198,30 @@ ExpandCurrentExperiment() {
           local k=""
           for k in "${_ks[@]}"; do
             for graph in "${_graphs[@]}"; do
+              local instance_id=""
+              local log_file=""
+              instance_id=$(BuildInstanceId "$graph" "$k" "$seed" "$epsilon" "$topology")
+              log_file="$log_dir/${instance_id}.log"
+
               RUN_algorithm="$algorithm"
               RUN_base="${ctx_base["$algorithm"]}"
               RUN_binary_path="${ctx_binary_path["$algorithm"]}"
-              RUN_args="${ctx_args["$algorithm"]}"
               RUN_graph="$graph"
               RUN_k="$k"
               RUN_epsilon="$epsilon"
               RUN_seed="$seed"
+              RUN_topology="$topology"
               RUN_nodes="$nodes"
               RUN_mpis="$mpis"
               RUN_threads="$threads"
+              RUN_instance_id="$instance_id"
+              RUN_log_file="$log_file"
+              ResolveRunArgPlaceholders "${ctx_args["$algorithm"]}"
 
               local raw_cmd=""
               local wrapped_cmd=""
               local final_cmd=""
               local call_id="$(( ${#EXPAND_CALL_IDS[@]} + 1 ))"
-              local instance_id=""
-              local log_file=""
               local previous_probe_mode="$MKEXP2_PROBE_MODE"
 
               PARTITIONER_INVOKE_CMD=""
@@ -253,9 +259,6 @@ ExpandCurrentExperiment() {
                 final_cmd="${EXPAND_TIMEOUT_PREFIX}${final_cmd}"
               fi
 
-              instance_id=$(BuildInstanceId "$graph" "$k" "$seed" "$epsilon" "$topology")
-              log_file="$log_dir/${instance_id}.log"
-
               EXPAND_CALL_IDS+=("$call_id")
               EXPAND_CALL["$call_id::job_key"]="$job_key"
               EXPAND_CALL["$call_id::experiment_name"]="$experiment_name"
@@ -264,7 +267,7 @@ ExpandCurrentExperiment() {
               EXPAND_CALL["$call_id::algorithm"]="$algorithm"
               EXPAND_CALL["$call_id::base"]="${ctx_base["$algorithm"]}"
               EXPAND_CALL["$call_id::binary_path"]="${ctx_binary_path["$algorithm"]}"
-              EXPAND_CALL["$call_id::args"]="${ctx_args["$algorithm"]}"
+              EXPAND_CALL["$call_id::args"]="$RUN_args"
               EXPAND_CALL["$call_id::graph"]="$graph"
               EXPAND_CALL["$call_id::graph_name"]="${graph:t}"
               EXPAND_CALL["$call_id::k"]="$k"

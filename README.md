@@ -208,6 +208,9 @@ AlgorithmProperty KaMinPar-Dev repo_ref origin/my/branch
 DefineAlgorithm KaMinPar-Dbg KaMinPar
 AlgorithmProperty KaMinPar-Dbg build_opts -DCMAKE_BUILD_TYPE=Debug
 DefineAlgorithm KaMinPar-FM KaMinPar -P fm
+# Extra CLI args can use per-run placeholders such as {{graph}}, {{graph_name}},
+# {{k}}, {{seed}}, {{epsilon}}, {{threads}}, and {{topology}}.
+DefineAlgorithm KaMinPar-Named KaMinPar --run-id '{{graph_name}}-k{{k}}-s{{seed}}'
 
 ExperimentBaseline() {
   Algorithms KaMinPar-Dev dKaMinPar

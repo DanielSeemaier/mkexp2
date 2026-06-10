@@ -1085,23 +1085,27 @@ GenerateCurrentExperiment() {
           local k=""
           for k in "${_ks[@]}"; do
             for graph in "${_graphs[@]}"; do
+              local graph_name="${graph:t}"
+              local instance_id="${graph_name}___k${k}_seed${seed}_eps${epsilon}_P${topology}"
+              local log_file="$log_dir/${instance_id}.log"
+
               RUN_algorithm="$algorithm"
               RUN_base="${ctx_base["$algorithm"]}"
               RUN_binary_path="${ctx_binary_path["$algorithm"]}"
-              RUN_args="${ctx_args["$algorithm"]}"
               RUN_graph="$graph"
               RUN_k="$k"
               RUN_epsilon="$epsilon"
               RUN_seed="$seed"
+              RUN_topology="$topology"
               RUN_nodes="$nodes"
               RUN_mpis="$mpis"
               RUN_threads="$threads"
+              RUN_instance_id="$instance_id"
+              RUN_log_file="$log_file"
+              ResolveRunArgPlaceholders "${ctx_args["$algorithm"]}"
 
               local raw_cmd=""
               local wrapped_cmd=""
-              local graph_name="${graph:t}"
-              local instance_id="${graph_name}___k${k}_seed${seed}_eps${epsilon}_P${topology}"
-              local log_file="$log_dir/${instance_id}.log"
 
               PARTITIONER_INVOKE_CMD=""
               MKEXP2_ACTIVE_ALGORITHM="$RUN_algorithm"

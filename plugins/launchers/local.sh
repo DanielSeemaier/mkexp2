@@ -23,7 +23,12 @@ LauncherWrapCommand_local() {
   fi
 
   local call_wrapper=""
-  call_wrapper=$(ResolveRunProperty "local.call_wrapper" "taskset")
+  if [[ -n "$LAUNCHER_LOCAL_CALL_WRAPPER_CACHE" ]]; then
+    call_wrapper="$LAUNCHER_LOCAL_CALL_WRAPPER_CACHE"
+  else
+    call_wrapper=$(ResolveRunProperty "local.call_wrapper" "taskset")
+    LAUNCHER_LOCAL_CALL_WRAPPER_CACHE="$call_wrapper"
+  fi
   case "$call_wrapper" in
     taskset)
       local nproc=$((mpis * threads))

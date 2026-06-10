@@ -483,6 +483,70 @@ ShellQuote() {
   printf '%q' "$1"
 }
 
+ResolveRunArgPlaceholders() {
+  local args="$1"
+  RUN_args="$args"
+  if [[ -z "$args" || "$args" != *'{{'* ]]; then
+    return
+  fi
+
+  local nodes="${RUN_nodes:-1}"
+  local mpis="${RUN_mpis:-1}"
+  local threads="${RUN_threads:-1}"
+  if [[ "$nodes" != <-> ]]; then
+    nodes=1
+  fi
+  if [[ "$mpis" != <-> ]]; then
+    mpis=1
+  fi
+  if [[ "$threads" != <-> ]]; then
+    threads=1
+  fi
+
+  local topology="${RUN_topology:-${nodes}x${mpis}x${threads}}"
+  local total_cores=$(( nodes * mpis * threads ))
+  local graph_name="${RUN_graph:t}"
+  local quoted=""
+  quoted="${(q)RUN_algorithm}"
+  args="${args//\{\{algorithm\}\}/$quoted}"
+  quoted="${(q)RUN_base}"
+  args="${args//\{\{base\}\}/$quoted}"
+  quoted="${(q)RUN_binary_path}"
+  args="${args//\{\{binary_path\}\}/$quoted}"
+  quoted="${(q)RUN_graph}"
+  args="${args//\{\{graph\}\}/$quoted}"
+  args="${args//\{\{graph_path\}\}/$quoted}"
+  quoted="${(q)graph_name}"
+  args="${args//\{\{graph_name\}\}/$quoted}"
+  args="${args//\{\{graph_basename\}\}/$quoted}"
+  quoted="${(q)RUN_k}"
+  args="${args//\{\{k\}\}/$quoted}"
+  quoted="${(q)RUN_epsilon}"
+  args="${args//\{\{epsilon\}\}/$quoted}"
+  args="${args//\{\{eps\}\}/$quoted}"
+  quoted="${(q)RUN_seed}"
+  args="${args//\{\{seed\}\}/$quoted}"
+  quoted="${(q)topology}"
+  args="${args//\{\{topology\}\}/$quoted}"
+  quoted="${(q)nodes}"
+  args="${args//\{\{nodes\}\}/$quoted}"
+  quoted="${(q)mpis}"
+  args="${args//\{\{mpis\}\}/$quoted}"
+  args="${args//\{\{mpi\}\}/$quoted}"
+  quoted="${(q)threads}"
+  args="${args//\{\{threads\}\}/$quoted}"
+  quoted="${(q)total_cores}"
+  args="${args//\{\{cores\}\}/$quoted}"
+  args="${args//\{\{total_threads\}\}/$quoted}"
+  quoted="${(q)RUN_instance_id}"
+  args="${args//\{\{instance\}\}/$quoted}"
+  args="${args//\{\{instance_id\}\}/$quoted}"
+  quoted="${(q)RUN_log_file}"
+  args="${args//\{\{log_file\}\}/$quoted}"
+
+  RUN_args="$args"
+}
+
 # Resolve an algorithm property for the currently active plugin context.
 # Intended for PartitionerFetch_*/PartitionerBuild_*/PartitionerInvoke_* helpers.
 PartitionerProperty() {

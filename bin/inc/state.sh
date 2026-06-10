@@ -99,7 +99,6 @@ typeset -A PARTITIONER_PROP_ALLOWED=()
 typeset -A PARTITIONER_PROP_WHEN=()
 typeset -A SYSTEM_PROP_ALLOWED=()
 typeset -A SYSTEM_PROP_WHEN=()
-
 typeset -A LOADED_PARTITIONERS=()
 typeset -A LOADED_LAUNCHERS=()
 
@@ -169,14 +168,19 @@ RUN_graph=""
 RUN_k=""
 RUN_epsilon=""
 RUN_seed=""
+RUN_topology=""
 RUN_nodes=""
 RUN_mpis=""
 RUN_threads=""
+RUN_instance_id=""
+RUN_log_file=""
 
 # Shared command output buffers to avoid per-instance subshell command substitution
 # in the generate hot path.
 PARTITIONER_INVOKE_CMD=""
 LAUNCHER_WRAPPED_CMD=""
+LAUNCHER_LOCAL_CALL_WRAPPER_CACHE=""
+LAUNCHER_SLURM_CALL_WRAPPER_CACHE=""
 
 ResetExperiment() {
   _system="local"
@@ -237,12 +241,17 @@ ResetExperiment() {
   RUN_k=""
   RUN_epsilon=""
   RUN_seed=""
+  RUN_topology=""
   RUN_nodes=""
   RUN_mpis=""
   RUN_threads=""
+  RUN_instance_id=""
+  RUN_log_file=""
 
   PARTITIONER_INVOKE_CMD=""
   LAUNCHER_WRAPPED_CMD=""
+  LAUNCHER_LOCAL_CALL_WRAPPER_CACHE=""
+  LAUNCHER_SLURM_CALL_WRAPPER_CACHE=""
   EXPAND_CALL_IDS=()
   EXPAND_CALL=()
   EXPAND_JOB_KEYS=()
