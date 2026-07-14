@@ -8,6 +8,7 @@ test_probe_local_generation_parity() {
   cat > "$tmp/Experiment" <<'EOF'
 System local
 Property local.call_wrapper none
+Property spack.environment x86
 DefineAlgorithm HarnessArg TestHarness --alpha 1
 
 ExperimentLocalParity() {
@@ -33,6 +34,7 @@ EOF
     assert_line_count jobs/ExperimentLocalParity__1x1x2.cmds.meta.tsv "4" "local metadata has one row per command"
     assert_eq "$(json_value probe-calls.json '.calls | length')" "4" "probe reports all local calls"
     assert_eq "$(json_value probe-calls.json '.calls[0].final_command | startswith("timeout -v 7s ")')" "true" "per-instance timeout is reflected in probe output"
+    assert_file_contains jobs/ExperimentLocalParity__1x1x2.sh "spack env activate --sh x86" "local job activates configured Spack environment"
   )
 
   pass "local generation parity"
@@ -46,6 +48,7 @@ test_probe_slurm_generation_parity() {
   cat > "$tmp/Experiment" <<'EOF'
 System slurm
 Property slurm.partition cpu
+Property spack.environment x86
 Property slurm.use_array true
 Property slurm.array.max_parallel 5
 Property slurm.install.mode job
@@ -121,6 +124,10 @@ EOF
     if ! grep -q 'MKEXP2_SLURM_INSTALL_LOGIN_ENV=1' jobs/install__*.sh; then
       fail "generated slurm install job reloads login shell environment"
     fi
+    assert_file_contains jobs/ExperimentAlpha__2x1x3.sh "spack env activate --sh x86" "non-array Slurm job activates configured Spack environment"
+    assert_file_contains jobs/ExperimentBeta__2x1x3.sh "spack env activate --sh x86" "array Slurm job activates configured Spack environment"
+    assert_file_contains jobs/install__*.sh "spack env activate --sh x86" "Slurm install job activates configured Spack environment"
+    assert_file_contains jobs/parse__*.sh "spack env activate --sh x86" "Slurm parse job activates configured Spack environment"
     if ! grep -q '^#SBATCH --output=slurm/slurm-%j.out$' jobs/parse__*.sh; then
       fail "generated slurm parse job writes output under slurm directory"
     fi

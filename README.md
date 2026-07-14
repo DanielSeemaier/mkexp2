@@ -192,6 +192,7 @@ System local
 Property slurm.partition cpuonly
 Property slurm.call_wrapper srun
 Property slurm.minimal_header false
+Property spack.environment x86
 # For local launcher:
 # Property local.call_wrapper taskset
 SystemProperty slurm.qos normal
@@ -295,6 +296,10 @@ Example:
   - `Property slurm.minimal_header true|false` (default: `false`)
   - when `true`, Slurm run jobs only emit `--job-name`, `--partition`, `--output`, and `--error` (plus `--array` if applicable)
 - Slurm run, install, and parse job scripts are generated under `jobs/`.
+- `Property spack.environment <name-or-path>` activates that Spack environment
+  for direct installs and generated local/Slurm install, run, and parse jobs.
+  The `spack` executable must be available in the login environment `PATH`.
+  The configured environment is included in the build cache identity.
 - Slurm scheduler stdout/stderr files are written under `slurm/` (`slurm-%j.out` for regular jobs, `slurm-%A_%a.out` for array tasks).
 - `generate` writes one command manifest per job as `jobs/<job>.cmds` and a
   sidecar `jobs/<job>.cmds.meta.tsv` with zero-based command index, algorithm,

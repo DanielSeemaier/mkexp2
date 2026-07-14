@@ -63,7 +63,11 @@ LauncherWriteJob_local() {
   cat > "$job_script" <<SCRIPT
 #!/usr/bin/env zsh
 set -euo pipefail
+SCRIPT
 
+  AppendConfiguredSpackEnvironmentActivation "$job_script"
+
+  cat >> "$job_script" <<SCRIPT
 cmd_file="\${MKEXP2_CMD_FILE:-${cmd_file}}"
 
 while IFS= read -r line; do

@@ -39,6 +39,85 @@ ResolveRunProperty() {
   echo "$value"
 }
 
+ActivateConfiguredSpackEnvironment() {
+  local environment=""
+  local activation=""
+  environment=$(ResolveRunProperty "spack.environment" "")
+
+  if [[ -z "$environment" ]]; then
+    if [[ -n "${MKEXP2_SPACK_ENVIRONMENT:-}" && -n "${SPACK_ENV:-}" ]]; then
+      if ! command -v spack >/dev/null 2>&1; then
+        EchoFatal "cannot deactivate the inherited Spack environment because spack was not found in PATH"
+        return 1
+      fi
+      if ! activation=$(spack env deactivate --sh 2>&1); then
+        EchoFatal "failed to deactivate the inherited Spack environment: $activation"
+        return 1
+      fi
+      eval "$activation"
+    fi
+    unset MKEXP2_SPACK_ENVIRONMENT
+    return 0
+  fi
+  if [[ "${MKEXP2_SPACK_ENVIRONMENT:-}" == "$environment" ]]; then
+    return 0
+  fi
+  if ! command -v spack >/dev/null 2>&1; then
+    EchoFatal "spack.environment is '$environment', but spack was not found in PATH"
+    return 1
+  fi
+
+  if [[ -n "${SPACK_ENV:-}" ]]; then
+    if ! activation=$(spack env deactivate --sh 2>&1); then
+      EchoFatal "failed to deactivate the inherited Spack environment: $activation"
+      return 1
+    fi
+    eval "$activation"
+  fi
+
+  if ! activation=$(spack env activate --sh "$environment" 2>&1); then
+    EchoFatal "failed to activate Spack environment '$environment': $activation"
+    return 1
+  fi
+  eval "$activation"
+  export MKEXP2_SPACK_ENVIRONMENT="$environment"
+  EchoInfo "Spack environment: $environment"
+}
+
+AppendConfiguredSpackEnvironmentActivation() {
+  local output_file="$1"
+  local environment=""
+  local quoted_environment=""
+  environment=$(ResolveRunProperty "spack.environment" "")
+
+  [[ -n "$environment" ]] || return 0
+  quoted_environment=$(ShellQuote "$environment")
+
+  cat >> "$output_file" <<SCRIPT
+if [[ "\${MKEXP2_SPACK_ENVIRONMENT:-}" != $quoted_environment ]]; then
+  if ! command -v spack >/dev/null 2>&1; then
+    echo "error: spack.environment is $quoted_environment, but spack was not found in PATH" >&2
+    exit 127
+  fi
+  if [[ -n "\${SPACK_ENV:-}" ]]; then
+    mkexp2_spack_activation=\$(spack env deactivate --sh) || {
+      echo "error: failed to deactivate the inherited Spack environment" >&2
+      exit 1
+    }
+    eval "\$mkexp2_spack_activation"
+  fi
+  mkexp2_spack_activation=\$(spack env activate --sh $quoted_environment) || {
+    echo "error: failed to activate Spack environment $quoted_environment" >&2
+    exit 1
+  }
+  eval "\$mkexp2_spack_activation"
+  unset mkexp2_spack_activation
+  export MKEXP2_SPACK_ENVIRONMENT=$quoted_environment
+  echo "[mkexp2] Spack environment: $quoted_environment"
+fi
+SCRIPT
+}
+
 ResolveAlgorithmProperty() {
   local algorithm="$1"
   local key="$2"

@@ -140,6 +140,68 @@ test_e2e_local_pipeline_and_parse() {
   pass "local all + submit + parse pipeline"
 }
 
+test_e2e_spack_environment_property() {
+  local tmp=""
+  tmp=$(mktemp -d)
+  mkdir -p "$tmp/graphs" "$tmp/fakebin"
+  : > "$tmp/graphs/demo.metis"
+
+  cat > "$tmp/Experiment" <<'EOF'
+System local
+Property local.call_wrapper none
+Property spack.environment x86
+
+ExperimentSpack() {
+  Algorithms TestHarness
+  Graph graphs/demo
+  Ks 2
+  Seeds 1
+  Epsilons 0.03
+  Threads 1x1x1
+}
+EOF
+
+  cat > "$tmp/fakebin/spack" <<'EOF'
+#!/usr/bin/env zsh
+print -r -- "$*" >> "$SPACK_CALLS_FILE"
+case "$*" in
+  "env activate --sh x86")
+    print 'export SPACK_ENV=/fake/spack/environments/x86'
+    print 'export MKEXP2_TEST_SPACK_ACTIVE=x86'
+    ;;
+  "env deactivate --sh")
+    print 'unset SPACK_ENV'
+    print 'unset MKEXP2_TEST_SPACK_ACTIVE'
+    ;;
+  *)
+    exit 2
+    ;;
+esac
+EOF
+  chmod +x "$tmp/fakebin/spack"
+
+  (
+    cd "$tmp"
+    export PATH="$PWD/fakebin:$PATH"
+    export SPACK_CALLS_FILE="$PWD/spack.calls"
+
+    "$MKEXP2" check >/dev/null
+    "$MKEXP2" all >/dev/null
+    assert_file_contains jobs/ExperimentSpack__1x1x1.sh "spack env activate --sh x86" "generated local job contains Spack activation"
+
+    zsh ./submit.sh >/dev/null
+    assert_path_exists logs/TestHarness/ExperimentSpack/demo___k2_seed1_eps0.03_P1x1x1.log "Spack-enabled local job runs successfully"
+
+    local activation_count=""
+    activation_count=$(grep -c '^env activate --sh x86$' spack.calls)
+    if (( activation_count < 3 )); then
+      fail "Spack environment is checked, used for install, and used for the run job"
+    fi
+  )
+
+  pass "Spack environment property"
+}
+
 test_e2e_local_per_experiment_submit_filter() {
   local tmp=""
   tmp=$(mktemp -d)
