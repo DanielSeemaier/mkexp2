@@ -180,6 +180,7 @@ _CheckValidateKnownProperties() {
     slurm.call_wrapper
     slurm.minimal_header
     local.call_wrapper
+    spack.environment
   )
   for key in "${core_run_keys[@]}"; do
     known_run_keys["$key"]=1
@@ -291,6 +292,16 @@ CheckCurrentExperiment() {
 
   if (( ${#_algorithms[@]} == 0 )); then
     CheckError "no Algorithms specified"
+  fi
+
+  local spack_environment=""
+  spack_environment=$(ResolveRunProperty "spack.environment" "")
+  if [[ -n "$spack_environment" ]]; then
+    if ! command -v spack >/dev/null 2>&1; then
+      CheckError "spack.environment is '$spack_environment', but spack was not found in PATH"
+    elif ! SPACK_ENV= spack env activate --sh "$spack_environment" >/dev/null 2>&1; then
+      CheckError "Spack environment '$spack_environment' could not be activated"
+    fi
   fi
   if (( ${#_graphs[@]} == 0 )); then
     CheckError "no Graph/Graphs entries specified"

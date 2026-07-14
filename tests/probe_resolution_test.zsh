@@ -11,6 +11,7 @@ EOF
   cat > "$tmp/Experiment" <<'EOF'
 System local
 Property local.call_wrapper none
+Property spack.environment x86
 SystemProperty local.call_wrapper taskset
 DefineAlgorithm HarnessFast TestHarness --fast-mode
 AlgorithmProperty HarnessFast parser ./parsers/test_harness.awk
@@ -34,6 +35,7 @@ EOF
     assert_eq "$(json_value full.json '.resolved.algorithms[0].parser.found')" "true" "parser resolution reports found parser"
     assert_eq "$(json_value full.json '.resolved.algorithms[0].properties.use_openmp_env')" "true" "resolved algorithm property includes override"
     assert_eq "$(json_value full.json '.resolved.run_properties["local.call_wrapper"]')" 'taskset' "SystemProperty overrides Property"
+    assert_eq "$(json_value full.json '.resolved.run_properties["spack.environment"]')" 'x86' "probe reports configured Spack environment"
     assert_eq "$(json_value full.json '.resolved.topologies[] | select(.spec=="1x2x4") | .distributed')" "true" "distributed topology is detected"
     assert_eq "$(json_value full.json '.resolved.graphs[0].resolved_path | endswith("graphs/demo.metis")')" "true" "graph metadata resolves extension candidates"
 

@@ -795,7 +795,11 @@ if [[ -z "\${MKEXP2_SLURM_INSTALL_LOGIN_ENV:-}" ]]; then
 fi
 
 set -euo pipefail
+SCRIPT
 
+  AppendConfiguredSpackEnvironmentActivation "$MKEXP2_SLURM_INSTALL_JOB_SCRIPT"
+
+  cat >> "$MKEXP2_SLURM_INSTALL_JOB_SCRIPT" <<SCRIPT
 cd "$PWD"
 mkdir -p "$PWD/logs"
 
@@ -867,9 +871,13 @@ SCRIPT
     echo "#SBATCH --constraint=$constraint" >> "$MKEXP2_SLURM_PARSE_JOB_SCRIPT"
   fi
 
-  cat >> "$MKEXP2_SLURM_PARSE_JOB_SCRIPT" <<SCRIPT
+  cat >> "$MKEXP2_SLURM_PARSE_JOB_SCRIPT" <<'SCRIPT'
 set -euo pipefail
+SCRIPT
 
+  AppendConfiguredSpackEnvironmentActivation "$MKEXP2_SLURM_PARSE_JOB_SCRIPT"
+
+  cat >> "$MKEXP2_SLURM_PARSE_JOB_SCRIPT" <<SCRIPT
 cd "$PWD"
 mkdir -p "$parse_log_dir"
 

@@ -29,6 +29,7 @@ PopulateBuildContext() {
   CTX_cmake_flags="$(ResolveAlgorithmProperty "$algorithm" cmake_flags "")"
   CTX_supports_distributed="$(ResolveAlgorithmProperty "$algorithm" supports_distributed "false")"
   CTX_use_openmp_env="$(ResolveAlgorithmProperty "$algorithm" use_openmp_env "false")"
+  CTX_spack_environment="$(ResolveRunProperty "spack.environment" "")"
   CTX_build_max_cores="$MKEXP2_BUILD_MAX_CORES"
   if [[ -n "$CTX_build_max_cores" ]]; then
     if [[ "$CTX_build_max_cores" != <-> ]] || (( CTX_build_max_cores <= 0 )); then
@@ -38,6 +39,9 @@ PopulateBuildContext() {
   fi
 
   local build_identity="${CTX_base}|${CTX_repo_url}|${CTX_repo_ref}|${CTX_build_opts}|${CTX_cmake_flags}"
+  if [[ -n "$CTX_spack_environment" ]]; then
+    build_identity+="|spack.environment=${CTX_spack_environment}"
+  fi
   CTX_build_key="$(HashString "$build_identity")"
   CTX_source_dir="$MKEXP2_WORK_DIR/src/${CTX_base}-${CTX_build_key}"
   CTX_binary_path="$MKEXP2_WORK_DIR/bin/${CTX_base}-${CTX_build_key}"
@@ -46,6 +50,7 @@ PopulateBuildContext() {
 
 InstallCurrentExperiment() {
   local experiment_name="$1"
+  ActivateConfiguredSpackEnvironment
   mkdir -p "$MKEXP2_WORK_DIR/src" "$MKEXP2_WORK_DIR/bin"
   PrepareInstallLogFile
 

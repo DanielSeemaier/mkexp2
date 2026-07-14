@@ -308,9 +308,16 @@ SCRIPT
   if [[ "$array_mode" == "scheduler" ]]; then
     local end=$((cmd_count - 1))
     echo "#SBATCH --array=0-${end}%${max_parallel}" >> "$job_script"
-    cat >> "$job_script" <<SCRIPT
-set -euo pipefail
+  fi
 
+  cat >> "$job_script" <<'SCRIPT'
+set -euo pipefail
+SCRIPT
+
+  AppendConfiguredSpackEnvironmentActivation "$job_script"
+
+  if [[ "$array_mode" == "scheduler" ]]; then
+    cat >> "$job_script" <<SCRIPT
 cmd_file="\${MKEXP2_CMD_FILE:-${cmd_file}}"
 meta_file="\${MKEXP2_META_FILE:-${meta_file}}"
 
@@ -350,7 +357,6 @@ SCRIPT
   elif [[ "$array_mode" == "packed" ]]; then
     cat >> "$job_script" <<SCRIPT
 # mkexp2 array mode: packed (${effective_parallel} concurrent command(s) in one Slurm allocation)
-set -euo pipefail
 
 cmd_file="\${MKEXP2_CMD_FILE:-${cmd_file}}"
 meta_file="\${MKEXP2_META_FILE:-${meta_file}}"
@@ -430,8 +436,6 @@ mkexp2_close_semaphore
 SCRIPT
   else
     cat >> "$job_script" <<SCRIPT
-set -euo pipefail
-
 cmd_file="\${MKEXP2_CMD_FILE:-${cmd_file}}"
 
 while IFS= read -r line; do

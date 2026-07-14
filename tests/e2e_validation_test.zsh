@@ -78,6 +78,7 @@ EOF
     assert_eq "$(jq -r '[.partitioners[].defaults[].key | select(. == "preconfiguration_flag" or . == "k_flag" or . == "seed_flag" or . == "epsilon_flag" or . == "threads_flag" or . == "imbalance_flag" or . == "k_argument_style")] | length' describe-all.json)" "0" "describe --all --json omits hard-coded flag properties"
     assert_eq "$(jq -r '.systems[] | select(.name == "local") | .defaults[] | select(.key == "local.call_wrapper") | .value' describe-all.json)" "taskset" "describe --all --json reports system defaults"
     assert_eq "$(jq -r '.dsl.commands[] | select(.name == "DefineAlgorithm") | .usage' describe-all.json)" "DefineAlgorithm Name Base [CLI args...]" "describe --all --json reports DSL help"
+    assert_eq "$(jq -r '.dsl.common_properties | index("spack.environment") != null' describe-all.json)" "true" "describe --all --json reports Spack environment property"
 
     "$MKEXP2" describe TestHarness --json > describe-plugin.json
     assert_eq "$(jq -r '.name' describe-plugin.json)" "TestHarness" "describe --json reports plugin name"

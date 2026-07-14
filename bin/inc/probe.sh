@@ -17,6 +17,7 @@ typeset -ga PROBE_CORE_RUN_KEYS=(
   slurm.call_wrapper
   slurm.minimal_header
   local.call_wrapper
+  spack.environment
 )
 
 typeset -ga PROBE_CORE_ALGORITHM_KEYS=(
